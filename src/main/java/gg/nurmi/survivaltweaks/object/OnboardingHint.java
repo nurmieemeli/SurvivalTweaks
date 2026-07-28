@@ -1,0 +1,18 @@
+package gg.nurmi.survivaltweaks.object;
+
+public enum OnboardingHint {
+    WELCOME,
+    HUB,
+    LANGUAGE,
+    HOME,
+    TELEPORT_INBOX,
+    DEATH_RECOVERY,
+    LOCK_CONTROL,
+    VANILLA_NETHER_COORDINATES,
+    VANILLA_SLEEP_RULES,
+    VANILLA_VILLAGER_CURING,
+    VANILLA_RESPAWN_ANCHORS,
+    VANILLA_LODESTONES,
+    VANILLA_ANVILS,
+    VANILLA_ENCHANTING
+}

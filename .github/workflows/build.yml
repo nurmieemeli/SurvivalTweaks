@@ -1,0 +1,75 @@
+name: Build and release
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Verify
+        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Paper smoke test
+        shell: pwsh
+        run: ./.github/scripts/paper-smoke.ps1
+      - name: Create checksum
+        shell: bash
+        run: |
+          cd target
+          jar="$(find . -maxdepth 1 -type f -name 'SurvivalTweaks-*.jar' -printf '%f\n')"
+          test -n "$jar"
+          sha256sum "$jar" > "$jar.sha256"
+      - name: Upload verified build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SurvivalTweaks-${{ github.sha }}
+          path: |
+            target/SurvivalTweaks-*.jar
+            target/SurvivalTweaks-*.jar.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified build
+        uses: actions/download-artifact@v4
+        with:
+          name: SurvivalTweaks-${{ github.sha }}
+          path: release
+      - name: Validate tag and checksum
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          test -f "release/SurvivalTweaks-${expected}.jar"
+          cd release
+          sha256sum --check "SurvivalTweaks-${expected}.jar.sha256"
+      - name: Publish latest GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/SurvivalTweaks-*.jar \
+            release/SurvivalTweaks-*.jar.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SurvivalTweaks ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --latest

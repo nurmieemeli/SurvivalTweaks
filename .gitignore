@@ -1,0 +1,26 @@
+# Maven
+/target/
+dependency-reduced-pom.xml
+pom.xml.versionsBackup
+release.properties
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Local Paper server
+/run/
+
+# JVM diagnostics
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# Logs and operating-system metadata
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini

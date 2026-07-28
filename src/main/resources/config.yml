@@ -1,0 +1,334 @@
+home:
+  max-amount: 3
+
+teleport:
+  request-lifetime-seconds: 30
+  warmup-seconds: 3
+  cooldown-seconds: 30
+  cancel-on-move: true
+  cancel-on-damage: true
+  safe-search-radius: 4
+
+# First-time players receive a unique, safe Overworld starting location.
+# Prepared locations remain generated and loaded so joins do not wait on terrain.
+new-player-spawn:
+  enabled: true
+  # Leave blank to use the server's first loaded Overworld.
+  world: ""
+  min-x: -10000
+  max-x: 10000
+  min-z: -10000
+  max-z: 10000
+  preload-locations: 10
+  minimum-separation: 256
+  max-generation-attempts: 100
+  # Pace terrain generation and pause it when the one-minute TPS falls below this value.
+  generation-delay-ticks: 20
+  minimum-tps: 18.0
+  # Every block in this radius must be safe and reasonably level.
+  landing-radius: 2
+  max-height-variation: 2
+  # Empty allow list means every biome not present in blocked-biomes.
+  allowed-biomes: []
+  blocked-biomes:
+    - "minecraft:ocean"
+    - "minecraft:deep_ocean"
+    - "minecraft:frozen_ocean"
+    - "minecraft:deep_frozen_ocean"
+    - "minecraft:cold_ocean"
+    - "minecraft:deep_cold_ocean"
+    - "minecraft:lukewarm_ocean"
+    - "minecraft:deep_lukewarm_ocean"
+    - "minecraft:warm_ocean"
+
+storage:
+  autosave-seconds: 300
+
+locked-containers:
+  target-distance: 5
+  max-per-player: 50
+  protect-from-explosions: true
+  block-automation: true
+
+ui:
+  # Multiple homes open in a safe, paginated chest-style menu.
+  home-menu-enabled: true
+  # Paper's dialog API is experimental; commands remain available as fallbacks.
+  dialogs-enabled: true
+  # Teleport timers, cooldowns, and container targeting hints use the action bar.
+  action-bar-enabled: true
+  lock-target-hints-enabled: true
+
+death-recovery:
+  enabled: true
+  # Give a bound recovery compass after respawning.
+  compass-on-respawn: true
+  floating-guide:
+    # Private, non-persistent text display that guides only its owner.
+    enabled: true
+    # Players can always toggle the guide through the compass or command.
+    automatic-on-respawn: false
+    # Inside this distance, the display moves onto the exact death location.
+    near-distance: 24.0
+    # While farther away, keep the directional display this many blocks away.
+    offset: 3.5
+  marker-lifetime-seconds: 3600
+  compass-cooldown-seconds: 30
+
+# Subtle localized alternatives for environmental deaths. Deaths attributed to
+# players, mobs, projectiles, or other entities always retain Minecraft's native
+# killer and weapon-aware message.
+custom-death-messages:
+  enabled: true
+  # Rare lines are a little more playful; set to 0 for only restrained variants.
+  rare-variant-percent: 5
+  causes:
+    fall: true
+    fire: true
+    drowning: true
+    suffocation: true
+    void: true
+    freezing: true
+    starvation: true
+    lightning: true
+    contact: true
+    explosion: true
+    world-border: true
+    cramming: true
+
+feedback:
+  enabled: true
+  sounds-enabled: true
+  particles-enabled: true
+  # Sound values are Minecraft sound keys. Particle values use Bukkit names.
+  cues:
+    home-saved:
+      sound: "minecraft:entity.player.levelup"
+      volume: 0.65
+      pitch: 1.35
+      particle: "HAPPY_VILLAGER"
+      count: 12
+      spread: 0.35
+    home-deleted:
+      sound: "minecraft:entity.item_frame.remove_item"
+      volume: 0.6
+      pitch: 0.9
+      particle: "POOF"
+      count: 10
+      spread: 0.3
+    ui-open:
+      sound: "minecraft:block.chest.open"
+      volume: 0.45
+      pitch: 1.2
+    ui-click:
+      sound: "minecraft:ui.button.click"
+      volume: 0.45
+      pitch: 1.15
+    teleport-request:
+      sound: "minecraft:entity.experience_orb.pickup"
+      volume: 0.7
+      pitch: 1.3
+      particle: "ENCHANT"
+      count: 8
+      spread: 0.35
+    teleport-warmup:
+      sound: "minecraft:block.beacon.activate"
+      volume: 0.55
+      pitch: 1.5
+      particle: "ENCHANT"
+      count: 22
+      spread: 0.6
+    teleport-countdown:
+      sound: "minecraft:block.note_block.hat"
+      volume: 0.55
+      pitch: 1.45
+      particle: "ENCHANT"
+      count: 12
+      spread: 0.45
+    teleport-complete:
+      sound: "minecraft:entity.enderman.teleport"
+      volume: 0.75
+      pitch: 1.1
+      particle: "PORTAL"
+      count: 45
+      spread: 0.65
+    teleport-cancelled:
+      sound: "minecraft:block.note_block.bass"
+      volume: 0.55
+      pitch: 0.7
+      particle: "SMOKE"
+      count: 8
+      spread: 0.3
+    new-player-arrival:
+      sound: "minecraft:ui.toast.challenge_complete"
+      volume: 0.75
+      pitch: 1.15
+      particle: "TOTEM_OF_UNDYING"
+      count: 38
+      spread: 0.7
+    home-arrival-sparkle:
+      sound: "minecraft:entity.player.levelup"
+      volume: 0.6
+      pitch: 1.6
+      particle: "HAPPY_VILLAGER"
+      count: 32
+      spread: 0.7
+    home-arrival-portal:
+      sound: "minecraft:block.portal.travel"
+      volume: 0.45
+      pitch: 1.3
+      particle: "PORTAL"
+      count: 45
+      spread: 0.75
+    home-arrival-gentle:
+      sound: "minecraft:block.amethyst_block.chime"
+      volume: 0.45
+      pitch: 1.25
+      particle: "END_ROD"
+      count: 10
+      spread: 0.35
+    death-nearby:
+      particle: "SOUL"
+      count: 6
+      spread: 0.35
+    death-reached:
+      sound: "minecraft:entity.player.levelup"
+      volume: 0.7
+      pitch: 1.25
+      particle: "TOTEM_OF_UNDYING"
+      count: 28
+      spread: 0.6
+    lock-created:
+      sound: "minecraft:block.iron_door.close"
+      volume: 0.65
+      pitch: 1.25
+      particle: "WAX_ON"
+      count: 16
+      spread: 0.45
+    lock-removed:
+      sound: "minecraft:block.iron_door.open"
+      volume: 0.65
+      pitch: 1.2
+      particle: "WAX_OFF"
+      count: 16
+      spread: 0.45
+    lock-access-changed:
+      sound: "minecraft:entity.experience_orb.pickup"
+      volume: 0.6
+      pitch: 1.6
+      particle: "ELECTRIC_SPARK"
+      count: 10
+      spread: 0.4
+    lock-denied:
+      sound: "minecraft:block.iron_door.close"
+      volume: 0.7
+      pitch: 0.65
+      particle: "ANGRY_VILLAGER"
+      count: 4
+      spread: 0.25
+    mention:
+      sound: "minecraft:entity.experience_orb.pickup"
+      volume: 0.65
+      pitch: 1.45
+    mail:
+      sound: "minecraft:block.amethyst_block.chime"
+      volume: 0.7
+      pitch: 1.15
+    guide-hint:
+      sound: "minecraft:block.amethyst_block.chime"
+      volume: 0.45
+      pitch: 1.4
+    maintenance-warning:
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.75
+      pitch: 0.9
+    announcement:
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.9
+      pitch: 0.85
+
+chat:
+  enabled: true
+
+connection-messages:
+  enabled: true
+
+# Active players vote per world; AFK players can be excluded automatically.
+sleep:
+  enabled: true
+  required-percentage: 50
+  exclude-afk: true
+  clear-weather: true
+
+# The server browser uses a neutral branded MOTD and rotates these MiniMessage lines.
+server-list:
+  enabled: true
+  announcements:
+    - "<gray>Friendly survival with thoughtful quality-of-life features</gray>"
+    - "<gray>Homes, safe teleports, protected containers, and more</gray>"
+    - "<gray>Open your player hub with <green>/survival</green></gray>"
+
+mentions:
+  enabled: true
+  cooldown-seconds: 10
+  max-per-message: 3
+
+maintenance:
+  # New joins are blocked during the final part of a scheduled restart.
+  join-block-seconds: 30
+  backup-before-restart: true
+
+journey:
+  enabled: true
+  welcome-delay-ticks: 60
+  # Contextual explanations observe vanilla actions but never modify their result.
+  vanilla-guide:
+    enabled: true
+    # Only one explanation is shown within this interval; rare hints are deferred.
+    minimum-gap-seconds: 120
+    topics:
+      nether-coordinates: true
+      sleep-rules: true
+      villager-curing: true
+      respawn-anchors: true
+      lodestones: true
+      anvils: true
+      enchanting: true
+
+welcome-back:
+  enabled: true
+  minimum-away-hours: 6
+  delay-ticks: 80
+  # When false, a compact clickable prompt is shown instead of forcing a menu.
+  auto-open: false
+
+player-profiles:
+  enabled: true
+
+# Read-only journal built from statistics already tracked by Minecraft.
+statistics:
+  enabled: true
+  # Other-player journals also respect each player's public-profile privacy setting.
+  public-viewing: true
+
+# Mail is text-only and stored in the recipient's notification history.
+mail:
+  enabled: true
+  maximum-length: 160
+  cooldown-seconds: 30
+  maximum-per-hour: 10
+
+# Localized TAB dashboard with stable player ordering and lightweight live metrics.
+player-list:
+  enabled: true
+  refresh-seconds: 2
+  show-ping: true
+  show-tps: true
+  show-mspt: true
+  show-world: true
+  show-unread-notifications: true
+  # Players with survivaltweaks.playerlist.staff receive a subtle star badge.
+  staff-badges: true
+  afk:
+    enabled: true
+    after-seconds: 300
