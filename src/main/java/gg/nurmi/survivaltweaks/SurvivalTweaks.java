@@ -739,6 +739,18 @@ public final class SurvivalTweaks extends JavaPlugin {
         if (executor instanceof TabCompleter tabCompleter) {
             command.setTabCompleter(tabCompleter);
         }
+        describe(command, name);
+    }
+
+    /**
+     * Bukkit keeps one server-wide description and usage string per command and
+     * cannot localize them per player, so both are read from the catalogs here
+     * rather than duplicated in plugin.yml. A null audience selects English;
+     * players get translated text from {@code /survivaltweaks help} instead.
+     */
+    private void describe(PluginCommand command, String name) {
+        command.setDescription(messages.plain(null, "admin.help." + name));
+        command.setUsage(messages.plain(null, "command.usage." + name));
     }
 
     private void cancel(BukkitTask task) {

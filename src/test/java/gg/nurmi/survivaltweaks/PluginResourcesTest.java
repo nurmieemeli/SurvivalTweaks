@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks;
 
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +14,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PluginResourcesTest {
@@ -124,7 +126,7 @@ class PluginResourcesTest {
         assertTrue(config.getBoolean("ui.lock-target-hints-enabled"));
         assertTrue(config.getBoolean("death-recovery.enabled"));
         assertTrue(config.getBoolean("death-recovery.floating-guide.enabled"));
-        assertEquals(24.0, config.getDouble("death-recovery.floating-guide.near-distance"));
+        assertEquals(32.0, config.getDouble("death-recovery.floating-guide.near-distance"));
         assertEquals(3.5, config.getDouble("death-recovery.floating-guide.offset"));
         assertTrue(config.getBoolean("custom-death-messages.enabled"));
         assertEquals(5, config.getInt("custom-death-messages.rare-variant-percent"));
@@ -154,6 +156,25 @@ class PluginResourcesTest {
     }
 
     @Test
+    void everyDeclaredCommandTakesItsDescriptionAndUsageFromTheCatalogs() {
+        YamlConfiguration descriptor = resource("plugin.yml");
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        ConfigurationSection commands = descriptor.getConfigurationSection("commands");
+        assertNotNull(commands);
+        for (String name : commands.getKeys(false)) {
+            // plugin.yml cannot be localized, so it must carry no prose at all.
+            assertNull(commands.getString(name + ".description"), name + " description");
+            assertNull(commands.getString(name + ".usage"), name + " usage");
+            for (YamlConfiguration catalog : List.of(english, finnish)) {
+                assertNotNull(catalog.getString("admin.help." + name), "admin.help." + name);
+                assertNotNull(catalog.getString("command.usage." + name), "command.usage." + name);
+            }
+        }
+    }
+
+    @Test
     void bothCatalogsDeclareTheirMessagesInTheSameOrder() {
         YamlConfiguration english = resource("messages_en.yml");
         YamlConfiguration finnish = resource("messages_fi.yml");
@@ -173,6 +194,8 @@ class PluginResourcesTest {
                 "welcome-back.prompt",
                 "teleport.usage",
                 "shout.usage",
+                "command.usage.teleport",
+                "command.usage.shout",
                 "death-recovery.guide-prompt-enabled",
                 "death-recovery.guide-prompt-disabled"
         );

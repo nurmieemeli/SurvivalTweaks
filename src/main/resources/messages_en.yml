@@ -14,6 +14,29 @@ format:
     kilometres: "<value> km"
     metres: "<value> m"
 
+# Fed into Bukkit's command metadata at startup and shown by vanilla /help.
+# Bukkit holds one server-wide string per command, so these are read from this
+# catalog only; per-player usage text comes from the <command>.usage keys.
+command:
+  usage:
+    afk: "/afk"
+    mail: "/mail [inbox|send|block|unblock] [player] [message]"
+    profile: "/profile [player]"
+    stats: "/stats [player]"
+    welcome: "/welcome"
+    guide: "/guide"
+    deathlocation: "/deathlocation [guide [on|off]|dismiss]"
+    teleportinbox: "/teleportinbox"
+    survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
+    sethome: "/sethome [name]"
+    deletehome: "/deletehome [name]"
+    home: "/home [name]"
+    teleport: "/teleport <player>"
+    teleportaccept: "/teleportaccept [player]"
+    shout: "/shout <message>"
+    lock: "/lock [trust|untrust|info|nearby] [player|radius]"
+    unlock: "/unlock [confirm]"
+
 connection:
   join: "<green><player> joined.</green>"
   quit: "<red><player> left.</red>"
@@ -372,6 +395,7 @@ admin:
     entry: "<dark_gray>›</dark_gray> <green><command></green> <dark_gray>—</dark_gray> <gray><description></gray>"
     footer: "<dark_gray>Click a command to place it in your chat input.</dark_gray>"
     click: "<yellow>Click to prepare this command.</yellow>"
+    survivaltweaks: "Open the player hub, or administer the plugin."
     afk: "Toggle your away indicator in the player list."
     mail: "Open your mailbox or send offline-safe text mail."
     profile: "View your own or another player's public profile."

@@ -21,7 +21,7 @@ class PluginSettingsTest {
         assertEquals(3, settings.maxHomes());
         assertEquals(5, settings.lockTargetDistance());
         assertTrue(settings.deathFloatingGuideEnabled());
-        assertEquals(24.0, settings.deathFloatingGuideNearDistance());
+        assertEquals(32.0, settings.deathFloatingGuideNearDistance());
         assertEquals(3.5, settings.deathFloatingGuideOffset());
         assertTrue(settings.customDeathMessagesEnabled());
         assertEquals(5, settings.customDeathMessageRareVariantPercent());

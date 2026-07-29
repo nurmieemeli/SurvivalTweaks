@@ -14,6 +14,29 @@ format:
     kilometres: "<value> km"
     metres: "<value> m"
 
+# Syötetään Bukkitin komentotietoihin käynnistyksessä; näkyy /help-komennossa.
+# Bukkit säilyttää yhden palvelinkohtaisen merkkijonon komentoa kohti, joten
+# nämä luetaan vain englanninkielisestä luettelosta.
+command:
+  usage:
+    afk: "/afk"
+    mail: "/mail [inbox|send|block|unblock] [pelaaja] [viesti]"
+    profile: "/profile [pelaaja]"
+    stats: "/stats [pelaaja]"
+    welcome: "/welcome"
+    guide: "/guide"
+    deathlocation: "/deathlocation [guide [on|off]|dismiss]"
+    teleportinbox: "/teleportinbox"
+    survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
+    sethome: "/sethome [nimi]"
+    deletehome: "/deletehome [nimi]"
+    home: "/home [nimi]"
+    teleport: "/teleport <pelaaja>"
+    teleportaccept: "/teleportaccept [pelaaja]"
+    shout: "/shout <viesti>"
+    lock: "/lock [trust|untrust|info|nearby] [pelaaja|säde]"
+    unlock: "/unlock [confirm]"
+
 connection:
   join: "<green><player> liittyi.</green>"
   quit: "<red><player> poistui.</red>"
@@ -371,6 +394,7 @@ admin:
     entry: "<dark_gray>›</dark_gray> <green><command></green> <dark_gray>—</dark_gray> <gray><description></gray>"
     footer: "<dark_gray>Napsauta komentoa siirtääksesi sen chat-kenttään.</dark_gray>"
     click: "<yellow>Napsauta valmistellaksesi komento.</yellow>"
+    survivaltweaks: "Avaa pelaajakeskus tai hallitse lisäosaa."
     afk: "Vaihda poissaolomerkintäsi pelaajalistassa."
     mail: "Avaa postilaatikkosi tai lähetä offline-tilassa toimivaa tekstipostia."
     profile: "Näytä oma tai toisen pelaajan julkinen profiili."

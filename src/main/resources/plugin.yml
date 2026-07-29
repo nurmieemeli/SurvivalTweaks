@@ -1,94 +1,62 @@
 name: SurvivalTweaks
 version: '${project.version}'
 main: gg.nurmi.survivaltweaks.SurvivalTweaks
-description: Small quality-of-life tweaks for a Finnish survival server.
-author: nurmieemeli
 website: https://github.com/nurmieemeli/SurvivalTweaks
 api-version: '26.2'
 
+# Command descriptions and usage strings are deliberately absent. Bukkit stores
+# one server-wide string per command and cannot localize them, so SurvivalTweaks
+# feeds both from the language catalogs at startup instead of duplicating them
+# here. See command.usage.* and admin.help.* in messages_en.yml.
 commands:
   afk:
-    description: Toggles your away indicator in the player list.
-    usage: /afk
     aliases: [away, poissa]
     permission: survivaltweaks.command.afk
   mail:
-    description: Opens your mailbox or sends text-only mail to another player.
-    usage: /mail [inbox|send|block|unblock] [player] [message]
     aliases: [post, posti]
     permission: survivaltweaks.command.mail
   profile:
-    description: Opens your own or another player's social profile.
-    usage: /profile [player]
     aliases: [playerprofile, profiili]
     permission: survivaltweaks.command.profile
   stats:
-    description: Opens your own or another player's vanilla statistics journal.
-    usage: /stats [player]
     aliases: [statistics, tilastot]
     permission: survivaltweaks.command.stats
   welcome:
-    description: Opens your welcome-back summary.
-    usage: /welcome
     aliases: [welcomeback, takaisin]
     permission: survivaltweaks.command.welcome
   guide:
-    description: Opens your contextual vanilla mechanics guide.
-    usage: /guide
     aliases: [vanillaguide, opas]
     permission: survivaltweaks.command.guide
   deathlocation:
-    description: Manages your temporary death marker, recovery compass, and private floating guide.
-    usage: /deathlocation [guide [on|off]|dismiss]
     aliases: [deathloc, kuolinpaikka]
     permission: survivaltweaks.command.deathlocation
   teleportinbox:
-    description: Opens your pending teleport-request inbox.
-    usage: /teleportinbox
     aliases: [tpinbox, tprequests]
     permission: survivaltweaks.command.teleportaccept
   survivaltweaks:
-    description: Opens SurvivalTweaks or provides help, diagnostics, backups, reload, spawn-pool, maintenance, and restart administration.
-    usage: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]
     aliases: [st, stweaks, survival]
   sethome:
-    description: Asettaa kodin nykyiseen sijaintiin.
-    usage: /sethome [nimi]
     aliases: [asetakoti, homeset]
     permission: survivaltweaks.command.sethome
   deletehome:
-    description: Poistaa asetetun kodin.
-    usage: /deletehome [nimi]
     aliases: [poistakoti, homedelete, removehome, homeremove]
     permission: survivaltweaks.command.deletehome
   home:
-    description: Teleporttaa asetettuun kotiin.
-    usage: /home [nimi]
     aliases: [koti, homes, kodit]
     permission: survivaltweaks.command.home
   teleport:
-    description: Pyytää teleporttausta toisen pelaajan luokse.
-    usage: /teleport <pelaaja>
     aliases: [tp, tpa, tele, teleportti]
     permission: survivaltweaks.command.teleport
   teleportaccept:
-    description: Hyväksyy teleporttipyynnön.
-    usage: /teleportaccept [pelaaja]
     aliases: [tpaccept, hyväksy, accept]
     permission: survivaltweaks.command.teleportaccept
   shout:
-    description: Lähettää konsolista palvelinilmoituksen.
-    usage: /shout <viesti>
     aliases: []
     permission: survivaltweaks.command.shout
   lock:
-    description: Lukitsee säiliön tai hallitsee sen käyttöoikeuksia.
-    usage: /lock [trust|untrust|info|nearby] [pelaaja|säde]
     aliases: [lukitse]
     permission: survivaltweaks.command.lock
   unlock:
-    description: Poistaa säiliön lukituksen.
-    usage: /unlock [confirm]
     aliases: [poistalukko]
     permission: survivaltweaks.command.unlock
 
@@ -139,35 +107,35 @@ permissions:
     description: Allows joining during manual maintenance mode.
     default: op
   survivaltweaks.command.home:
-    description: Sallii /home-komennon.
+    description: Allows using /home.
     default: true
   survivaltweaks.command.sethome:
-    description: Sallii /sethome-komennon.
+    description: Allows using /sethome.
     default: true
   survivaltweaks.command.deletehome:
-    description: Sallii /deletehome-komennon.
+    description: Allows using /deletehome.
     default: true
   survivaltweaks.command.teleport:
-    description: Sallii /teleport-komennon.
+    description: Allows using /teleport.
     default: true
   survivaltweaks.command.teleportaccept:
-    description: Sallii /teleportaccept-komennon.
+    description: Allows using /teleportaccept.
     default: true
   survivaltweaks.command.shout:
-    description: Sallii /shout-komennon.
+    description: Allows using /shout.
     default: op
   survivaltweaks.teleport.bypass:
-    description: Ohittaa teleporttipyynnön ja teleporttaa heti.
+    description: Skips the teleport request and teleports immediately.
     default: op
   survivaltweaks.teleport.instant:
-    description: Ohittaa teleporttauksen odotusajan.
+    description: Skips the teleport warm-up delay.
     default: op
   survivaltweaks.command.lock:
-    description: Sallii säiliöiden lukitsemisen ja käyttöoikeuksien hallinnan.
+    description: Allows locking containers and managing their access.
     default: true
   survivaltweaks.command.unlock:
-    description: Sallii omien säiliölukkojen poistamisen.
+    description: Allows removing your own container locks.
     default: true
   survivaltweaks.lock.admin:
-    description: Sallii kaikkien säiliölukkojen käytön ja hallinnan.
+    description: Allows using and managing every container lock.
     default: op

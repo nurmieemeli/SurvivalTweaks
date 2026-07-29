@@ -15,10 +15,10 @@ new-player-spawn:
   enabled: true
   # Leave blank to use the server's first loaded Overworld.
   world: ""
-  min-x: -10000
-  max-x: 10000
-  min-z: -10000
-  max-z: 10000
+  min-x: -25000
+  max-x: 25000
+  min-z: -25000
+  max-z: 25000
   preload-locations: 10
   minimum-separation: 256
   max-generation-attempts: 100
@@ -46,7 +46,7 @@ storage:
 
 locked-containers:
   target-distance: 5
-  max-per-player: 50
+  max-per-player: 100
   protect-from-explosions: true
   block-automation: true
 
@@ -69,7 +69,7 @@ death-recovery:
     # Players can always toggle the guide through the compass or command.
     automatic-on-respawn: false
     # Inside this distance, the display moves onto the exact death location.
-    near-distance: 24.0
+    near-distance: 32.0
     # While farther away, keep the directional display this many blocks away.
     offset: 3.5
   marker-lifetime-seconds: 3600
