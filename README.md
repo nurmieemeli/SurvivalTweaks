@@ -2,225 +2,210 @@
 
 <img src=".github/assets/header.svg" alt="SurvivalTweaks" width="548">
 
-[![Build and release](https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml/badge.svg)](https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml)
-[![Latest release](https://img.shields.io/github/v/release/nurmieemeli/SurvivalTweaks)](https://github.com/nurmieemeli/SurvivalTweaks/releases/latest)
+<h3>Vanilla-friendly quality of life for Paper survival servers</h3>
+
+<p>Homes · safe teleports · container locks · death recovery · player hub · bilingual UI</p>
+
+<p>
+  <a href="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml"><img src="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml/badge.svg" alt="Build and release"></a>
+  <a href="https://github.com/nurmieemeli/SurvivalTweaks/releases/latest"><img src="https://img.shields.io/github/v/release/nurmieemeli/SurvivalTweaks" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Paper-26.2-3faffa" alt="Paper 26.2">
+  <img src="https://img.shields.io/badge/Java-25-f89820" alt="Java 25">
+</p>
+
+<p>
+  <a href="https://github.com/nurmieemeli/SurvivalTweaks/releases/latest">Download latest release</a>
+  ·
+  <a href="src/main/resources/config.yml">View configuration</a>
+  ·
+  <a href="docs/operations.md">Operations guide</a>
+</p>
 
 </div>
 
-A Paper plugin for a Finnish survival server. It adds homes, teleport requests,
-container locks, death recovery, offline mail, and a unified player hub — all
-localized in Finnish and English, with no scoreboard or permissions plugin
-required.
+SurvivalTweaks brings the everyday features of a polished survival server into
+one dependency-free Paper plugin. Players get a unified, localized experience;
+operators get strict configuration validation, diagnostics, backups, and safe
+maintenance tools.
 
-Everything is optional and configurable, and the survival loop stays
-recognizably vanilla: there are no custom items, recipes, currencies, or
-progression systems.
+The survival loop remains recognizably vanilla. SurvivalTweaks adds no custom
+items, recipes, currency, economy, or progression system, and it does not
+require a scoreboard, permissions, or chat plugin.
 
-## Requirements
+## Quick start
 
-- Paper 26.2 (compiled against `26.2.build.84-stable`)
-- Java 25 or newer
-- Maven 3.9 or newer for command-line builds
+1. Download the JAR from the
+   [latest release](https://github.com/nurmieemeli/SurvivalTweaks/releases/latest).
+2. Place it in the Paper server's `plugins/` directory.
+3. Start the server with Java 25.
+4. Customize `plugins/SurvivalTweaks/config.yml` if needed.
+5. Restart, or apply changes with `/survivaltweaks reload`.
 
-## Building
+The first start creates English and Finnish message catalogs beside the
+configuration. Existing installations keep their customized values when new
+defaults are introduced.
 
-```shell
-mvn verify
-```
+### Requirements
 
-The JAR is written to `target/SurvivalTweaks-<version>.jar`. `verify` runs the
-full unit suite and produces the same layout CI publishes.
+| Component | Requirement |
+| --- | --- |
+| Server | Paper 26.2 |
+| Java | 25 or newer |
+| Optional source build | Maven 3.9 or newer |
 
-In IntelliJ IDEA, open the repository root or its `pom.xml` as a Maven project
-and select a Java 25 SDK. The Maven model is the shared project definition;
-local `.idea`, module, and compiler-output files are intentionally ignored.
+## What it adds
 
-## Installation
+| Area | Player experience |
+| --- | --- |
+| Homes and teleports | Named homes, a paginated home menu, teleport requests, warm-ups, cooldowns, visual feedback, and safe landing searches |
+| Container locks | Double-chest-aware locks with trusted, deposit-only, and public access; owner menus; access history; transfer; and per-lock hopper policy |
+| Death recovery | Persistent death markers, a bound recovery compass, Nether/Overworld distance scaling, and a private floating guide—without a `/back` teleport |
+| Player hub | `/survival` brings homes, requests, locks, recovery, notifications, mail, profiles, statistics, guidance, and preferences into one interface |
+| Player list | Localized TAB header and footer with capacity, ping, TPS, MSPT, dimension, unread notifications, staff badges, and automatic or manual AFK state |
+| Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
+| First sessions | Pre-generated unique spawn locations, onboarding, a journey tracker, and contextual explanations of vanilla mechanics |
+| Vanilla refinements | Optional tree felling, bounded fast leaf decay, inventory-to-hotbar block refill, pet friendly-fire prevention, sleep voting, and deliberate decoration breaking |
+| Atmosphere | Independently configurable sounds and particles for durability, health, pickups, shields, advancements, death sites, weather, caves, biomes, arrows, and interactions |
+| Server presentation | Rotating multiplayer-list announcements, localized connection messages, custom environmental death messages, and maintenance status |
 
-1. Build the plugin.
-2. Copy the JAR into the server's `plugins/` directory.
-3. Start the server.
-4. Adjust `plugins/SurvivalTweaks/config.yml` or either message catalog.
-5. Run `/survivaltweaks reload`, or restart.
-
-Older profile, lock, and version 1.0 `userdata/` files are upgraded
-automatically, and new configuration defaults are merged into existing files
-without replacing customized values.
+Every feature is configurable, and player-facing preferences such as language,
+sound, particles, dialogs, action-bar guidance, mentions, and player-list
+visibility can be changed in game.
 
 ## Commands
 
-| Command | Description | Default access |
+<details>
+<summary><strong>Player commands</strong></summary>
+
+| Command | Purpose |
+| --- | --- |
+| `/survival` or `/st` | Open the unified player hub |
+| `/sethome [name]` | Save the current location as a home |
+| `/home [name]` | Teleport to a home or browse saved homes |
+| `/deletehome [name]` | Delete a home |
+| `/teleport <player>` | Request a teleport to another player |
+| `/teleportaccept [player]` | Accept a pending request |
+| `/teleportinbox` | Browse and respond to pending requests |
+| `/deathlocation [guide [on\|off]\|dismiss]` | Manage the latest death marker and recovery guide |
+| `/lock` | Lock the targeted container |
+| `/lock nearby [radius]` | Lock nearby unlocked containers |
+| `/lock trust\|untrust <player>` | Change access to the targeted lock |
+| `/lock info` | Inspect the targeted lock |
+| `/unlock [confirm]` | Remove the targeted lock |
+| `/mail [inbox]` | Open the text-only mailbox |
+| `/mail send <player> <message>` | Send offline-safe mail |
+| `/mail block\|unblock <player>` | Manage blocked senders |
+| `/profile [player]` | Open a player profile |
+| `/stats [player]` | Browse vanilla statistics |
+| `/welcome` | Open the welcome-back summary |
+| `/guide` | Review discovered vanilla guidance |
+| `/afk` | Toggle the player-list AFK indicator |
+| `/survivaltweaks help` | Show localized, clickable command help |
+
+</details>
+
+<details>
+<summary><strong>Operator and console commands</strong></summary>
+
+| Command | Purpose | Default access |
 | --- | --- | --- |
-| `/sethome [name]` | Set a home at the current location | Everyone |
-| `/home [name]` | Teleport to a home or list available homes | Everyone |
-| `/deletehome [name]` | Delete a home | Everyone |
-| `/teleport <player>` | Request a teleport to another player | Everyone |
-| `/teleportaccept [player]` | Accept a pending request | Everyone |
-| `/teleportinbox` | Browse and respond to pending teleport requests | Everyone |
-| `/afk` | Toggle your player-list AFK indicator | Everyone |
-| `/mail [inbox]` | Open your text-only mailbox | Everyone |
-| `/mail send <player> <message>` | Send offline-safe player mail | Everyone |
-| `/mail block\|unblock <player>` | Control who may send you mail | Everyone |
-| `/profile [player]` | Open your own or another player's public profile | Everyone |
-| `/stats [player]` | Browse a vanilla statistics journal | Everyone |
-| `/welcome` | Open the welcome-back summary | Everyone |
-| `/guide` | Review vanilla mechanics discovered while playing | Everyone |
-| `/deathlocation [guide [on\|off]\|dismiss]` | Manage the latest death marker and its recovery aids | Everyone |
-| `/lock` | Lock the targeted container | Everyone |
-| `/lock nearby [radius]` | Lock unlocked containers within 1–8 blocks | Everyone |
-| `/lock trust\|untrust <player>` | Manage access to the targeted lock | Everyone |
-| `/lock info` | Show lock ownership and access | Everyone |
-| `/unlock [confirm]` | Confirm and remove the targeted lock | Everyone |
-| `/survival` or `/st` | Open the unified player hub | Everyone |
-| `/survivaltweaks help` | Show localized, clickable commands available to you | Everyone |
-| `/shout <message>` | Broadcast a console announcement | Operators/console |
-| `/survivaltweaks reload` | Validate and reload settings, languages, and effects | Operators |
-| `/survivaltweaks doctor` | Scan configuration, player data, locks, markers, and backups | Operators |
-| `/survivaltweaks backup list\|create\|verify` | Manage safety backups | Operators |
+| `/shout <message>` | Broadcast a console announcement | Operator or console |
+| `/survivaltweaks reload` | Validate and reload settings, languages, and effects | Operator |
+| `/survivaltweaks doctor` | Scan configuration and persisted data | Operator |
+| `/survivaltweaks backup list\|create\|verify` | Inspect and create safety backups | Operator |
 | `/survivaltweaks backup restore <file> [confirm]` | Stage a maintenance-only restore | Console |
-| `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operators |
-| `/survivaltweaks maintenance on\|off\|status` | Control join-blocking maintenance mode | Operators |
-| `/survivaltweaks restart <10s\|5m\|1h\|cancel\|status>` | Schedule or cancel a safe restart | Operators |
+| `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operator |
+| `/survivaltweaks maintenance on\|off\|status` | Control join-blocking maintenance mode | Operator |
+| `/survivaltweaks restart <10s\|5m\|1h\|cancel\|status>` | Schedule, inspect, or cancel a safe restart | Operator |
 
-Operators with `survivaltweaks.teleport.bypass` teleport immediately instead of
-creating a request. All permission nodes and aliases are documented in
-[`plugin.yml`](src/main/resources/plugin.yml).
+</details>
 
-## Features
-
-**Homes and teleports.** Multiple homes open in a paginated chest menu where
-each one can take an icon, description, category, arrival style, favorite mark,
-and custom order. Teleport requests use a warm-up with a boss bar, action-bar
-timer, countdown sounds, and arrival effects, and land on a safe nearby block.
-
-**Player hub.** `/survival` links to homes, the teleport inbox, death recovery,
-managed locks, notifications, mail, profiles, statistics, the journey tracker,
-and per-player experience preferences — sounds, particles, dialogs, action-bar
-guidance, player-list visibility, mention notifications, and language.
-
-**Container locks.** Locks cover both halves of a double chest and support
-trusted-only, deposit-only, and public access. Owners shift-right-click a lock
-to rename it, manage trusted players, review recent access attempts, transfer
-ownership, and allow or block hopper automation. Locks resist explosions and
-fire, and hopper automation stays blocked unless enabled per lock.
-
-**Death recovery.** Each death records a marker and can grant a bound recovery
-compass on respawn, reporting distance and direction with scaled hints between
-the Overworld and Nether. Right-clicking air toggles a private floating guide
-visible only to its owner. There is no `/back` teleport.
-
-**Player list.** A localized TAB header and footer show capacity, the viewer's
-ping, one-minute TPS, average MSPT, current dimension, and unread notifications.
-Rows carry dimension markers, an optional staff badge, and AFK labels. Players
-go AFK automatically or with `/afk`; the state is session-only.
-
-**Social.** Typing `@Name` highlights a mention for that player without
-revealing hidden players. Profiles and vanilla statistics journals are
-privacy-aware, work for offline players, and need
-`survivaltweaks.profile.bypass` to inspect when hidden. Mail is text-only, safe
-to send offline, and rate-limited — no items, currency, or commands move.
-
-**First sessions.** New players can spawn at unique, pre-generated Overworld
-locations so terrain generation never delays their first moments. A journey
-tracker completed by normal play links to `/guide`, which explains Nether
-coordinates, sleep rules, villager curing, respawn anchors, lodestones, anvils,
-and enchanting the first time each is encountered.
-
-**Vanilla conveniences.** Optional tree felling and bounded fast leaf decay
-make forestry less repetitive. Empty block stacks refill from the inventory
-without moving another hotbar or offhand stack. Sneaking remains the deliberate
-way to break item frames, paintings, and armor stands, while tamed pets are
-protected from player friendly fire.
-
-**Atmosphere.** Lightweight client-side sounds and particles accent low tool
-durability, low health, rare pickups, shield blocks, advancements, death sites,
-critical arrows, weather, caves, biomes, and other vanilla interactions. Each
-category can be disabled independently.
-
-**Server touches.** A configurable share of active players can skip the night,
-with AFK players optionally excluded. The multiplayer server list rotates
-MiniMessage announcements and reflects maintenance and restart states without a
-proxy plugin. Environmental deaths can use subtle localized variants, while
-player-, mob-, and weapon-attributed deaths keep Minecraft's native message.
+All aliases and built-in permission nodes are listed in
+[`plugin.yml`](src/main/resources/plugin.yml). Operators with
+`survivaltweaks.teleport.bypass` skip teleport requests, while
+`survivaltweaks.teleport.instant` skips the warm-up.
 
 ## Configuration
 
-`config.yml` is grouped by feature:
+The bundled [`config.yml`](src/main/resources/config.yml) is organized by
+feature:
 
-| Section | Controls |
+| Sections | Controls |
 | --- | --- |
-| `home`, `storage` | Home limit and profile autosave interval |
-| `teleport` | Request lifetime, warm-up, cooldown, cancellation, safe search |
-| `new-player-spawn` | First-join pool: world, bounds, size, separation, pacing, TPS floor, landing checks, biomes |
-| `locked-containers` | Target distance, per-player limit, explosion protection, automation policy |
-| `ui` | Chest menus, native dialogs, action bar, lock targeting hints |
-| `death-recovery` | Markers, respawn compass, floating guide, lifetime, cooldown |
-| `custom-death-messages` | Environmental death lines, rare-variant frequency, per-cause switches |
-| `feedback` | Per-action sounds and particles, each independently configurable |
-| `tree-feller`, `fast-leaf-decay` | Forestry activation, work limits, decay pacing and search radius |
-| `pet-protection`, `hotbar-refill`, `decoration-protection` | Small vanilla interaction safeguards and conveniences |
-| `atmosphere` | Independent ambient, interaction, warning, and trail effects |
-| `chat`, `connection-messages` | Chat format and join/quit messages |
-| `player-list` | Metrics, refresh interval, staff badges, AFK timeout |
-| `sleep` | Threshold, AFK exclusion, weather clearing |
-| `server-list` | Rotating announcements |
-| `mentions` | Cooldown and per-message cap |
-| `mail` | Length, cooldown, hourly limit |
-| `journey`, `welcome-back` | First-session guidance, vanilla guide topics, return summaries |
-| `player-profiles`, `statistics` | Availability and public viewing |
-| `maintenance` | Restart join blocking and pre-restart backups |
+| `home`, `storage` | Home limits and profile persistence |
+| `teleport` | Requests, warm-up, cooldown, cancellation, and safe landing |
+| `new-player-spawn` | World, coordinate bounds, pool size, spacing, pacing, TPS floor, landing checks, and blocked biomes |
+| `locked-containers` | Targeting, limits, explosion protection, and automation defaults |
+| `tree-feller`, `fast-leaf-decay` | Forestry activation, work limits, and decay pacing |
+| `pet-protection`, `hotbar-refill`, `decoration-protection` | Small interaction safeguards and conveniences |
+| `atmosphere`, `feedback` | Ambient, interaction, warning, sound, particle, and trail effects |
+| `ui` | Chest interfaces, native dialogs, action bars, and lock hints |
+| `death-recovery`, `custom-death-messages` | Markers, compass, floating guide, expiry, cooldowns, and environmental death variants |
+| `chat`, `connection-messages`, `mentions` | Formatting and social notifications |
+| `player-list`, `sleep`, `server-list` | Live metrics, AFK behavior, night voting, and multiplayer-list presentation |
+| `journey`, `welcome-back` | First-session progress, vanilla guidance, and return summaries |
+| `mail`, `player-profiles`, `statistics` | Availability, privacy, limits, and rate controls |
+| `maintenance` | Join blocking and restart safeguards |
 
-Startup tolerates invalid numeric settings by falling back to safe defaults and
-logging a warning. `/survivaltweaks reload` is stricter: it validates the whole
-configuration, both catalogs, MiniMessage templates, particles, and sound keys
-before applying anything, and a rejected reload leaves the running configuration
-untouched.
+Startup replaces unsafe numeric values with logged safe defaults.
+`/survivaltweaks reload` is deliberately stricter: it validates the complete
+configuration, both language catalogs, MiniMessage templates, particles, and
+sound keys before applying anything. A rejected reload leaves the active
+configuration unchanged.
 
 ## Languages
 
-Each player's Minecraft client locale selects their language: `fi` uses
-`messages_fi.yml`, everything else and the console use `messages_en.yml`.
-Players can override this from `/survival`, and changes apply immediately.
+The plugin automatically selects Finnish for a player whose Minecraft locale is
+Finnish; everyone else receives English. Players can override that choice from
+the hub, and the change applies immediately.
 
-Both catalogs are copied to `plugins/SurvivalTweaks/` and accept MiniMessage
-formatting. New keys merge into existing catalogs without overwriting
-customizations. Durations and distances take their units from the catalogs too,
-so hours, minutes, and kilometres read naturally in either language, and
-decimals follow the reader's language — a Finnish player sees `1,2 km` and
-`12,5` damage where an English one sees `1.2 km` and `12.5`.
+Both `messages_fi.yml` and `messages_en.yml` are editable MiniMessage catalogs.
+New message keys merge into existing files without overwriting server
+customizations. Numbers, durations, distances, and item names are rendered for
+the receiving player's locale.
 
-A few strings always come from `messages_en.yml`, because no single reader's
-language applies:
+Shared text that has no single viewer—such as server-list content, TAB row
+markers, restart login messages, and searchable operator diagnostics—uses the
+English catalog.
 
-- the server-list status and announcements, and the kick shown when a scheduled
-  restart blocks a login — both happen before the player's locale is known;
-- the TAB staff and AFK markers, which are one shared row rendered identically
-  for every viewer;
-- operator output from `/survivaltweaks doctor` and backup verification, which
-  stays English so it can be searched and quoted directly.
+## Data safety and operations
 
-Editing those keys in `messages_en.yml` changes them for everyone; editing them
-in `messages_fi.yml` has no effect.
+Profiles, locks, death markers, and spawn state use ordered background
+persistence with atomic file replacement. Mutable Bukkit state never crosses
+the asynchronous storage boundary.
 
-## Operations
+SurvivalTweaks creates safety archives before startup data loading and
+configuration reloads, retaining the newest ten. Restores are staged while the
+server is running and applied before normal data loading on the next startup.
 
-Profiles, locks, death markers, and spawn state persist through an ordered
-coalescing background writer with atomic file replacement, so no Bukkit object
-or mutable collection crosses a thread boundary. The plugin snapshots its data
-into `plugins/SurvivalTweaks/backups/` before loading at startup and before
-every reload, keeping the newest ten archives.
+Maintenance mode blocks new joins without removing connected players. Scheduled
+restarts display localized milestones, block late joins, flush pending writes,
+and stop Paper cleanly; an external process manager remains responsible for
+starting it again.
 
-Maintenance mode blocks new joins while leaving connected players alone.
-Scheduled restarts show localized milestones and a boss bar, block late joins in
-the final window, flush profile writes, and shut Paper down cleanly; an external
-process manager is responsible for starting it again.
+See the [operations guide](docs/operations.md) for backup restoration,
+diagnostics, spawn-pool tuning, and recovery procedures.
 
-See [`docs/operations.md`](docs/operations.md) for backup and restore
-procedures, spawn-pool tuning, diagnostics, and the data-safety guarantees.
+## Building from source
 
-## Release QA
+Open the repository or its `pom.xml` in IntelliJ IDEA, select a Java 25 SDK, and
+run the Maven `verify` lifecycle. The equivalent command-line build is:
 
-Every push and pull request runs the Maven suite and a pinned Paper 26.2
-startup/reload/diagnostics/shutdown smoke test, then retains the verified JAR
-and its SHA-256 as a workflow artifact. Pushing a `v*` tag publishes that same
-verified artifact as the latest GitHub release.
+```shell
+mvn --batch-mode --no-transfer-progress clean verify
+```
+
+The resulting plugin is written to
+`target/SurvivalTweaks-<version>.jar`. IntelliJ project files, compiler output,
+and other local state are intentionally excluded from version control.
+
+## Release quality
+
+Every push and pull request runs the complete Maven test suite and a
+checksum-pinned Paper 26.2 smoke test covering startup, configuration reload,
+diagnostics, and clean shutdown. CI retains the verified JAR and SHA-256 as
+workflow artifacts. A `v*` tag publishes those same files as the latest GitHub
+release.
+
+Older profile, lock, and version 1.0 `userdata/` files are upgraded
+automatically.
