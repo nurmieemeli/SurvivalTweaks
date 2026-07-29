@@ -5,8 +5,10 @@ import org.junit.jupiter.api.Test;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -151,11 +153,110 @@ class PluginResourcesTest {
         assertNotNull(finnish.getString("lock.denied-open"));
     }
 
+    @Test
+    void bothCatalogsDeclareTheirMessagesInTheSameOrder() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        // Matching order keeps the two files reviewable side by side.
+        assertEquals(orderedMessageKeys(english), orderedMessageKeys(finnish));
+    }
+
+    @Test
+    void bothCatalogsUseTheSameTagsAndPlaceholdersForEachMessage() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        // Translated hover text and localized argument names in usage strings
+        // are the only places the two catalogs may legitimately differ.
+        Set<String> translatable = Set.of(
+                "welcome-back.prompt",
+                "teleport.usage",
+                "shout.usage",
+                "death-recovery.guide-prompt-enabled",
+                "death-recovery.guide-prompt-disabled"
+        );
+        for (String key : orderedMessageKeys(english)) {
+            if (translatable.contains(key)) {
+                continue;
+            }
+            assertEquals(
+                    tags(english.getString(key)),
+                    tags(finnish.getString(key)),
+                    key
+            );
+        }
+    }
+
+    @Test
+    void everyCountedMessageOffersBothASingularAndAPluralForm() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        // Finnish inflects the counted noun, so one template cannot serve both.
+        for (String key : List.of(
+                "player-list.unread",
+                "notifications.unread-summary",
+                "ui.hub.homes-count",
+                "ui.hub.mail-count",
+                "ui.hub.notifications-count",
+                "ui.mailbox.title",
+                "ui.notifications.title",
+                "ui.notifications.age",
+                "ui.welcome-back.count",
+                "ui.profile.homes-value",
+                "ui.profile.last-seen",
+                "ui.teleport-inbox.expires",
+                "teleport.received",
+                "teleport.safety.warmup",
+                "teleport.safety.cooldown",
+                "death-recovery.recorded",
+                "death-recovery.location",
+                "death-recovery.compass-cooldown",
+                "admin.restart.scheduled",
+                "admin.doctor.truncated",
+                "admin.backup.players-online",
+                "admin.spawnpool.cleared"
+        )) {
+            for (YamlConfiguration catalog : List.of(english, finnish)) {
+                assertNotNull(catalog.getString(key), key);
+                assertNotNull(catalog.getString(key + "-one"), key + "-one");
+            }
+        }
+    }
+
+    @Test
+    void everyRestartDurationOffersTheFormUsedBeforeAPostposition() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        // "5 minuutin kuluttua" needs the genitive, not the standalone partitive.
+        for (String unit : List.of("second", "seconds", "minute", "minutes", "hour", "hours")) {
+            String key = "maintenance.duration." + unit;
+            for (YamlConfiguration catalog : List.of(english, finnish)) {
+                assertNotNull(catalog.getString(key), key);
+                assertNotNull(catalog.getString(key + "-before"), key + "-before");
+            }
+        }
+    }
+
     private YamlConfiguration resource(String name) {
         return YamlConfiguration.loadConfiguration(new InputStreamReader(
                 Objects.requireNonNull(getClass().getClassLoader().getResourceAsStream(name)),
                 StandardCharsets.UTF_8
         ));
+    }
+
+    private List<String> orderedMessageKeys(YamlConfiguration catalog) {
+        return catalog.getKeys(true).stream().filter(catalog::isString).toList();
+    }
+
+    /** Every MiniMessage tag and placeholder in a template, sorted. */
+    private List<String> tags(String template) {
+        return Pattern.compile("<[^>]+>").matcher(Objects.requireNonNull(template)).results()
+                .map(java.util.regex.MatchResult::group)
+                .sorted()
+                .toList();
     }
 
     private Set<String> messageKeys(YamlConfiguration catalog) {

@@ -110,7 +110,7 @@ public final class PlayerHubController implements Listener {
                 messages.component(player, "ui.hub.homes"),
                 List.of(messages.component(
                         player,
-                        "ui.hub.homes-count",
+                        MessageService.plural("ui.hub.homes-count", profile.homes().size()),
                         Placeholder.unparsed("count", Integer.toString(profile.homes().size()))
                 ))
         ));
@@ -144,7 +144,7 @@ public final class PlayerHubController implements Listener {
                 messages.component(player, "ui.hub.mail"),
                 List.of(messages.component(
                         player,
-                        "ui.hub.mail-count",
+                        MessageService.plural("ui.hub.mail-count", profile.unreadMailCount()),
                         Placeholder.unparsed("count", Long.toString(profile.unreadMailCount()))
                 ))
         ));
@@ -154,7 +154,7 @@ public final class PlayerHubController implements Listener {
                 messages.component(player, "ui.hub.notifications"),
                 List.of(messages.component(
                         player,
-                        "ui.hub.notifications-count",
+                        MessageService.plural("ui.hub.notifications-count", unread),
                         Placeholder.unparsed("count", Long.toString(unread))
                 ))
         ));

@@ -56,7 +56,7 @@ public final class ConnectionListener implements Listener {
         if (unread > 0) {
             messages.send(
                     event.getPlayer(),
-                    "notifications.unread-summary",
+                    MessageService.plural("notifications.unread-summary", unread),
                     Placeholder.unparsed("count", Long.toString(unread))
             );
         }

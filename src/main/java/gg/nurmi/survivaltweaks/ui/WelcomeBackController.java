@@ -176,7 +176,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 messages.component(player, "ui.welcome-back.notifications"),
                 List.of(messages.component(
                         player,
-                        "ui.welcome-back.count",
+                        MessageService.plural("ui.welcome-back.count", unread),
                         Placeholder.unparsed("count", Long.toString(unread))
                 ))
         ));
@@ -185,7 +185,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 messages.component(player, "ui.welcome-back.mail"),
                 List.of(messages.component(
                         player,
-                        "ui.welcome-back.count",
+                        MessageService.plural("ui.welcome-back.count", unreadMail),
                         Placeholder.unparsed("count", Long.toString(unreadMail))
                 ))
         ));
@@ -194,7 +194,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 messages.component(player, "ui.welcome-back.teleports"),
                 List.of(messages.component(
                         player,
-                        "ui.welcome-back.count",
+                        MessageService.plural("ui.welcome-back.count", pending),
                         Placeholder.unparsed("count", Integer.toString(pending))
                 ))
         ));

@@ -189,7 +189,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
                 messages.component(viewer, "ui.profile.homes"),
                 List.of(messages.component(
                         viewer,
-                        "ui.profile.homes-value",
+                        MessageService.plural("ui.profile.homes-value", targetProfile.homes().size()),
                         Placeholder.unparsed("count", Integer.toString(targetProfile.homes().size()))
                 ))
         ));
@@ -315,7 +315,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
         long minutes = Math.max(0, Duration.between(lastSeen, clock.instant()).toMinutes());
         return messages.component(
                 viewer,
-                "ui.profile.last-seen",
+                MessageService.plural("ui.profile.last-seen", minutes),
                 Placeholder.unparsed("minutes", Long.toString(minutes))
         );
     }

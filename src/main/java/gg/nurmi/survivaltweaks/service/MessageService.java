@@ -71,6 +71,15 @@ public final class MessageService {
         audience.sendMessage(component(audience, key, placeholders));
     }
 
+    /**
+     * Picks the singular sibling {@code <key>-one} when a count is exactly one.
+     * Languages such as Finnish inflect the counted noun, so "1 unread
+     * notification" and "2 unread notifications" cannot share one template.
+     */
+    public static String plural(String key, long count) {
+        return count == 1L ? key + "-one" : key;
+    }
+
     public Component component(String key, TagResolver... placeholders) {
         return component(null, key, placeholders);
     }

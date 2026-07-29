@@ -376,14 +376,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 messages.send(sender, "admin.backup.maintenance-required");
                 return true;
             }
-            if (!plugin.getServer().getOnlinePlayers().isEmpty()) {
+            int online = plugin.getServer().getOnlinePlayers().size();
+            if (online > 0) {
                 messages.send(
                         sender,
-                        "admin.backup.players-online",
-                        Placeholder.unparsed(
-                                "count",
-                                Integer.toString(plugin.getServer().getOnlinePlayers().size())
-                        )
+                        MessageService.plural("admin.backup.players-online", online),
+                        Placeholder.unparsed("count", Integer.toString(online))
                 );
                 return true;
             }
@@ -530,7 +528,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             MaintenanceService.ScheduleResult result = maintenance.schedule(delay);
             String key = switch (result) {
-                case SCHEDULED -> "admin.restart.scheduled";
+                case SCHEDULED -> MessageService.plural("admin.restart.scheduled", delay.toSeconds());
                 case ALREADY_SCHEDULED -> "admin.restart.already-scheduled";
                 case INVALID -> "admin.restart.invalid";
             };
@@ -598,7 +596,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             if (result.successful()) {
                 messages.send(
                         sender,
-                        "admin.spawnpool.cleared",
+                        MessageService.plural("admin.spawnpool.cleared", result.cleared()),
                         Placeholder.unparsed("count", Integer.toString(result.cleared()))
                 );
             } else {
@@ -699,7 +697,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         if (omitted > 0) {
             messages.send(
                     sender,
-                    "admin.doctor.truncated",
+                    MessageService.plural("admin.doctor.truncated", omitted),
                     Placeholder.unparsed("count", Integer.toString(omitted))
             );
         }

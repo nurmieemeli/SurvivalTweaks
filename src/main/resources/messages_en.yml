@@ -29,7 +29,8 @@ player-list:
   ping: "<gray>Ping <ping> ms</gray>"
   tps: "<gray>TPS <tps></gray>"
   mspt: "<gray>MSPT <mspt> ms</gray>"
-  unread: "<yellow><count> unread notification(s)</yellow>"
+  unread: "<yellow><count> unread notifications</yellow>"
+  unread-one: "<yellow><count> unread notification</yellow>"
   entry: "<world> <gray><player></gray><staff><afk>"
   staff-marker: " <gold>★</gold>"
   afk-marker: " <yellow>[AFK]</yellow>"
@@ -59,7 +60,9 @@ server-list:
     online: "<green>Online</green>"
     maintenance: "<yellow>Maintenance</yellow>"
     restarting: "<red>Restarting</red>"
-    restart-scheduled: "<yellow>Restart in <time></yellow>"
+    # <time> is an abbreviation (e.g. "5m"), so this stays a label rather than
+    # a sentence — Finnish cannot govern an abbreviation with a postposition.
+    restart-scheduled: "<yellow>Restart scheduled: <time></yellow>"
 
 mentions:
   target-afk: "<yellow><player> is currently AFK and may not respond immediately.</yellow>"
@@ -77,6 +80,14 @@ maintenance:
     minutes: "<count> minutes"
     hour: "<count> hour"
     hours: "<count> hours"
+    # Used before a preposition such as "in". English needs no separate case,
+    # but languages like Finnish inflect the noun here.
+    second-before: "<count> second"
+    seconds-before: "<count> seconds"
+    minute-before: "<count> minute"
+    minutes-before: "<count> minutes"
+    hour-before: "<count> hour"
+    hours-before: "<count> hours"
 
 journey:
   title: "<green>Welcome to Survival</green>"
@@ -145,7 +156,7 @@ new-player-spawn:
   preparing: "<gray>Preparing your own safe place in the world...</gray>"
   arrived: "<green>Welcome! This unique starting area is yours to explore.</green>"
   replacing: "<yellow>Your reserved starting area changed or became unsafe. Preparing a fresh location...</yellow>"
-  title: "<green>Welcome to survival</green>"
+  title: "<green>Welcome to Survival</green>"
   subtitle: "<gray>Your adventure starts here</gray>"
   failed: "<red>Your starting location could not be prepared. Please reconnect or contact an operator.</red>"
 
@@ -180,6 +191,9 @@ teleport:
   received: |-
     <gray><player> wants to teleport to you.
     Accept with <green>/teleportaccept <player></green>. The request expires in <seconds> seconds.</gray>
+  received-one: |-
+    <gray><player> wants to teleport to you.
+    Accept with <green>/teleportaccept <player></green>. The request expires in <seconds> second.</gray>
   completed: "<gray>Teleported to <green><player></green>.</gray>"
   declined: "<red><player> declined your teleport request.</red>"
   destination:
@@ -193,8 +207,10 @@ teleport:
     cooldown: "<gray>Teleport ready in <green><seconds>s</green></gray>"
   safety:
     warmup: "<gray>Teleporting in <green><seconds></green> seconds. Do not move.</gray>"
+    warmup-one: "<gray>Teleporting in <green><seconds></green> second. Do not move.</gray>"
     pending: "<red>You already have a teleport in progress.</red>"
     cooldown: "<red>You can teleport again in <seconds> seconds.</red>"
+    cooldown-one: "<red>You can teleport again in <seconds> second.</red>"
     cancelled-move: "<red>Teleport cancelled because you moved.</red>"
     cancelled-damage: "<red>Teleport cancelled because you took damage.</red>"
     unsafe: "<red>No safe teleport destination was found.</red>"
@@ -244,7 +260,7 @@ lock:
   nearby-radius: "<red>The nearby-lock radius must be between 1 and 8 blocks.</red>"
   nearby-created: "<gray>Locked <green><count></green> nearby containers.</gray>"
   actionbar:
-    deposit-only: "<yellow>Deposit access</yellow> <dark_gray>-</dark_gray> <gray>Owner: <owner></gray>"
+    deposit-only: "<yellow>Deposit access</yellow> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
     owner: "<green>🔒 Your locked container</green> <dark_gray>•</dark_gray> <gray>/lock info</gray>"
     trusted: "<green>🔓 Access granted</green> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
     denied: "<red>🔒 Locked</red> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
@@ -253,15 +269,18 @@ death-recovery:
   usage: "<red>Usage: /deathlocation [guide [on|off]|dismiss]</red>"
   none: "<red>You do not have an active death marker.</red>"
   recorded: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minutes.</gray>"
+  recorded-one: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minute.</gray>"
   location: "<gray>Your death marker is at <green><world> <x>, <y>, <z></green> and expires in <minutes> minutes.</gray>"
+  location-one: "<gray>Your death marker is at <green><world> <x>, <y>, <z></green> and expires in <minutes> minute.</gray>"
   compass-name: "<red>Recovery Compass</red>"
   compass-lore: "<gray>Points to <white><world> <x>, <y>, <z></white></gray>"
   compass-guide-lore: "<dark_gray>Right-click air to toggle the floating guide.</dark_gray>"
   compass-given: "<gray>You received a recovery compass.</gray>"
   compass-present: "<yellow>You already have a recovery compass.</yellow>"
   compass-cooldown: "<red>You can request another compass in <seconds> seconds.</red>"
-  actionbar-navigation: "<red>Death marker</red> <dark_gray>-</dark_gray> <white><arrow></white> <distance> <gray>blocks</gray>"
-  actionbar-portal: "<light_purple>Use a portal near <x>, <z></light_purple> <dark_gray>-</dark_gray> <gray><world></gray>"
+  compass-cooldown-one: "<red>You can request another compass in <seconds> second.</red>"
+  actionbar-navigation: "<red>Death marker</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>blocks</gray>"
+  actionbar-portal: "<light_purple>Use a portal near <x>, <z></light_purple> <dark_gray>•</dark_gray> <gray><world></gray>"
   actionbar-distance: "<red>Death marker</red> <dark_gray>•</dark_gray> <gray><distance> blocks away</gray>"
   actionbar-world: "<red>Death marker</red> <dark_gray>•</dark_gray> <gray><world> <x>, <z></gray>"
   actionbar-expired: "<red>This recovery compass has expired.</red>"
@@ -339,6 +358,7 @@ onboarding:
 
 notifications:
   unread-summary: "<yellow>You have <count> unread SurvivalTweaks notifications. Open <green>/survival</green> to review them.</yellow>"
+  unread-summary-one: "<yellow>You have <count> unread SurvivalTweaks notification. Open <green>/survival</green> to review it.</yellow>"
 
 admin:
   usage: "<red>Usage: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]</red>"
@@ -382,6 +402,7 @@ admin:
   restart:
     usage: "<red>Usage: /survivaltweaks restart [10s|5m|1h|cancel|status]</red>"
     scheduled: "<green>Safe restart scheduled in <seconds> seconds.</green>"
+    scheduled-one: "<green>Safe restart scheduled in <seconds> second.</green>"
     already-scheduled: "<yellow>A restart is already scheduled.</yellow>"
     invalid: "<red>Restart delay must be between 10 seconds and 24 hours.</red>"
     cancelled: "<green>The scheduled restart was cancelled.</green>"
@@ -394,7 +415,8 @@ admin:
     healthy: "<green>No problems were found.</green>"
     error: "<red>✖ <detail></red>"
     warning: "<yellow>⚠ <detail></yellow>"
-    truncated: "<gray><count> additional issue(s) omitted from chat.</gray>"
+    truncated: "<gray><count> additional issues omitted from chat.</gray>"
+    truncated-one: "<gray><count> additional issue omitted from chat.</gray>"
   backup:
     working: "<gray>Running the backup operation in the background...</gray>"
     busy: "<yellow>Another backup operation is already running.</yellow>"
@@ -410,7 +432,8 @@ admin:
     restore-confirm: "<yellow>Restoring <file> replaces all managed plugin data on the next startup. Enable maintenance, remove every player, then confirm from console with <red>/survivaltweaks backup restore <file> confirm</red>.</yellow>"
     console-only: "<red>Backup restoration can only be confirmed from the server console.</red>"
     maintenance-required: "<red>Enable SurvivalTweaks maintenance mode before staging a restore.</red>"
-    players-online: "<red>Cannot restore while <count> player(s) are online.</red>"
+    players-online: "<red>Cannot restore while <count> players are online.</red>"
+    players-online-one: "<red>Cannot restore while <count> player is online.</red>"
     restore-staged: "<green>Restore staged from <file> (SHA-256 <sha>). Paper is shutting down. The archive will be verified again and applied before plugin data loads on the next startup.</green>"
   spawnpool:
     usage: "<red>Usage: /survivaltweaks spawnpool [status|refill|validate|clear-prepared]</red>"
@@ -430,7 +453,8 @@ admin:
     validate-cancelled: "<yellow>Spawn-pool validation was cancelled because its configuration changed.</yellow>"
     validate-result: "<gray>Checked <checked> • Removed unsafe prepared: <removed> • Invalid pending: <pending> • Unavailable worlds: <unavailable> • Errors: <errors></gray>"
     clear-confirm: "<yellow>This clears every unassigned prepared location. Confirm with <red>/survivaltweaks spawnpool clear-prepared confirm</red>.</yellow>"
-    cleared: "<green>Cleared <count> prepared location(s). TPS-aware replenishment has started.</green>"
+    cleared: "<green>Cleared <count> prepared locations. TPS-aware replenishment has started.</green>"
+    cleared-one: "<green>Cleared <count> prepared location. TPS-aware replenishment has started.</green>"
     clear-failed: "<red>Prepared locations could not be cleared because the updated state was not saved.</red>"
 
 ui:
@@ -534,6 +558,7 @@ ui:
     title: "<dark_green>Teleport requests (<count>)</dark_green>"
     request: "<green><player></green>"
     expires: "<gray>Expires in <seconds> seconds.</gray>"
+    expires-one: "<gray>Expires in <seconds> second.</gray>"
     actions: "<green>Left-click: accept</green> <dark_gray>•</dark_gray> <red>Right-click: decline</red>"
   unlock-dialog:
     title: "<red>Remove this lock?</red>"
@@ -563,6 +588,7 @@ ui:
     title: "<dark_green><bold>Survival hub</bold></dark_green>"
     homes: "<green>Homes</green>"
     homes-count: "<gray><count> saved homes</gray>"
+    homes-count-one: "<gray><count> saved home</gray>"
     teleports: "<light_purple>Teleport inbox</light_purple>"
     teleports-description: "<gray>Review incoming requests.</gray>"
     death: "<red>Death recovery</red>"
@@ -575,8 +601,10 @@ ui:
     journey-description: "<gray>Follow optional introductions and view your progress.</gray>"
     mail: "<aqua>Mailbox</aqua>"
     mail-count: "<gray><count> unread letters</gray>"
+    mail-count-one: "<gray><count> unread letter</gray>"
     notifications: "<yellow>Notifications</yellow>"
     notifications-count: "<gray><count> unread</gray>"
+    notifications-count-one: "<gray><count> unread</gray>"
     help: "<aqua>Help</aqua>"
     help-description: "<gray>See commands and interaction tips.</gray>"
     help-command: "<gray>Use <green>/survivaltweaks help</green> for the complete clickable command list.</gray>"
@@ -657,6 +685,7 @@ ui:
       enchanting: "<gray>Open an enchanting table to discover this.</gray>"
   mailbox:
     title: "<dark_green>Mailbox <gray>(<unread> unread)</gray></dark_green>"
+    title-one: "<dark_green>Mailbox <gray>(<unread> unread)</gray></dark_green>"
     letter: "<aqua>Mail from <sender></aqua>"
     message: "<white><message></white>"
     actions: "<green>Left: read</green> <dark_gray>•</dark_gray> <aqua>Right: reply</aqua> <dark_gray>•</dark_gray> <red>Shift-left: delete</red> <dark_gray>•</dark_gray> <yellow>Shift-right: block</yellow>"
@@ -671,6 +700,7 @@ ui:
       offline: "<gray>Offline</gray>"
     world: "<gray>World: <white><world></white></gray>"
     last-seen: "<gray>Last seen <minutes> minutes ago</gray>"
+    last-seen-one: "<gray>Last seen <minutes> minute ago</gray>"
     last-seen-unknown: "<gray>Last seen time unavailable</gray>"
     playtime: "<aqua>Playtime</aqua>"
     playtime-value: "<gray><time></gray>"
@@ -678,6 +708,7 @@ ui:
     first-joined-value: "<gray><days> days ago</gray>"
     homes: "<red>Homes</red>"
     homes-value: "<gray><count> saved</gray>"
+    homes-value-one: "<gray><count> saved</gray>"
     statistics: "<aqua>Statistics journal</aqua>"
     statistics-description: "<gray>Browse this player's vanilla milestones.</gray>"
     send-mail: "<aqua>Send mail</aqua>"
@@ -731,6 +762,7 @@ ui:
     mail: "<aqua>Mailbox</aqua>"
     teleports: "<light_purple>Teleport requests</light_purple>"
     count: "<gray><count> pending or unread</gray>"
+    count-one: "<gray><count> pending or unread</gray>"
     death: "<red>Death recovery</red>"
     death-active: "<yellow>An active death marker is waiting.</yellow>"
     death-none: "<gray>No active death marker.</gray>"
@@ -740,10 +772,12 @@ ui:
     away: "<gray>You were away for <away>.</gray>"
   notifications:
     title: "<dark_green>Notifications <gray>(<unread> unread)</gray></dark_green>"
+    title-one: "<dark_green>Notifications <gray>(<unread> unread)</gray></dark_green>"
     age: "<gray><minutes> minutes ago</gray>"
+    age-one: "<gray><minutes> minute ago</gray>"
     unread: "<yellow>Unread</yellow>"
     read: "<gray>Read</gray>"
-    actions: "<green>Click: mark read</green> <dark_gray>-</dark_gray> <red>Shift-click: delete</red>"
+    actions: "<green>Click: mark read</green> <dark_gray>•</dark_gray> <red>Shift-click: delete</red>"
     clear-read: "<red>Clear read notifications</red>"
     type:
       teleport-declined: "<red><actor> declined your teleport request.</red>"

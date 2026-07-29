@@ -81,17 +81,15 @@ public final class MailboxController implements Listener {
                 .filter(notification -> notification.type() == NotificationType.MAIL)
                 .limit(45)
                 .toList();
+        long unread = letters.stream().filter(letter -> !letter.read()).count();
         MailboxHolder holder = new MailboxHolder(
                 player.getUniqueId(),
                 letters,
                 server,
                 messages.component(
                         player,
-                        "ui.mailbox.title",
-                        Placeholder.unparsed(
-                                "unread",
-                                Long.toString(letters.stream().filter(letter -> !letter.read()).count())
-                        )
+                        MessageService.plural("ui.mailbox.title", unread),
+                        Placeholder.unparsed("unread", Long.toString(unread))
                 )
         );
         for (int index = 0; index < letters.size(); index++) {
@@ -115,7 +113,7 @@ public final class MailboxController implements Listener {
                             ),
                             messages.component(
                                     player,
-                                    "ui.notifications.age",
+                                    MessageService.plural("ui.notifications.age", minutes),
                                     Placeholder.unparsed("minutes", Long.toString(minutes))
                             ),
                             messages.component(player, "ui.mailbox.actions")

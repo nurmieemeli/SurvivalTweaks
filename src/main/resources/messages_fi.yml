@@ -30,6 +30,7 @@ player-list:
   tps: "<gray>TPS <tps></gray>"
   mspt: "<gray>MSPT <mspt> ms</gray>"
   unread: "<yellow><count> lukematonta ilmoitusta</yellow>"
+  unread-one: "<yellow><count> lukematon ilmoitus</yellow>"
   entry: "<world> <gray><player></gray><staff><afk>"
   staff-marker: " <gold>★</gold>"
   afk-marker: " <yellow>[AFK]</yellow>"
@@ -59,7 +60,8 @@ server-list:
     online: "<green>Paikalla</green>"
     maintenance: "<yellow>Huoltotila</yellow>"
     restarting: "<red>Käynnistyy uudelleen</red>"
-    restart-scheduled: "<yellow>Uudelleenkäynnistys <time> kuluttua</yellow>"
+    # <time> on lyhenne (esim. "5m"), jota postpositio "kuluttua" ei voi hallita.
+    restart-scheduled: "<yellow>Uudelleenkäynnistys ajastettu: <time></yellow>"
 
 mentions:
   target-afk: "<yellow><player> on tällä hetkellä AFK eikä ehkä vastaa heti.</yellow>"
@@ -77,6 +79,14 @@ maintenance:
     minutes: "<count> minuuttia"
     hour: "<count> tunti"
     hours: "<count> tuntia"
+    # Genitiivi vaaditaan postposition "kuluttua" edellä. Sama muoto yksikössä
+    # ja monikossa: "1 minuutin kuluttua", "5 minuutin kuluttua".
+    second-before: "<count> sekunnin"
+    seconds-before: "<count> sekunnin"
+    minute-before: "<count> minuutin"
+    minutes-before: "<count> minuutin"
+    hour-before: "<count> tunnin"
+    hours-before: "<count> tunnin"
 
 journey:
   title: "<green>Tervetuloa survivaliin</green>"
@@ -180,6 +190,9 @@ teleport:
   received: |-
     <gray><player> pyytää saada teleportata luoksesi.
     Hyväksy komennolla <green>/hyväksy <player></green>. Pyyntö vanhenee <seconds> sekunnissa.</gray>
+  received-one: |-
+    <gray><player> pyytää saada teleportata luoksesi.
+    Hyväksy komennolla <green>/hyväksy <player></green>. Pyyntö vanhenee <seconds> sekunnissa.</gray>
   completed: "<gray>Teleportattu pelaajan <green><player></green> luokse.</gray>"
   declined: "<red>Pelaaja <player> hylkäsi teleporttipyyntösi.</red>"
   destination:
@@ -193,8 +206,10 @@ teleport:
     cooldown: "<gray>Teleporttaus käytettävissä <green><seconds> s</green> kuluttua</gray>"
   safety:
     warmup: "<gray>Teleporttaus alkaa <green><seconds></green> sekunnin kuluttua. Älä liiku.</gray>"
+    warmup-one: "<gray>Teleporttaus alkaa <green><seconds></green> sekunnin kuluttua. Älä liiku.</gray>"
     pending: "<red>Sinulla on jo teleporttaus käynnissä.</red>"
     cooldown: "<red>Voit teleportata uudelleen <seconds> sekunnin kuluttua.</red>"
+    cooldown-one: "<red>Voit teleportata uudelleen <seconds> sekunnin kuluttua.</red>"
     cancelled-move: "<red>Teleporttaus peruttiin, koska liikuit.</red>"
     cancelled-damage: "<red>Teleporttaus peruttiin, koska vahingoituit.</red>"
     unsafe: "<red>Turvallista teleporttaussijaintia ei löytynyt.</red>"
@@ -239,30 +254,33 @@ lock:
   denied-attach: "<red>Et voi yhdistää säiliötä toisen pelaajan lukkoon.</red>"
   removed-by-break: "<gray>Säiliön lukitus poistettiin ennen rikkomista.</gray>"
   extended: "<gray>Uusi säiliö liitettiin olemassa olevaan lukkoon.</gray>"
-  conflict: "<red>Säiliön lukitiedoissa on ristiriita. Pyydä ylläpitäjää tarkistamaan loki.</red>"
+  conflict: "<red>Säiliön lukkotiedoissa on ristiriita. Pyydä ylläpitäjää tarkistamaan loki.</red>"
+  deposit-only: "<yellow>Tähän säiliöön voi tallettaa tavaroita, mutta et voi ottaa niitä.</yellow>"
+  nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 lohkoa.</red>"
+  nearby-created: "<gray>Lukittiin <green><count></green> lähellä olevaa säiliötä.</gray>"
   actionbar:
+    deposit-only: "<yellow>Talletusoikeus</yellow> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
     owner: "<green>🔒 Oma lukittu säiliösi</green> <dark_gray>•</dark_gray> <gray>/lock info</gray>"
     trusted: "<green>🔓 Käyttöoikeus</green> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
     denied: "<red>🔒 Lukittu</red> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
-
-    deposit-only: "<yellow>Talletusoikeus</yellow> <dark_gray>-</dark_gray> <gray>Omistaja: <owner></gray>"
-
-  deposit-only: "<yellow>Tähän säiliöön voi tallettaa tavaroita, mutta et voi ottaa niitä.</yellow>"
-  nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 korttelia.</red>"
-  nearby-created: "<gray>Lukittiin <green><count></green> lähellä olevaa säiliötä.</gray>"
 
 death-recovery:
   usage: "<red>Käyttö: /deathlocation [guide [on|off]|dismiss]</red>"
   none: "<red>Sinulla ei ole aktiivista kuolinmerkintää.</red>"
   recorded: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
+  recorded-one: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   location: "<gray>Kuolinpaikkasi on <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
+  location-one: "<gray>Kuolinpaikkasi on <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   compass-name: "<red>Palautuskompassi</red>"
   compass-lore: "<gray>Osoittaa paikkaan <white><world> <x>, <y>, <z></white></gray>"
   compass-guide-lore: "<dark_gray>Vaihda kelluva opas napsauttamalla ilmaa oikealla.</dark_gray>"
   compass-given: "<gray>Sait palautuskompassin.</gray>"
   compass-present: "<yellow>Sinulla on jo palautuskompassi.</yellow>"
   compass-cooldown: "<red>Voit pyytää uuden kompassin <seconds> sekunnin kuluttua.</red>"
-  actionbar-distance: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><distance> korttelin päässä</gray>"
+  compass-cooldown-one: "<red>Voit pyytää uuden kompassin <seconds> sekunnin kuluttua.</red>"
+  actionbar-navigation: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>lohkoa</gray>"
+  actionbar-portal: "<light_purple>Käytä portaalia lähellä kohtaa <x>, <z></light_purple> <dark_gray>•</dark_gray> <gray><world></gray>"
+  actionbar-distance: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><distance> lohkon päässä</gray>"
   actionbar-world: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world> <x>, <z></gray>"
   actionbar-expired: "<red>Tämä palautuskompassi on vanhentunut.</red>"
   guide-prompt-enabled: "<green>Kelluva kuolinpaikkaoppaasi on käytössä.</green> <click:run_command:'/deathlocation guide off'><hover:show_text:'Piilota yksityinen opas'><yellow>[Poista käytöstä]</yellow></hover></click>"
@@ -275,9 +293,6 @@ death-recovery:
   guide-destination: "<red>☠ Tarkka kuolinpaikka</red> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-portal: "<light_purple>◇ Portaalireitti</light_purple> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-world: "<red>☠ Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world></gray>"
-
-  actionbar-navigation: "<red>Kuolinpaikka</red> <dark_gray>-</dark_gray> <white><arrow></white> <distance> <gray>korttelia</gray>"
-  actionbar-portal: "<light_purple>Käytä portaalia lähellä kohtaa <x>, <z></light_purple> <dark_gray>-</dark_gray> <gray><world></gray>"
   reached: "<green>Saavuit kuolinpaikallesi. Palautuskompassi poistettiin.</green>"
   dismissed: "<gray>Kuolinpaikkasi ja palautuskompassi poistettiin.</gray>"
 
@@ -295,7 +310,7 @@ death-messages:
     2: "<gray><player> ei päässyt takaisin pinnalle.</gray>"
     rare: "<gray><player> yritti hengittää veden alla vielä kerran.</gray>"
   suffocation:
-    1: "<gray><player> jäi loukkuun korttelin sisään.</gray>"
+    1: "<gray><player> jäi loukkuun lohkon sisään.</gray>"
     2: "<gray><player>-pelaajalta loppui tila hengittää.</gray>"
     rare: "<gray><player> huomasi seinien olevan liian lähellä.</gray>"
   void:
@@ -342,6 +357,7 @@ onboarding:
 
 notifications:
   unread-summary: "<yellow>Sinulla on <count> lukematonta SurvivalTweaks-ilmoitusta. Tarkista ne komennolla <green>/survival</green>.</yellow>"
+  unread-summary-one: "<yellow>Sinulla on <count> lukematon SurvivalTweaks-ilmoitus. Tarkista se komennolla <green>/survival</green>.</yellow>"
 
 admin:
   usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]</red>"
@@ -385,6 +401,8 @@ admin:
   restart:
     usage: "<red>Käyttö: /survivaltweaks restart [10s|5m|1h|cancel|status]</red>"
     scheduled: "<green>Turvallinen uudelleenkäynnistys ajastettiin <seconds> sekunnin päähän.</green>"
+    # Genitiivi ei taivu luvun mukaan, joten yksikkömuoto on sama.
+    scheduled-one: "<green>Turvallinen uudelleenkäynnistys ajastettiin <seconds> sekunnin päähän.</green>"
     already-scheduled: "<yellow>Uudelleenkäynnistys on jo ajastettu.</yellow>"
     invalid: "<red>Viiveen on oltava 10 sekunnin ja 24 tunnin välillä.</red>"
     cancelled: "<green>Ajastettu uudelleenkäynnistys peruttiin.</green>"
@@ -398,6 +416,7 @@ admin:
     error: "<red>✖ <detail></red>"
     warning: "<yellow>⚠ <detail></yellow>"
     truncated: "<gray><count> muuta havaintoa jätettiin näyttämättä chatissa.</gray>"
+    truncated-one: "<gray><count> muu havainto jätettiin näyttämättä chatissa.</gray>"
   backup:
     working: "<gray>Varmuuskopiointitoiminto suoritetaan taustalla...</gray>"
     busy: "<yellow>Toinen varmuuskopiointitoiminto on jo käynnissä.</yellow>"
@@ -409,17 +428,18 @@ admin:
     created: "<green>Luotiin varmuuskopio <file>.</green>"
     valid: "<green><file> on kelvollinen.</green> <gray><entries> tiedostoa, purettuna <kib> KiB, SHA-256 <sha></gray>"
     invalid: "<red><file> ei ole kelvollinen SurvivalTweaks-varmuuskopio: <reason></red>"
-    failed: "<red>Varmuuskopiotoiminto epäonnistui: <reason></red>"
+    failed: "<red>Varmuuskopiointitoiminto epäonnistui: <reason></red>"
     restore-confirm: "<yellow>Tiedoston <file> palauttaminen korvaa kaikki lisäosan hallitsemat tiedot seuraavalla käynnistyksellä. Ota huoltotila käyttöön, poista kaikki pelaajat ja vahvista konsolista komennolla <red>/survivaltweaks backup restore <file> confirm</red>.</yellow>"
     console-only: "<red>Varmuuskopion palautuksen voi vahvistaa vain palvelinkonsolista.</red>"
     maintenance-required: "<red>Ota SurvivalTweaksin huoltotila käyttöön ennen palautuksen valmistelua.</red>"
-    players-online: "<red>Palautusta ei voi tehdä, kun <count> pelaajaa on linjoilla.</red>"
+    players-online: "<red>Palautusta ei voi tehdä, kun <count> pelaajaa on paikalla.</red>"
+    players-online-one: "<red>Palautusta ei voi tehdä, kun <count> pelaaja on paikalla.</red>"
     restore-staged: "<green>Palautus tiedostosta <file> valmisteltiin (SHA-256 <sha>). Paper sammutetaan. Arkisto tarkistetaan uudelleen ja palautetaan ennen lisäosan tietojen lataamista seuraavalla käynnistyksellä.</green>"
   spawnpool:
     usage: "<red>Käyttö: /survivaltweaks spawnpool [status|refill|validate|clear-prepared]</red>"
     status-header: "<dark_green><bold>Uusien pelaajien sijaintivaranto</bold></dark_green>"
-    status-pool: "<gray>Käytössä: <enabled> • Maailma: <world> • Valmiina: <green><ready></green>/<target> (<available> tallennettu) • TPS: <tps></gray>"
-    status-assignments: "<gray>Odottavia: <pending> • Valmiita: <completed> • Hylättyjä: <retired> • Linjoilla odottavia: <waiting></gray>"
+    status-pool: "<gray>Käytössä: <enabled> • Maailma: <world> • Valmiina: <green><ready></green>/<target> (<available> tallennettua) • TPS: <tps></gray>"
+    status-assignments: "<gray>Odottavia: <pending> • Valmiita: <completed> • Hylättyjä: <retired> • Paikalla odottavia: <waiting></gray>"
     status-runtime: "<gray>Luodaan: <generating> • Tarkistetaan: <validating> • Luotu: <generated> • Korvattu: <replacements> • TPS-taukoja: <pauses> • Hylkäykset: <rejections></gray>"
     refill:
       started: "<green>Sijaintivarannon täydentäminen aloitettiin.</green>"
@@ -427,13 +447,14 @@ admin:
       already-running: "<gray>Uutta aloitussijaintia luodaan jo.</gray>"
       tps-paused: "<yellow>Täydennys on jonossa, mutta odottaa palvelimen TPS:n palautumista.</yellow>"
       disabled: "<yellow>Uusien pelaajien sijoittaminen on poistettu käytöstä asetuksissa.</yellow>"
-      world-unavailable: "<red>Määritetty Overworld ei ole ladattu.</red>"
+      world-unavailable: "<red>Määritettyä ylämaailmaa ei ole ladattu.</red>"
     validate-started: "<gray>Tarkistetaan valmistellut ja odottavat aloitussijainnit taustalla...</gray>"
     validate-running: "<yellow>Sijaintivarannon tarkistus on jo käynnissä.</yellow>"
     validate-cancelled: "<yellow>Sijaintivarannon tarkistus peruttiin asetusten muututtua.</yellow>"
     validate-result: "<gray>Tarkistettu <checked> • Poistettu turvattomia valmisteltuja: <removed> • Turvattomia odottavia: <pending> • Lataamattomia maailmoja: <unavailable> • Virheitä: <errors></gray>"
     clear-confirm: "<yellow>Tämä tyhjentää kaikki varaamattomat valmistellut sijainnit. Vahvista komennolla <red>/survivaltweaks spawnpool clear-prepared confirm</red>.</yellow>"
     cleared: "<green>Tyhjennettiin <count> valmisteltua sijaintia. TPS-tietoinen täydennys aloitettiin.</green>"
+    cleared-one: "<green>Tyhjennettiin <count> valmisteltu sijainti. TPS-tietoinen täydennys aloitettiin.</green>"
     clear-failed: "<red>Valmisteltuja sijainteja ei voitu tyhjentää, koska päivitetyn tilan tallennus epäonnistui.</red>"
 
 ui:
@@ -452,21 +473,21 @@ ui:
     home-coordinates: "<gray>Sijainti: <white><x>, <y>, <z></white></gray>"
     home-action: "<yellow>Napsauta teleportataksesi.</yellow>"
     home-edit-action: "<aqua>Napsauta oikealla muokataksesi.</aqua>"
-    home-description: "<white><description></white>"
-    favorite: "<gold>★ Suosikki</gold>"
-    previous: "<yellow>Edellinen sivu</yellow>"
-    next: "<yellow>Seuraava sivu</yellow>"
-    close: "<red>Sulje</red>"
     home-reorder-action: "<light_purple>Valitse koti Shift-napsautuksella ja sitten sen uusi paikka.</light_purple>"
     home-category: "<gray>Luokka: <category></gray>"
     reorder-selected: "<yellow>Koti <home> valittu. Shift-napsauta sen uutta paikkaa.</yellow>"
     reorder-cancelled: "<gray>Kotien järjestäminen peruttiin.</gray>"
     reordered: "<green>Kotien järjestys päivitettiin.</green>"
+    home-description: "<white><description></white>"
+    favorite: "<gold>★ Suosikki</gold>"
+    previous: "<yellow>Edellinen sivu</yellow>"
+    next: "<yellow>Seuraava sivu</yellow>"
+    close: "<red>Sulje</red>"
   home-editor:
     title: "<dark_green>Muokkaa kotia <home></dark_green>"
     icon: "<green>Kuvake: <icon></green>"
     description: "<green>Muokkaa kuvausta</green>"
-    description-prompt: "<yellow>Kirjoita kodin uusi kuvaus chattiin. Tyhjennä kuvauksella yksi viiva (-).</yellow>"
+    description-prompt: "<yellow>Kirjoita kodin uusi kuvaus chattiin. Tyhjennä kuvaus yhdellä viivalla (-).</yellow>"
     favorite-on: "<gold>Suosikki: käytössä</gold>"
     favorite-off: "<gray>Suosikki: ei käytössä</gray>"
     earlier: "<yellow>Siirrä aikaisemmaksi</yellow>"
@@ -505,6 +526,9 @@ ui:
     trusted-player: "<green><player></green>"
     remove-trusted: "<red>Napsauta poistaaksesi käyttöoikeuden.</red>"
     add-trusted: "<green>Lisää luotettu pelaaja</green>"
+    search-player: "<aqua>Etsi pelaajia</aqua>"
+    search-prompt: "<yellow>Kirjoita paikalla olevan tai aiemmin nähdyn pelaajan nimi.</yellow>"
+    player-not-found: "<red>Sopivaa pelaajaa ei löytynyt.</red>"
     owner: "<green>Omistaja: <player></green>"
     transfer-action: "<yellow>Napsauta siirtääksesi omistajuuden.</yellow>"
     transferred: "<gray>Omistajuus siirrettiin pelaajalle <green><player></green>.</gray>"
@@ -515,19 +539,16 @@ ui:
     mode-action: "<yellow>Napsauta vaihtaaksesi käyttöoikeustilaa.</yellow>"
     mode:
       trusted: "<yellow>Omistaja ja luotetut pelaajat</yellow>"
-      public: "<green>Julkinen</green>"
       deposit_only: "<aqua>Kaikki voivat tallettaa</aqua>"
+      public: "<green>Julkinen</green>"
+    automation-enabled: "<green>Suppiloautomaatio: käytössä</green>"
+    automation-disabled: "<red>Suppiloautomaatio: estetty</red>"
+    automation-action: "<yellow>Vaihda tämän lukon automaatiota napsauttamalla.</yellow>"
     access-allowed: "<green><player> käytti lukkoa</green> <gray><seconds> s sitten</gray>"
     access-denied: "<red>Pelaajan <player> pääsy estettiin</red> <gray><seconds> s sitten</gray>"
     select-trusted: "<dark_green>Valitse luotettu pelaaja</dark_green>"
     select-owner: "<dark_green>Valitse uusi omistaja</dark_green>"
     back: "<yellow>Takaisin</yellow>"
-    search-player: "<aqua>Etsi pelaajia</aqua>"
-    search-prompt: "<yellow>Kirjoita paikalla olevan tai aiemmin nähdyn pelaajan nimi.</yellow>"
-    player-not-found: "<red>Sopivaa pelaajaa ei löytynyt.</red>"
-    automation-enabled: "<green>Suppiloautomaatio: käytössä</green>"
-    automation-disabled: "<red>Suppiloautomaatio: estetty</red>"
-    automation-action: "<yellow>Vaihda tämän lukon automaatiota napsauttamalla.</yellow>"
   lock-list:
     title: "<dark_green>Hallittavat lukot <gray>(<page>/<pages>)</gray></dark_green>"
     lock: "<green><name></green>"
@@ -537,12 +558,26 @@ ui:
     title: "<dark_green>Teleporttipyynnöt (<count>)</dark_green>"
     request: "<green><player></green>"
     expires: "<gray>Vanhenee <seconds> sekunnissa.</gray>"
+    # Inessiivi ei taivu luvun mukaan, joten yksikkömuoto on sama.
+    expires-one: "<gray>Vanhenee <seconds> sekunnissa.</gray>"
     actions: "<green>Vasen: hyväksy</green> <dark_gray>•</dark_gray> <red>Oikea: hylkää</red>"
   unlock-dialog:
     title: "<red>Poistetaanko lukitus?</red>"
     body: "<gray>Tämä poistaa säiliön suojauksen ja kaikkien luotettujen pelaajien käyttöoikeudet.</gray>"
     confirm: "<red>Poista lukitus</red>"
     confirm-tooltip: "<gray>Poista tämän säiliön lukitus pysyvästi.</gray>"
+    cancel: "<green>Peruuta</green>"
+  teleport-dialog:
+    title: "<green>Teleporttipyyntö</green>"
+    body: "<gray>Pelaaja <green><player></green> haluaa teleportata luoksesi.</gray>"
+    accept: "<green>Hyväksy</green>"
+    accept-tooltip: "<gray>Aloita pelaajan teleporttaus luoksesi.</gray>"
+    decline: "<red>Hylkää</red>"
+  lock-transfer-dialog:
+    title: "<red>Siirretäänkö lukon omistajuus?</red>"
+    body: "<gray>Pelaajasta <green><player></green> tulee omistaja. Sinä jäät luotetuksi.</gray>"
+    confirm: "<red>Siirrä omistajuus</red>"
+    confirm-tooltip: "<gray>Anna pelaajalle lukon täysi hallinta.</gray>"
     cancel: "<green>Peruuta</green>"
   home-delete-dialog:
     title: "<red>Poistetaanko tämä koti?</red>"
@@ -554,6 +589,7 @@ ui:
     title: "<dark_green><bold>Survival-keskus</bold></dark_green>"
     homes: "<green>Kodit</green>"
     homes-count: "<gray><count> tallennettua kotia</gray>"
+    homes-count-one: "<gray><count> tallennettu koti</gray>"
     teleports: "<light_purple>Teleporttipyynnöt</light_purple>"
     teleports-description: "<gray>Tarkista saapuneet pyynnöt.</gray>"
     death: "<red>Kuolinpaikka</red>"
@@ -566,8 +602,10 @@ ui:
     journey-description: "<gray>Seuraa vapaaehtoisia esittelyjä ja edistymistäsi.</gray>"
     mail: "<aqua>Postilaatikko</aqua>"
     mail-count: "<gray><count> lukematonta viestiä</gray>"
+    mail-count-one: "<gray><count> lukematon viesti</gray>"
     notifications: "<yellow>Ilmoitukset</yellow>"
     notifications-count: "<gray><count> lukematonta</gray>"
+    notifications-count-one: "<gray><count> lukematon</gray>"
     help: "<aqua>Ohje</aqua>"
     help-description: "<gray>Näytä komennot ja käyttövinkit.</gray>"
     help-command: "<gray>Täydellinen komentolista: <green>/survivaltweaks help</green>.</gray>"
@@ -648,6 +686,7 @@ ui:
       enchanting: "<gray>Avaa lumouspöytä löytääksesi tämän.</gray>"
   mailbox:
     title: "<dark_green>Postilaatikko <gray>(<unread> lukematonta)</gray></dark_green>"
+    title-one: "<dark_green>Postilaatikko <gray>(<unread> lukematon)</gray></dark_green>"
     letter: "<aqua>Viesti pelaajalta <sender></aqua>"
     message: "<white><message></white>"
     actions: "<green>Vasen: lue</green> <dark_gray>•</dark_gray> <aqua>Oikea: vastaa</aqua> <dark_gray>•</dark_gray> <red>Shift-vasen: poista</red> <dark_gray>•</dark_gray> <yellow>Shift-oikea: estä</yellow>"
@@ -662,13 +701,15 @@ ui:
       offline: "<gray>Poissa</gray>"
     world: "<gray>Maailma: <white><world></white></gray>"
     last-seen: "<gray>Viimeksi paikalla <minutes> minuuttia sitten</gray>"
+    last-seen-one: "<gray>Viimeksi paikalla <minutes> minuutti sitten</gray>"
     last-seen-unknown: "<gray>Viimeisin paikallaoloaika ei ole saatavilla</gray>"
     playtime: "<aqua>Pelattu aika</aqua>"
     playtime-value: "<gray><time></gray>"
     first-joined: "<green>Liittyi ensimmäisen kerran</green>"
     first-joined-value: "<gray><days> päivää sitten</gray>"
     homes: "<red>Kodit</red>"
-    homes-value: "<gray><count> tallennettu</gray>"
+    homes-value: "<gray><count> tallennettua</gray>"
+    homes-value-one: "<gray><count> tallennettu</gray>"
     statistics: "<aqua>Tilastopäiväkirja</aqua>"
     statistics-description: "<gray>Selaa tämän pelaajan vaniljatilastoja.</gray>"
     send-mail: "<aqua>Lähetä postia</aqua>"
@@ -698,7 +739,7 @@ ui:
       walked: "Kävelty"
       sprinted: "Juostu"
       crouched: "Hiivitty"
-      swum: "Uituna"
+      swum: "Uitu"
       boat: "Veneellä"
       minecart: "Kaivosvaunulla"
       elytra: "Elytralla"
@@ -714,14 +755,15 @@ ui:
       villager-trades: "Kyläläiskaupat"
       villagers-talked-to: "Puhutellut kyläläiset"
       chests-opened: "Avatut arkut"
-      ender-chests-opened: "Avatut enderarkut"
-      shulkers-opened: "Avatut shulkerlaatikot"
+      ender-chests-opened: "Avatut ender-arkut"
+      shulkers-opened: "Avatut shulker-laatikot"
   welcome-back:
     title: "<dark_green>Tervetuloa takaisin</dark_green>"
     notifications: "<yellow>Ilmoitukset</yellow>"
     mail: "<aqua>Postilaatikko</aqua>"
     teleports: "<light_purple>Teleporttipyynnöt</light_purple>"
     count: "<gray><count> odottavaa tai lukematonta</gray>"
+    count-one: "<gray><count> odottava tai lukematon</gray>"
     death: "<red>Kuolinpaikka</red>"
     death-active: "<yellow>Aktiivinen kuolinpaikka odottaa.</yellow>"
     death-none: "<gray>Ei aktiivista kuolinpaikkaa.</gray>"
@@ -731,10 +773,12 @@ ui:
     away: "<gray>Olit poissa <away>.</gray>"
   notifications:
     title: "<dark_green>Ilmoitukset <gray>(<unread> lukematonta)</gray></dark_green>"
+    title-one: "<dark_green>Ilmoitukset <gray>(<unread> lukematon)</gray></dark_green>"
     age: "<gray><minutes> minuuttia sitten</gray>"
+    age-one: "<gray><minutes> minuutti sitten</gray>"
     unread: "<yellow>Lukematon</yellow>"
     read: "<gray>Luettu</gray>"
-    actions: "<green>Napsauta: merkitse luetuksi</green> <dark_gray>-</dark_gray> <red>Shift: poista</red>"
+    actions: "<green>Napsauta: merkitse luetuksi</green> <dark_gray>•</dark_gray> <red>Shift: poista</red>"
     clear-read: "<red>Poista luetut ilmoitukset</red>"
     type:
       teleport-declined: "<red><actor> hylkäsi teleporttipyyntösi.</red>"
@@ -744,15 +788,3 @@ ui:
       lock-admin-changed: "<yellow><actor> muutti lukkoasi: <detail>.</yellow>"
       death-marker-expired: "<red>Kuolinpaikkasi maailmassa <detail> vanheni.</red>"
       mail: "<aqua><actor> lähetti: <detail></aqua>"
-  teleport-dialog:
-    title: "<green>Teleporttipyyntö</green>"
-    body: "<gray>Pelaaja <green><player></green> haluaa teleportata luoksesi.</gray>"
-    accept: "<green>Hyväksy</green>"
-    accept-tooltip: "<gray>Aloita pelaajan teleporttaus luoksesi.</gray>"
-    decline: "<red>Hylkää</red>"
-  lock-transfer-dialog:
-    title: "<red>Siirretäänkö lukon omistajuus?</red>"
-    body: "<gray>Pelaajasta <green><player></green> tulee omistaja. Sinä jäät luotetuksi.</gray>"
-    confirm: "<red>Siirrä omistajuus</red>"
-    confirm-tooltip: "<gray>Anna pelaajalle lukon täysi hallinta.</gray>"
-    cancel: "<green>Peruuta</green>"

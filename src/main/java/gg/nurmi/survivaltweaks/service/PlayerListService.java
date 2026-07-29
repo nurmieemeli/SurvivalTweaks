@@ -364,7 +364,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         if (current.playerListShowUnreadNotifications() && unread > 0) {
             footer = footer.append(Component.newline()).append(messages.component(
                     player,
-                    "player-list.unread",
+                    MessageService.plural("player-list.unread", unread),
                     Placeholder.unparsed("count", Long.toString(unread))
             ));
         }

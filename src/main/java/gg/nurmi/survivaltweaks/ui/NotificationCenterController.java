@@ -59,17 +59,15 @@ public final class NotificationCenterController implements Listener {
 
     public void open(Player player) {
         List<PlayerNotification> notifications = profiles.load(player.getUniqueId()).notifications();
+        long unread = notifications.stream().filter(value -> !value.read()).count();
         NotificationsHolder holder = new NotificationsHolder(
                 player.getUniqueId(),
                 notifications.stream().limit(45).toList(),
                 server,
                 messages.component(
                         player,
-                        "ui.notifications.title",
-                        Placeholder.unparsed(
-                                "unread",
-                                Long.toString(notifications.stream().filter(value -> !value.read()).count())
-                        )
+                        MessageService.plural("ui.notifications.title", unread),
+                        Placeholder.unparsed("unread", Long.toString(unread))
                 )
         );
         for (int index = 0; index < holder.notifications().size(); index++) {
@@ -90,7 +88,7 @@ public final class NotificationCenterController implements Listener {
                     List.of(
                             messages.component(
                                     player,
-                                    "ui.notifications.age",
+                                    MessageService.plural("ui.notifications.age", minutes),
                                     Placeholder.unparsed("minutes", Long.toString(minutes))
                             ),
                             messages.component(

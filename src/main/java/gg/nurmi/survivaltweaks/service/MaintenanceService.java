@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import io.papermc.paper.event.connection.PlayerConnectionValidateLoginEvent;
+import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -176,22 +177,15 @@ public final class MaintenanceService implements Listener, AutoCloseable {
                 messages.send(
                         player,
                         "maintenance.restart-warning",
-                        Placeholder.component("time", duration(player, remaining))
+                        Placeholder.component("time", durationBefore(player, remaining))
                 );
                 feedback.play(player, FeedbackService.MAINTENANCE_WARNING);
             });
+            Audience console = plugin.getServer().getConsoleSender();
             messages.send(
-                    plugin.getServer().getConsoleSender(),
+                    console,
                     "maintenance.restart-warning",
-                    Placeholder.component(
-                            "time",
-                            messages.component(
-                                    remaining == 1
-                                            ? "maintenance.duration.second"
-                                            : "maintenance.duration.seconds",
-                                    Placeholder.unparsed("count", Long.toString(remaining))
-                            )
-                    )
+                    Placeholder.component("time", durationBefore(console, remaining))
             );
         }
         lastRemaining = remaining;
@@ -215,26 +209,40 @@ public final class MaintenanceService implements Listener, AutoCloseable {
         bar.progress(progress);
     }
 
-    private Component duration(Player player, long seconds) {
+    /** A standalone duration, as shown on its own in the boss bar. */
+    private Component duration(Audience audience, long seconds) {
+        return duration(audience, seconds, "");
+    }
+
+    /**
+     * A duration that is followed by a preposition or postposition. Finnish puts
+     * the counted noun in the genitive there ("5 minuutin kuluttua"), so this
+     * cannot reuse the standalone forms.
+     */
+    private Component durationBefore(Audience audience, long seconds) {
+        return duration(audience, seconds, "-before");
+    }
+
+    private Component duration(Audience audience, long seconds, String suffix) {
         if (seconds >= 3600 && seconds % 3600 == 0) {
             long hours = seconds / 3600;
             return messages.component(
-                    player,
-                    hours == 1 ? "maintenance.duration.hour" : "maintenance.duration.hours",
+                    audience,
+                    "maintenance.duration." + (hours == 1 ? "hour" : "hours") + suffix,
                     Placeholder.unparsed("count", Long.toString(hours))
             );
         }
         if (seconds >= 60 && seconds % 60 == 0) {
             long minutes = seconds / 60;
             return messages.component(
-                    player,
-                    minutes == 1 ? "maintenance.duration.minute" : "maintenance.duration.minutes",
+                    audience,
+                    "maintenance.duration." + (minutes == 1 ? "minute" : "minutes") + suffix,
                     Placeholder.unparsed("count", Long.toString(minutes))
             );
         }
         return messages.component(
-                player,
-                seconds == 1 ? "maintenance.duration.second" : "maintenance.duration.seconds",
+                audience,
+                "maintenance.duration." + (seconds == 1 ? "second" : "seconds") + suffix,
                 Placeholder.unparsed("count", Long.toString(seconds))
         );
     }

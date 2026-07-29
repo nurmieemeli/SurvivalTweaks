@@ -303,7 +303,10 @@ public final class DeathRecoveryService
         if (enforceCooldown && available != null && available.isAfter(now)) {
             messages.send(
                     player,
-                    "death-recovery.compass-cooldown",
+                    MessageService.plural(
+                            "death-recovery.compass-cooldown",
+                            secondsUntil(now, available)
+                    ),
                     Placeholder.unparsed("seconds", Long.toString(secondsUntil(now, available)))
             );
             return;
@@ -784,17 +787,18 @@ public final class DeathRecoveryService
     }
 
     private void sendLocation(Player player, DeathMarker marker, String key) {
+        long minutes = Math.max(
+                1L,
+                Duration.between(clock.instant(), marker.expiresAt()).toMinutes()
+        );
         messages.send(
                 player,
-                key,
+                MessageService.plural(key, minutes),
                 Placeholder.unparsed("world", marker.worldName()),
                 Placeholder.unparsed("x", Long.toString(Math.round(marker.x()))),
                 Placeholder.unparsed("y", Long.toString(Math.round(marker.y()))),
                 Placeholder.unparsed("z", Long.toString(Math.round(marker.z()))),
-                Placeholder.unparsed(
-                        "minutes",
-                        Long.toString(Math.max(1L, Duration.between(clock.instant(), marker.expiresAt()).toMinutes()))
-                )
+                Placeholder.unparsed("minutes", Long.toString(minutes))
         );
     }
 

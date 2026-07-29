@@ -97,7 +97,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
                     List.of(
                             messages.component(
                                     player,
-                                    "ui.teleport-inbox.expires",
+                                    MessageService.plural("ui.teleport-inbox.expires", seconds),
                                     Placeholder.unparsed("seconds", Long.toString(seconds))
                             ),
                             messages.component(player, "ui.teleport-inbox.actions")

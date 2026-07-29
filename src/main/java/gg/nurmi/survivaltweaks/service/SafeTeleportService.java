@@ -100,7 +100,7 @@ public final class SafeTeleportService implements AutoCloseable {
             long seconds = secondsUntil(now, availableAt);
             messages.send(
                     player,
-                    "teleport.safety.cooldown",
+                    MessageService.plural("teleport.safety.cooldown", seconds),
                     Placeholder.unparsed("seconds", Long.toString(seconds))
             );
             showCooldown(player, seconds);
@@ -176,7 +176,7 @@ public final class SafeTeleportService implements AutoCloseable {
         }
         messages.send(
                 player,
-                "teleport.safety.warmup",
+                MessageService.plural("teleport.safety.warmup", warmup.toSeconds()),
                 Placeholder.unparsed("seconds", Long.toString(warmup.toSeconds()))
         );
         feedback.play(player, FeedbackService.TELEPORT_WARMUP);

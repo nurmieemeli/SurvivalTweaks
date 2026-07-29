@@ -128,7 +128,7 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
         messages.send(player, "teleport.sent", Placeholder.unparsed("player", target.getName()));
         messages.send(
                 target,
-                "teleport.received",
+                MessageService.plural("teleport.received", requestLifetime.toSeconds()),
                 Placeholder.unparsed("player", player.getName()),
                 Placeholder.unparsed("seconds", Long.toString(requestLifetime.toSeconds()))
         );

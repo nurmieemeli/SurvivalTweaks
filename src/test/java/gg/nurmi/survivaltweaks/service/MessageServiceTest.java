@@ -76,6 +76,14 @@ class MessageServiceTest {
         assertEquals(Component.text("Hei"), messages.component(player, "greeting"));
     }
 
+    @Test
+    void pluralPicksTheSingularSiblingOnlyForExactlyOne() {
+        assertEquals("ui.hub.mail-count-one", MessageService.plural("ui.hub.mail-count", 1));
+        assertEquals("ui.hub.mail-count", MessageService.plural("ui.hub.mail-count", 0));
+        assertEquals("ui.hub.mail-count", MessageService.plural("ui.hub.mail-count", 2));
+        assertEquals("ui.hub.mail-count", MessageService.plural("ui.hub.mail-count", 97));
+    }
+
     private Player player(Locale locale) {
         Player player = mock(Player.class);
         when(player.locale()).thenReturn(locale);
