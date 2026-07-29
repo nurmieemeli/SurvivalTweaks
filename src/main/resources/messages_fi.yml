@@ -136,7 +136,7 @@ vanilla-guide:
     respawn-anchors: "<gold>Vaniljavinkki:</gold> <gray>Hehkukivi lataa respawn-ankkurin. Se toimii Netherissä ja räjähtää muissa ulottuvuuksissa. <aqua>[Avaa opas]</aqua></gray>"
     lodestones: "<gold>Vaniljavinkki:</gold> <gray>Magneettikiveen käytetty kompassi osoittaa takaisin siihen samassa ulottuvuudessa. <aqua>[Avaa opas]</aqua></gray>"
     anvils: "<gold>Vaniljavinkki:</gold> <gray>Alasimella voi yhdistää, nimetä ja korjata esineitä kokemustasoilla vaniljan kustannusrajojen puitteissa. <aqua>[Avaa opas]</aqua></gray>"
-    enchanting: "<gold>Vaniljavinkki:</gold> <gray>Enintään 15 kirjahyllyä yhden tyhjän lohkon päässä parantaa lumouspöydän lumoustasoja. <aqua>[Avaa opas]</aqua></gray>"
+    enchanting: "<gold>Vaniljavinkki:</gold> <gray>Enintään 15 kirjahyllyä yhden tyhjän palikan päässä parantaa lumouspöydän lumoustasoja. <aqua>[Avaa opas]</aqua></gray>"
 
 mail:
   usage: "<red>Käyttö: /mail [inbox|send|block|unblock] [pelaaja] [viesti]</red>"
@@ -283,7 +283,7 @@ lock:
   extended: "<gray>Uusi säiliö liitettiin olemassa olevaan lukkoon.</gray>"
   conflict: "<red>Säiliön lukkotiedoissa on ristiriita. Pyydä ylläpitäjää tarkistamaan loki.</red>"
   deposit-only: "<yellow>Tähän säiliöön voi tallettaa tavaroita, mutta et voi ottaa niitä.</yellow>"
-  nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 lohkoa.</red>"
+  nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 palikkaa.</red>"
   nearby-created: "<gray>Lukittiin <green><count></green> lähellä olevaa säiliötä.</gray>"
   transferred: "<gray>Lukon omistajuus siirretty pelaajalle <green><player></green>.</gray>"
   transfer-received: "<gray>Olet nyt lukon omistaja, jonka siirsi <green><player></green>.</gray>"
@@ -314,9 +314,9 @@ death-recovery:
   compass-present: "<yellow>Sinulla on jo palautuskompassi.</yellow>"
   compass-cooldown: "<red>Voit pyytää uuden kompassin <seconds> sekunnin kuluttua.</red>"
   compass-cooldown-one: "<red>Voit pyytää uuden kompassin <seconds> sekunnin kuluttua.</red>"
-  actionbar-navigation: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>lohkoa</gray>"
+  actionbar-navigation: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>palikkaa</gray>"
   actionbar-portal: "<light_purple>Käytä portaalia lähellä kohtaa <x>, <z></light_purple> <dark_gray>•</dark_gray> <gray><world></gray>"
-  actionbar-distance: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><distance> lohkon päässä</gray>"
+  actionbar-distance: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><distance> palikan päässä</gray>"
   actionbar-world: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world> <x>, <z></gray>"
   actionbar-expired: "<red>Tämä palautuskompassi on vanhentunut.</red>"
   guide-prompt-enabled: "<green>Kelluva kuolinpaikkaoppaasi on käytössä.</green> <click:run_command:'/deathlocation guide off'><hover:show_text:'Piilota yksityinen opas'><yellow>[Poista käytöstä]</yellow></hover></click>"
@@ -346,7 +346,7 @@ death-messages:
     2: "<gray><player> ei päässyt takaisin pinnalle.</gray>"
     rare: "<gray><player> yritti hengittää veden alla vielä kerran.</gray>"
   suffocation:
-    1: "<gray><player> jäi loukkuun lohkon sisään.</gray>"
+    1: "<gray><player> jäi loukkuun palikan sisään.</gray>"
     2: "<gray><player>-pelaajalta loppui tila hengittää.</gray>"
     rare: "<gray><player> huomasi seinien olevan liian lähellä.</gray>"
   void:
@@ -706,7 +706,7 @@ ui:
       anvils: "<gray>Alasimet</gray>"
       enchanting: "<light_purple>Lumoaminen</light_purple>"
     description:
-      nether-coordinates: "<gray>Yksi Nether-lohko vastaa kahdeksaa Ylämaailman lohkoa.</gray>"
+      nether-coordinates: "<gray>Yksi Nether-palikka vastaa kahdeksaa Ylämaailman palikkaa.</gray>"
       sleep-rules: "<gray>Aika, lähellä olevat hirviöt, etäisyys ja ulottuvuus vaikuttavat sänkyihin.</gray>"
       villager-curing: "<gray>Heikkous ja kultainen omena parantavat zombikyläläisen ajan kuluessa.</gray>"
       respawn-anchors: "<gray>Hehkukivi lataa Netherin respawn-pisteen; muut ulottuvuudet ovat vaarallisia.</gray>"
