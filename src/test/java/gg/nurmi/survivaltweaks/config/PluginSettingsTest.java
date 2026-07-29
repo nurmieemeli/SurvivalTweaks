@@ -54,6 +54,15 @@ class PluginSettingsTest {
         assertTrue(settings.mailEnabled());
         assertEquals(160, settings.mailMaximumLength());
         assertEquals(10, settings.mailMaximumPerHour());
+        assertTrue(settings.treeFellerEnabled());
+        assertTrue(settings.fastLeafDecayEnabled());
+        assertEquals(2, settings.fastLeafDecayDelayTicks());
+        assertEquals(5, settings.fastLeafDecayRadius());
+        assertTrue(settings.petProtectionEnabled());
+        assertTrue(settings.hotbarRefillEnabled());
+        assertTrue(settings.decorationProtectionEnabled());
+        assertTrue(settings.atmosphereAmbientEffects());
+        assertTrue(settings.atmosphereDeathSiteWisps());
     }
 
     @Test
@@ -105,6 +114,15 @@ class PluginSettingsTest {
         config.set("death-recovery.floating-guide.offset", 20.0);
         config.set("custom-death-messages.rare-variant-percent", 101);
         config.set("custom-death-messages.causes.fall", "sometimes");
+
+        assertThrows(IllegalArgumentException.class, () -> PluginSettings.validate(config));
+    }
+
+    @Test
+    void strictValidationRejectsInvalidLeafDecaySettings() {
+        YamlConfiguration config = bundledConfig();
+        config.set("fast-leaf-decay.decay-delay-ticks", 0);
+        config.set("fast-leaf-decay.radius", 17);
 
         assertThrows(IllegalArgumentException.class, () -> PluginSettings.validate(config));
     }

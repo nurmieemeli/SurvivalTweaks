@@ -825,3 +825,6 @@ ui:
       lock-admin-changed: "<yellow><actor> muutti lukkoasi: <detail>.</yellow>"
       death-marker-expired: "<red>Kuolinpaikkasi maailmassa <detail> vanheni.</red>"
       mail: "<aqua><actor> lähetti: <detail></aqua>"
+
+atmosphere:
+  low-durability: "<red>Varoitus: Esineen <item> kestävyys on vähissä (<uses> käyttökertaa jäljellä)!</red>"

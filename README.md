@@ -12,8 +12,9 @@ container locks, death recovery, offline mail, and a unified player hub — all
 localized in Finnish and English, with no scoreboard or permissions plugin
 required.
 
-Everything is optional and configurable, and nothing changes vanilla outcomes:
-the plugin observes play rather than altering recipes, drops, or restrictions.
+Everything is optional and configurable, and the survival loop stays
+recognizably vanilla: there are no custom items, recipes, currencies, or
+progression systems.
 
 ## Requirements
 
@@ -125,6 +126,17 @@ tracker completed by normal play links to `/guide`, which explains Nether
 coordinates, sleep rules, villager curing, respawn anchors, lodestones, anvils,
 and enchanting the first time each is encountered.
 
+**Vanilla conveniences.** Optional tree felling and bounded fast leaf decay
+make forestry less repetitive. Empty block stacks refill from the inventory
+without moving another hotbar or offhand stack. Sneaking remains the deliberate
+way to break item frames, paintings, and armor stands, while tamed pets are
+protected from player friendly fire.
+
+**Atmosphere.** Lightweight client-side sounds and particles accent low tool
+durability, low health, rare pickups, shield blocks, advancements, death sites,
+critical arrows, weather, caves, biomes, and other vanilla interactions. Each
+category can be disabled independently.
+
 **Server touches.** A configurable share of active players can skip the night,
 with AFK players optionally excluded. The multiplayer server list rotates
 MiniMessage announcements and reflects maintenance and restart states without a
@@ -145,6 +157,9 @@ player-, mob-, and weapon-attributed deaths keep Minecraft's native message.
 | `death-recovery` | Markers, respawn compass, floating guide, lifetime, cooldown |
 | `custom-death-messages` | Environmental death lines, rare-variant frequency, per-cause switches |
 | `feedback` | Per-action sounds and particles, each independently configurable |
+| `tree-feller`, `fast-leaf-decay` | Forestry activation, work limits, decay pacing and search radius |
+| `pet-protection`, `hotbar-refill`, `decoration-protection` | Small vanilla interaction safeguards and conveniences |
+| `atmosphere` | Independent ambient, interaction, warning, and trail effects |
 | `chat`, `connection-messages` | Chat format and join/quit messages |
 | `player-list` | Metrics, refresh interval, staff badges, AFK timeout |
 | `sleep` | Threshold, AFK exclusion, weather clearing |

@@ -56,6 +56,41 @@ tree-feller:
   require-sneak: true
   max-blocks: 128
 
+fast-leaf-decay:
+  enabled: true
+  decay-delay-ticks: 2
+  radius: 5
+
+pet-protection:
+  enabled: true
+  prevent-friendly-fire: true
+
+hotbar-refill:
+  enabled: true
+
+decoration-protection:
+  enabled: true
+  require-sneak-to-break: true
+
+atmosphere:
+  durability-warning: true
+  low-health-heartbeat: true
+  ambient-effects: true
+  rare-pickup-effects: true
+  shield-block-effects: true
+  death-site-wisps: true
+  advancement-effects: true
+  thunder-effects: true
+  cave-echoes: true
+  totem-glow: true
+  ender-chest-effects: true
+  arrow-trails: true
+  sprint-dust: true
+  anvil-sparks: true
+  drowning-gasp: true
+  nether-soul-embers: true
+  spyglass-effects: true
+
 ui:
   # Multiple homes open in a safe, paginated chest-style menu.
   home-menu-enabled: true

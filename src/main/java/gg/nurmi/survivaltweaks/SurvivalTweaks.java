@@ -43,6 +43,11 @@ import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
+import gg.nurmi.survivaltweaks.service.AtmosphereService;
+import gg.nurmi.survivaltweaks.service.BlockRefillService;
+import gg.nurmi.survivaltweaks.service.DecorationProtectionService;
+import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
+import gg.nurmi.survivaltweaks.service.PetProtectionService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.service.VanillaGuideService;
@@ -99,6 +104,8 @@ public final class SurvivalTweaks extends JavaPlugin {
     private MaintenanceService maintenance;
     private ServerListService serverList;
     private WelcomeBackController welcomeBack;
+    private FastLeafDecayService fastLeafDecay;
+    private AtmosphereService atmosphere;
     private BukkitTask autosaveTask;
     private BukkitTask purgeTask;
 
@@ -440,7 +447,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 socialProfile,
                 welcomeBack,
                 notifications,
-                experience
+                experience,
+                actionBars
         );
         registerCommands(
                 dialogs,
@@ -473,6 +481,14 @@ public final class SurvivalTweaks extends JavaPlugin {
     public void onDisable() {
         cancel(autosaveTask);
         cancel(purgeTask);
+        if (atmosphere != null) {
+            atmosphere.close();
+            atmosphere = null;
+        }
+        if (fastLeafDecay != null) {
+            fastLeafDecay.close();
+            fastLeafDecay = null;
+        }
         if (diagnostics != null) {
             diagnostics.close();
             diagnostics = null;
@@ -546,7 +562,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             SocialProfileController socialProfile,
             WelcomeBackController welcomeBack,
             NotificationService notifications,
-            PlayerExperienceService experience
+            PlayerExperienceService experience,
+            ActionBarService actionBars
     ) {
         PluginManager pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(
@@ -607,6 +624,13 @@ public final class SurvivalTweaks extends JavaPlugin {
         pluginManager.registerEvents(hub, this);
         pluginManager.registerEvents(journeyMenu, this);
         pluginManager.registerEvents(new TreeFellerService(this, settings), this);
+        fastLeafDecay = new FastLeafDecayService(this, settings);
+        pluginManager.registerEvents(fastLeafDecay, this);
+        pluginManager.registerEvents(new PetProtectionService(settings), this);
+        pluginManager.registerEvents(new BlockRefillService(this, settings), this);
+        pluginManager.registerEvents(new DecorationProtectionService(settings), this);
+        atmosphere = new AtmosphereService(this, settings, messages, actionBars);
+        pluginManager.registerEvents(atmosphere, this);
     }
 
     private void registerCommands(

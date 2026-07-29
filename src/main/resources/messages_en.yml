@@ -824,3 +824,6 @@ ui:
       lock-admin-changed: "<yellow><actor> changed your lock: <detail>.</yellow>"
       death-marker-expired: "<red>Your death marker in <detail> expired.</red>"
       mail: "<aqua><actor> sent: <detail></aqua>"
+
+atmosphere:
+  low-durability: "<red>Warning: <item> is low on durability (<uses> uses remaining)!</red>"
