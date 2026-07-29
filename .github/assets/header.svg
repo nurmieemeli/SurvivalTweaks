@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 548 132" width="548" height="132" role="img" aria-label="SurvivalTweaks — quality-of-life tweaks for a Paper survival server">
+  <title>SurvivalTweaks</title>
+
+  <!-- Isometric grass block -->
+  <g transform="translate(28, 20)">
+    <!-- top face -->
+    <path d="M36 0 L72 21 L36 42 L0 21 Z" fill="#6FBF56"/>
+    <path d="M36 4 L65 21 L36 38 L7 21 Z" fill="#7FCB63"/>
+    <!-- left face -->
+    <path d="M0 21 L36 42 L36 84 L0 63 Z" fill="#6B4A2E"/>
+    <path d="M0 21 L36 42 L36 52 L0 31 Z" fill="#5A9E45"/>
+    <!-- right face -->
+    <path d="M72 21 L72 63 L36 84 L36 42 Z" fill="#8A6239"/>
+    <path d="M72 21 L72 31 L36 52 L36 42 Z" fill="#6FBF56"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="132" y="66"
+        font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, Roboto, Helvetica, Arial, sans-serif"
+        font-size="44" letter-spacing="-0.5">
+    <tspan fill="#5FB85F" font-weight="700">Survival</tspan><tspan fill="#8B949E" font-weight="300">Tweaks</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="134" y="96"
+        font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, Roboto, Helvetica, Arial, sans-serif"
+        font-size="15.5" font-weight="400" fill="#8B949E" letter-spacing="0.2">
+    Quality-of-life tweaks for a Paper survival server
+  </text>
+</svg>
