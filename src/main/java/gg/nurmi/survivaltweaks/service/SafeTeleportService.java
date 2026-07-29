@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -86,6 +87,8 @@ public final class SafeTeleportService implements AutoCloseable {
         this.settings = settings;
         this.actionBars = actionBars;
         this.experience = experience;
+        Objects.requireNonNull(PendingTeleport.class.getName());
+        Objects.requireNonNull(BlockPosition.class.getName());
     }
 
     public boolean ensureAvailable(Player player) {
@@ -133,12 +136,29 @@ public final class SafeTeleportService implements AutoCloseable {
             Component destinationLabel,
             String completionCue
     ) {
+        return begin(
+                player,
+                destination,
+                successMessage,
+                destinationLabel,
+                completionCue,
+                settings.current().teleportWarmup()
+        );
+    }
+
+    public boolean begin(
+            Player player,
+            Supplier<Location> destination,
+            Component successMessage,
+            Component destinationLabel,
+            String completionCue,
+            Duration warmup
+    ) {
         if (!ensureAvailable(player)) {
             return false;
         }
 
         UUID uniqueId = player.getUniqueId();
-        Duration warmup = settings.current().teleportWarmup();
         PendingTeleport teleport = new PendingTeleport(
                 BlockPosition.at(player.getLocation()),
                 player.getLocation().clone(),
@@ -217,13 +237,16 @@ public final class SafeTeleportService implements AutoCloseable {
 
     @Override
     public void close() {
-        pending.forEach((playerId, teleport) -> {
-            teleport.cancelTask();
-            Player player = plugin.getServer().getPlayer(playerId);
-            if (player != null) {
-                teleport.hideBossBar(player);
+        for (Map.Entry<UUID, PendingTeleport> entry : pending.entrySet()) {
+            PendingTeleport teleport = entry.getValue();
+            if (teleport != null) {
+                teleport.cancelTask();
+                Player player = plugin.getServer().getPlayer(entry.getKey());
+                if (player != null) {
+                    teleport.hideBossBar(player);
+                }
             }
-        });
+        }
         pending.clear();
         cooldowns.clear();
         cooldownActionBarSeconds.clear();
@@ -573,6 +596,20 @@ public final class SafeTeleportService implements AutoCloseable {
                                 : teleport.completionCue(),
                         teleport.originLocation(),
                         0.7
+                ));
+            }
+        }
+        World destWorld = player.getWorld();
+        if (destWorld != null) {
+            java.util.Collection<Player> viewers = destWorld.getNearbyPlayers(player.getLocation(), 32);
+            if (viewers != null) {
+                viewers.forEach(viewer -> feedback.playAt(
+                        viewer,
+                        teleport.completionCue().isBlank()
+                                ? FeedbackService.TELEPORT_COMPLETE
+                                : teleport.completionCue(),
+                        player.getLocation(),
+                        1.0
                 ));
             }
         }

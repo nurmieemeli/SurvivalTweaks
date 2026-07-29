@@ -49,6 +49,12 @@ locked-containers:
   max-per-player: 100
   protect-from-explosions: true
   block-automation: true
+  purge-inactive-days: 0
+
+tree-feller:
+  enabled: true
+  require-sneak: true
+  max-blocks: 128
 
 ui:
   # Multiple homes open in a safe, paginated chest-style menu.
@@ -249,6 +255,7 @@ feedback:
 
 chat:
   enabled: true
+  player-name-format: "<name>"
 
 connection-messages:
   enabled: true
@@ -264,9 +271,9 @@ sleep:
 server-list:
   enabled: true
   announcements:
-    - "<gray>Friendly survival with thoughtful quality-of-life features</gray>"
-    - "<gray>Homes, safe teleports, protected containers, and more</gray>"
-    - "<gray>Open your player hub with <green>/survival</green></gray>"
+    - "<gray>Friendly survival with quality-of-life features</gray>"
+    - "<gray>Homes, safe teleports, and protected containers</gray>"
+    - "<gray>Open player hub with <green>/survival</green></gray>"
 
 mentions:
   enabled: true

@@ -31,7 +31,7 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
 
     public static final String ADMIN_PERMISSION = "survivaltweaks.lock.admin";
 
-    private static final List<String> SUBCOMMANDS = List.of("trust", "untrust", "info", "nearby");
+    private static final List<String> SUBCOMMANDS = List.of("trust", "untrust", "transfer", "info", "nearby");
 
     private final Server server;
     private final ContainerBlockResolver resolver;
@@ -114,6 +114,10 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
             updateTrust(player, target.orElseThrow(), action, arguments[1]);
             return true;
         }
+        if (action.equals("transfer") && arguments.length == 2) {
+            transferLock(player, target.orElseThrow(), arguments[1]);
+            return true;
+        }
 
         messages.send(player, "lock.usage");
         return true;
@@ -138,7 +142,7 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
         }
 
         String action = arguments[0].toLowerCase(Locale.ROOT);
-        if (action.equals("trust")) {
+        if (action.equals("trust") || action.equals("transfer")) {
             return matching(
                     server.getOnlinePlayers().stream()
                             .filter(candidate -> !candidate.getUniqueId().equals(player.getUniqueId()))
@@ -212,6 +216,9 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
                             origin.getBlockY() + y,
                             origin.getBlockZ() + z
                     );
+                    if (!isPotentialContainer(block.getType())) {
+                        continue;
+                    }
                     Set<gg.nurmi.survivaltweaks.object.BlockKey> blocks = resolver.blocksFor(block);
                     if (blocks.isEmpty() || blocks.stream().anyMatch(visited::contains)) {
                         continue;
@@ -294,6 +301,32 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void transferLock(Player player, ContainerBlockResolver.Target target, String newOwnerName) {
+        Optional<ContainerLock> selected = managedLock(player, target);
+        if (selected.isEmpty()) {
+            return;
+        }
+
+        ContainerLock lock = selected.orElseThrow();
+        Player newOwner = server.getPlayer(newOwnerName);
+        if (newOwner == null) {
+            messages.send(player, "lock.player-not-found", Placeholder.unparsed("player", newOwnerName));
+            return;
+        }
+        if (newOwner.getUniqueId().equals(lock.ownerId())) {
+            messages.send(player, "lock.already-owner");
+            return;
+        }
+
+        if (locks.transfer(lock, newOwner.getUniqueId())) {
+            notifyAdministrativeChange(player, lock, "transferred:" + newOwner.getName());
+            messages.send(player, "lock.transferred", Placeholder.unparsed("player", newOwner.getName()));
+            messages.send(newOwner, "lock.transfer-received", Placeholder.unparsed("player", player.getName()));
+            feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
+            feedback.play(newOwner, FeedbackService.LOCK_ACCESS_CHANGED);
+        }
+    }
+
     private void showInfo(Player player, ContainerBlockResolver.Target target) {
         Optional<ContainerLock> selected = singleLock(player, target);
         if (selected.isEmpty()) {
@@ -367,5 +400,17 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
                 .filter(value -> value.toLowerCase(Locale.ROOT).startsWith(prefix))
                 .sorted()
                 .toList();
+    }
+
+    private static boolean isPotentialContainer(org.bukkit.Material type) {
+        if (type == null || !type.isBlock() || type.isAir()) {
+            return false;
+        }
+        String name = type.name();
+        return name.endsWith("_CHEST") || name.endsWith("_BARREL") || name.endsWith("_SHULKER_BOX")
+                || type == org.bukkit.Material.HOPPER || type == org.bukkit.Material.DISPENSER || type == org.bukkit.Material.DROPPER
+                || type == org.bukkit.Material.FURNACE || type == org.bukkit.Material.BLAST_FURNACE || type == org.bukkit.Material.SMOKER
+                || type == org.bukkit.Material.BREWING_STAND || type == org.bukkit.Material.JUKEBOX
+                || name.contains("CHEST") || name.contains("BARREL") || name.contains("SHULKER") || name.contains("CRAFTER");
     }
 }

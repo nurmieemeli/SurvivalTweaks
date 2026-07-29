@@ -189,6 +189,10 @@ home:
   list: "<gray>Saatavilla olevat kodit: <green><homes></green></gray>"
   teleported: "<gray>Teleportattu kotiin <green><home></green>.</gray>"
   world-missing: "<red>Kodin <home> maailma (<world>) ei ole ladattu.</red>"
+  invited: "<gray>Kutsuttu pelaaja <green><player></green> kotiisi <green><home></green>.</gray>"
+  uninvited: "<gray>Poistettu pelaajan <green><player></green> pääsy kotiisi <green><home></green>.</gray>"
+  invite-received: "<gray><green><player></green> kutsui sinut kotiinsa <green><home></green>! Siirry komennolla <green>/home <player>:<home></green>.</gray>"
+  not-shared: "<red>Sinulla ei ole pääsyä kyseiseen kotiin.</red>"
 
 set-home:
   usage: "<red>Käyttö: /sethome [nimi]</red>"
@@ -281,6 +285,9 @@ lock:
   deposit-only: "<yellow>Tähän säiliöön voi tallettaa tavaroita, mutta et voi ottaa niitä.</yellow>"
   nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 lohkoa.</red>"
   nearby-created: "<gray>Lukittiin <green><count></green> lähellä olevaa säiliötä.</gray>"
+  transferred: "<gray>Lukon omistajuus siirretty pelaajalle <green><player></green>.</gray>"
+  transfer-received: "<gray>Olet nyt lukon omistaja, jonka siirsi <green><player></green>.</gray>"
+  already-owner: "<red>Kyseinen pelaaja on jo tämän lukon omistaja.</red>"
   actionbar:
     deposit-only: "<yellow>Talletusoikeus</yellow> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
     owner: "<green>🔒 Oma lukittu säiliösi</green> <dark_gray>•</dark_gray> <gray>/lock info</gray>"
@@ -288,8 +295,14 @@ lock:
     denied: "<red>🔒 Lukittu</red> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
 
 death-recovery:
-  usage: "<red>Käyttö: /deathlocation [guide [on|off]|dismiss]</red>"
+  usage: "<red>Käyttö: /deathlocation [info|guide [on|off]|dismiss]</red>"
   none: "<red>Sinulla ei ole aktiivista kuolinmerkintää.</red>"
+  info: |-
+    <gray><b><red>☠ Kuolinpaikan Tiedot</red></b></gray>
+    <gray>Sijainti: <green><world> <x>, <y>, <z></green></gray>
+    <gray>Syystiedot: <white><cause></white></gray>
+    <gray>Etäisyys: <white><distance></white></gray>
+    <gray>Vanhenee: <yellow><minutes>min <seconds>s</yellow></gray>
   recorded: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   recorded-one: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   location: "<gray>Kuolinpaikkasi on <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
@@ -316,8 +329,8 @@ death-recovery:
   guide-destination: "<red>☠ Tarkka kuolinpaikka</red> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-portal: "<light_purple>◇ Portaalireitti</light_purple> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-world: "<red>☠ Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world></gray>"
-  reached: "<green>Saavuit kuolinpaikallesi. Palautuskompassi poistettiin.</green>"
-  dismissed: "<gray>Kuolinpaikkasi ja palautuskompassi poistettiin.</gray>"
+  reached: "<green>Saavuit kuolinpaikallesi. Kelluva opas poistettiin.</green>"
+  dismissed: "<gray>Kuolinpaikkasi kelluva opas poistettiin.</gray>"
 
 death-messages:
   fall:
@@ -375,7 +388,7 @@ onboarding:
   language: "<gray>SurvivalTweaks seuraa Minecraft-kieltäsi automaattisesti. Voit vaihtaa sen komennolla <green>/survival</green>.</gray>"
   home: "<gray>Ensimmäinen kotisi on valmis. Avaa ja muokkaa sitä komennolla <green>/home</green> tai <green>/survival</green>.</gray>"
   teleport-inbox: "<gray>Uudet teleporttipyynnöt löytyvät komennolla <green>/teleportinbox</green>.</gray>"
-  death-recovery: "<gray>Pidä palautuskompassia kädessä nähdäksesi suunnan tai napsauta sillä ilmaa oikealla vaihtaaksesi yksityisen kelluvan oppaan. Poista merkintä komennolla <green>/deathlocation dismiss</green>.</gray>"
+  death-recovery: "<gray>Seuraa kelluvaa opasta päästäksesi kuolinpaikallesi. Poista merkintä komennolla <green>/deathlocation dismiss</green>.</gray>"
   lock-control: "<gray>Avaa lukon hallinta hiipimällä ja napsauttamalla lukittua säiliötä oikealla.</gray>"
 
 notifications:

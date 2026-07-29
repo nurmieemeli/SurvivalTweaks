@@ -7,6 +7,7 @@ import org.bukkit.World;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public record Home(
@@ -23,7 +24,8 @@ public record Home(
         boolean favorite,
         int order,
         HomeCategory category,
-        HomeArrivalStyle arrivalStyle
+        HomeArrivalStyle arrivalStyle,
+        Set<UUID> sharedWith
 ) {
 
     public Home(
@@ -38,7 +40,7 @@ public record Home(
     ) {
         this(
                 name, worldId, worldName, x, y, z, yaw, pitch,
-                Material.ENDER_PEARL, "", false, 0, HomeCategory.OTHER, HomeArrivalStyle.DEFAULT
+                Material.ENDER_PEARL, "", false, 0, HomeCategory.OTHER, HomeArrivalStyle.DEFAULT, Set.of()
         );
     }
 
@@ -58,7 +60,29 @@ public record Home(
     ) {
         this(
                 name, worldId, worldName, x, y, z, yaw, pitch,
-                icon, description, favorite, order, HomeCategory.OTHER, HomeArrivalStyle.DEFAULT
+                icon, description, favorite, order, HomeCategory.OTHER, HomeArrivalStyle.DEFAULT, Set.of()
+        );
+    }
+
+    public Home(
+            String name,
+            UUID worldId,
+            String worldName,
+            double x,
+            double y,
+            double z,
+            float yaw,
+            float pitch,
+            Material icon,
+            String description,
+            boolean favorite,
+            int order,
+            HomeCategory category,
+            HomeArrivalStyle arrivalStyle
+    ) {
+        this(
+                name, worldId, worldName, x, y, z, yaw, pitch,
+                icon, description, favorite, order, category, arrivalStyle, Set.of()
         );
     }
 
@@ -69,6 +93,7 @@ public record Home(
         description = description == null ? "" : description.strip();
         category = category == null ? HomeCategory.OTHER : category;
         arrivalStyle = arrivalStyle == null ? HomeArrivalStyle.DEFAULT : arrivalStyle;
+        sharedWith = sharedWith == null ? Set.of() : Set.copyOf(sharedWith);
     }
 
     public static Home at(String name, Location location) {
@@ -92,32 +117,52 @@ public record Home(
         );
     }
 
+    public Home withArrivalStyle(HomeArrivalStyle updatedStyle) {
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, category, updatedStyle, sharedWith);
+    }
+
+    public Home withSharedWith(Set<UUID> updatedSharedWith) {
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, category, arrivalStyle, updatedSharedWith);
+    }
+
+    public Home invite(UUID playerId) {
+        Set<UUID> updated = new java.util.LinkedHashSet<>(sharedWith);
+        updated.add(playerId);
+        return withSharedWith(updated);
+    }
+
+    public Home uninvite(UUID playerId) {
+        Set<UUID> updated = new java.util.LinkedHashSet<>(sharedWith);
+        updated.remove(playerId);
+        return withSharedWith(updated);
+    }
+
+    public boolean isSharedWith(UUID playerId) {
+        return sharedWith.contains(playerId);
+    }
+
     public Home withIcon(Material updatedIcon) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, updatedIcon, description, favorite, order, category, arrivalStyle);
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, updatedIcon, description, favorite, order, category, arrivalStyle, sharedWith);
     }
 
     public Home withDescription(String updatedDescription) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, updatedDescription, favorite, order, category, arrivalStyle);
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, updatedDescription, favorite, order, category, arrivalStyle, sharedWith);
     }
 
     public Home withFavorite(boolean updatedFavorite) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, updatedFavorite, order, category, arrivalStyle);
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, updatedFavorite, order, category, arrivalStyle, sharedWith);
     }
 
     public Home withOrder(int updatedOrder) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, updatedOrder, category, arrivalStyle);
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, updatedOrder, category, arrivalStyle, sharedWith);
     }
 
     public Home withName(String updatedName) {
-        return copy(updatedName, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, category, arrivalStyle);
+        return copy(updatedName, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, category, arrivalStyle, sharedWith);
     }
 
     public Home withCategory(HomeCategory updatedCategory) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, updatedCategory, arrivalStyle);
-    }
-
-    public Home withArrivalStyle(HomeArrivalStyle updatedStyle) {
-        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, category, updatedStyle);
+        return copy(name, worldId, worldName, x, y, z, yaw, pitch, icon, description, favorite, order, updatedCategory, arrivalStyle, sharedWith);
     }
 
     public Home withLocation(Location location) {
@@ -126,7 +171,7 @@ public record Home(
                 name, world.getUID(), world.getName(),
                 location.getX(), location.getY(), location.getZ(),
                 location.getYaw(), location.getPitch(),
-                icon, description, favorite, order, category, arrivalStyle
+                icon, description, favorite, order, category, arrivalStyle, sharedWith
         );
     }
 
@@ -163,11 +208,12 @@ public record Home(
             boolean favorite,
             int order,
             HomeCategory category,
-            HomeArrivalStyle arrivalStyle
+            HomeArrivalStyle arrivalStyle,
+            Set<UUID> sharedWith
     ) {
         return new Home(
                 name, worldId, worldName, x, y, z, yaw, pitch,
-                icon, description, favorite, order, category, arrivalStyle
+                icon, description, favorite, order, category, arrivalStyle, sharedWith
         );
     }
 }

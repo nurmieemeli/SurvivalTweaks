@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.command;
 
+import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.MailService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.ui.MailboxController;
@@ -23,6 +24,7 @@ public final class MailCommand implements CommandExecutor, TabCompleter {
     private final MailService mail;
     private final MailboxController mailbox;
     private final MessageService messages;
+    private final SettingsService settings;
 
     public MailCommand(
             Server server,
@@ -30,10 +32,21 @@ public final class MailCommand implements CommandExecutor, TabCompleter {
             MailboxController mailbox,
             MessageService messages
     ) {
+        this(server, mail, mailbox, messages, null);
+    }
+
+    public MailCommand(
+            Server server,
+            MailService mail,
+            MailboxController mailbox,
+            MessageService messages,
+            SettingsService settings
+    ) {
         this.server = server;
         this.mail = mail;
         this.mailbox = mailbox;
         this.messages = messages;
+        this.settings = settings;
     }
 
     @Override
@@ -78,9 +91,9 @@ public final class MailCommand implements CommandExecutor, TabCompleter {
                     changed
                             ? (block ? "mail.blocked" : "mail.unblocked")
                             : (block ? "mail.already-blocked" : "mail.not-blocked"),
-                    Placeholder.unparsed(
+                    Placeholder.component(
                             "player",
-                            target.getName() == null ? arguments[1] : target.getName()
+                            messages.formatPlayerName(target.getName() == null ? arguments[1] : target.getName(), settings)
                     )
             );
             return true;

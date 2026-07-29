@@ -67,16 +67,18 @@ public final class CustomDeathMessageService implements Listener {
             return;
         }
 
-        Component vanillaDeathMessage = event.deathMessage();
-        if (event.deathScreenMessageOverride() == null) {
-            event.deathScreenMessageOverride(vanillaDeathMessage);
-        }
-        event.setShowDeathMessages(false);
-
         CustomDeathCause cause = customCause.orElseThrow();
         boolean rare = random.nextInt(100) < current.customDeathMessageRareVariantPercent();
         String key = cause.messageKey(random.nextInt(2) + 1, rare);
-        TagResolver playerName = Placeholder.component("player", Component.text(player.getName()));
+        Component formattedName = messages.formatPlayerName(player, settings);
+        if (formattedName == null) {
+            formattedName = Component.text(player.getName());
+        }
+        TagResolver playerName = Placeholder.component("player", formattedName);
+
+        Component customMessage = messages.component(player, key, playerName);
+        event.deathScreenMessageOverride(customMessage);
+        event.setShowDeathMessages(false);
 
         server.getOnlinePlayers().stream()
                 .filter(viewer -> viewer.canSee(player))

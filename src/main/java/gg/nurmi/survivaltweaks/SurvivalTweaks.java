@@ -44,6 +44,7 @@ import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
+import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.service.VanillaGuideService;
 import gg.nurmi.survivaltweaks.storage.ProfileStore;
 import gg.nurmi.survivaltweaks.storage.ContainerLockStore;
@@ -293,7 +294,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback,
                 safeTeleports,
                 clock,
-                notifications
+                notifications,
+                settings
         );
         TeleportInboxController inbox = new TeleportInboxController(
                 getServer(),
@@ -561,6 +563,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 this
         );
         pluginManager.registerEvents(new ChatListener(messages, settings, mentions), this);
+        pluginManager.registerEvents(newPlayerSpawns, this);
         pluginManager.registerEvents(playerList, this);
         pluginManager.registerEvents(sleepVotes, this);
         pluginManager.registerEvents(maintenance, this);
@@ -603,6 +606,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         pluginManager.registerEvents(lockList, this);
         pluginManager.registerEvents(hub, this);
         pluginManager.registerEvents(journeyMenu, this);
+        pluginManager.registerEvents(new TreeFellerService(this, settings), this);
     }
 
     private void registerCommands(
@@ -638,7 +642,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         ));
         register("teleportaccept", teleportAccept);
         register("teleportinbox", inbox);
-        register("home", new HomeCommand(profiles, messages, homeMenu));
+        register("home", new HomeCommand(profiles, messages, homeMenu, getServer(), feedback));
         register("sethome", new SetHomeCommand(profiles, messages, feedback, settings, onboarding));
         register("deletehome", new DeleteHomeCommand(profiles, messages, feedback));
         register("shout", new ShoutCommand(getServer(), messages, feedback));
@@ -676,7 +680,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         register("deathlocation", deathRecovery);
         register("afk", new AfkCommand(playerList, messages));
-        register("mail", new MailCommand(getServer(), mail, mailbox, messages));
+        register("mail", new MailCommand(getServer(), mail, mailbox, messages, settings));
         register("stats", statistics);
         register("profile", socialProfile);
         register("welcome", welcomeBack);

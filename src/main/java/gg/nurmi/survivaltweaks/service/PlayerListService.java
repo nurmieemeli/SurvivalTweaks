@@ -13,6 +13,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
@@ -197,6 +200,26 @@ public final class PlayerListService implements Listener, AutoCloseable {
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        activity(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        activity(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player damager) {
+            activity(damager);
+        }
+        if (event.getEntity() instanceof Player victim) {
+            activity(victim);
+        }
+    }
+
     public void refresh() {
         PluginSettings current = settings.current();
         if (!current.playerListEnabled()) {
@@ -240,8 +263,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             Player player = players.get(index);
             UUID playerId = player.getUniqueId();
             online.add(playerId);
-            boolean staffVisible = current.playerListStaffBadges()
-                    && player.hasPermission("survivaltweaks.playerlist.staff");
+            boolean staffVisible = false;
             boolean awayVisible = current.afkIndicatorsEnabled() && afk.isAfk(playerId);
             RowState state = new RowState(
                     index,
@@ -255,17 +277,18 @@ public final class PlayerListService implements Listener, AutoCloseable {
             if (state.equals(rowStates.put(playerId, state))) {
                 continue;
             }
+            Component formattedName = messages.formatPlayerName(player, settings);
+            player.customName(formattedName);
+            player.setCustomNameVisible(true);
             player.setPlayerListOrder(index);
-            Component staff = staffVisible
-                    ? messages.component("player-list.staff-marker")
-                    : Component.empty();
+            Component staff = Component.empty();
             Component away = awayVisible
                     ? messages.component("player-list.afk-marker")
                     : Component.empty();
             player.playerListName(messages.component(
                     "player-list.entry",
                     Placeholder.component("world", worldMarker(player.getWorld())),
-                    Placeholder.unparsed("player", player.getName()),
+                    Placeholder.component("player", formattedName),
                     Placeholder.component("staff", staff),
                     Placeholder.component("afk", away)
             ));

@@ -42,4 +42,18 @@ class DeathRecoveryGuideTest {
         assertEquals(64.0, guide.getY(), 0.000_001);
         assertEquals(0.0, guide.getZ(), 0.000_001);
     }
+
+    @Test
+    void calculatesCorrectDirectionalArrows() {
+        Location player = new Location(null, 0, 64, 0, 180.0f, 0.0f); // Facing North (-Z)
+
+        assertEquals("↑", DeathRecoveryService.directionArrow(player, new Location(null, 0, 64, -10)));
+        assertEquals("↓", DeathRecoveryService.directionArrow(player, new Location(null, 0, 64, 10)));
+        assertEquals("→", DeathRecoveryService.directionArrow(player, new Location(null, 10, 64, 0)));
+        assertEquals("←", DeathRecoveryService.directionArrow(player, new Location(null, -10, 64, 0)));
+        assertEquals("↗", DeathRecoveryService.directionArrow(player, new Location(null, 10, 64, -10)));
+        assertEquals("↖", DeathRecoveryService.directionArrow(player, new Location(null, -10, 64, -10)));
+        assertEquals("↘", DeathRecoveryService.directionArrow(player, new Location(null, 10, 64, 10)));
+        assertEquals("↙", DeathRecoveryService.directionArrow(player, new Location(null, -10, 64, 10)));
+    }
 }

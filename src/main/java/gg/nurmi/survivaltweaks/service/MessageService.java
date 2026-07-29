@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.service;
 
+import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.LanguagePreference;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
@@ -108,6 +109,22 @@ public final class MessageService {
 
     public String plain(Audience audience, String key, TagResolver... placeholders) {
         return PlainTextComponentSerializer.plainText().serialize(component(audience, key, placeholders));
+    }
+
+    public Component formatPlayerName(Player player, SettingsService settings) {
+        return formatPlayerName(player == null ? "" : player.getName(), settings);
+    }
+
+    public Component formatPlayerName(String name, SettingsService settings) {
+        String template = settings != null ? settings.current().playerNameFormat() : "<name>";
+        if (template == null || template.isBlank()) {
+            template = "<name>";
+        }
+        try {
+            return miniMessage.deserialize(template, Placeholder.unparsed("name", name == null ? "" : name));
+        } catch (RuntimeException exception) {
+            return Component.text(name == null ? "" : name);
+        }
     }
 
     public boolean migratedLegacyMessages() {

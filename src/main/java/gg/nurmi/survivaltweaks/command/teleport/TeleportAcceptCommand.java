@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.command.teleport;
 
+import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.TeleportRequest;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
@@ -31,6 +32,7 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
     private final SafeTeleportService safeTeleports;
     private final Clock clock;
     private final NotificationService notifications;
+    private final SettingsService settings;
     private TeleportInboxController inbox;
 
     public TeleportAcceptCommand(
@@ -42,6 +44,19 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
             Clock clock,
             NotificationService notifications
     ) {
+        this(server, requests, messages, feedback, safeTeleports, clock, notifications, null);
+    }
+
+    public TeleportAcceptCommand(
+            Server server,
+            TeleportRequestService requests,
+            MessageService messages,
+            FeedbackService feedback,
+            SafeTeleportService safeTeleports,
+            Clock clock,
+            NotificationService notifications,
+            SettingsService settings
+    ) {
         this.server = server;
         this.requests = requests;
         this.messages = messages;
@@ -49,6 +64,7 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
         this.safeTeleports = safeTeleports;
         this.clock = clock;
         this.notifications = notifications;
+        this.settings = settings;
     }
 
     public void inbox(TeleportInboxController inbox) {
@@ -136,12 +152,12 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
                 messages.component(
                         requestingPlayer,
                         "teleport.completed",
-                        Placeholder.unparsed("player", recipient.getName())
+                        Placeholder.component("player", messages.formatPlayerName(recipient, settings))
                 ),
                 messages.component(
                         requestingPlayer,
                         "teleport.destination.player",
-                        Placeholder.unparsed("player", recipient.getName())
+                        Placeholder.component("player", messages.formatPlayerName(recipient, settings))
                 ),
                 FeedbackService.TELEPORT_COMPLETE
         );
@@ -155,7 +171,7 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
         messages.send(
                 recipient,
                 "teleport.accept.accepted",
-                Placeholder.unparsed("player", requestingPlayer.getName())
+                Placeholder.component("player", messages.formatPlayerName(requestingPlayer, settings))
         );
         feedback.play(recipient, FeedbackService.UI_CLICK);
     }

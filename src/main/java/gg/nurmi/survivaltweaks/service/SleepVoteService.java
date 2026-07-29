@@ -51,6 +51,7 @@ public final class SleepVoteService implements Listener, AutoCloseable {
         this.actionBars = actionBars;
         this.experience = experience;
         this.playerList = playerList;
+        java.util.Objects.requireNonNull(ComponentProgress.class.getName());
     }
 
     public void start() {

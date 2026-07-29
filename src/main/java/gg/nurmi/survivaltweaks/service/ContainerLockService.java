@@ -179,6 +179,24 @@ public final class ContainerLockService implements AutoCloseable {
         return changed;
     }
 
+    public int purgeInactiveLocks(org.bukkit.Server server, int inactiveDays) {
+        if (server == null || inactiveDays <= 0) {
+            return 0;
+        }
+        long thresholdMillis = System.currentTimeMillis() - (inactiveDays * 86_400_000L);
+        List<ContainerLock> toRemove = locksById.values().stream()
+                .filter(lock -> {
+                    org.bukkit.OfflinePlayer owner = server.getOfflinePlayer(lock.ownerId());
+                    return owner.hasPlayedBefore()
+                            && !owner.isOnline()
+                            && owner.getLastSeen() > 0
+                            && owner.getLastSeen() < thresholdMillis;
+                })
+                .toList();
+        toRemove.forEach(this::remove);
+        return toRemove.size();
+    }
+
     public void recordAccess(ContainerLock lock, UUID playerId, boolean allowed, Instant when) {
         java.util.ArrayDeque<AccessAttempt> attempts = accessHistory.computeIfAbsent(
                 lock.id(),

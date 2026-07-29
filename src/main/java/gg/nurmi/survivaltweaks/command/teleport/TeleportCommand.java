@@ -101,12 +101,12 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
                     messages.component(
                             player,
                             "teleport.completed",
-                            Placeholder.unparsed("player", target.getName())
+                            Placeholder.component("player", messages.formatPlayerName(target, settings))
                     ),
                     messages.component(
                             player,
                             "teleport.destination.player",
-                            Placeholder.unparsed("player", target.getName())
+                            Placeholder.component("player", messages.formatPlayerName(target, settings))
                     ),
                     FeedbackService.TELEPORT_COMPLETE
             );
@@ -125,11 +125,11 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
                 clock.instant(),
                 requestLifetime
         ).orElseThrow();
-        messages.send(player, "teleport.sent", Placeholder.unparsed("player", target.getName()));
+        messages.send(player, "teleport.sent", Placeholder.component("player", messages.formatPlayerName(target, settings)));
         messages.send(
                 target,
                 MessageService.plural("teleport.received", requestLifetime.toSeconds()),
-                Placeholder.unparsed("player", player.getName()),
+                Placeholder.component("player", messages.formatPlayerName(player, settings)),
                 Placeholder.unparsed("seconds", Long.toString(requestLifetime.toSeconds()))
         );
         feedback.play(player, FeedbackService.UI_CLICK);

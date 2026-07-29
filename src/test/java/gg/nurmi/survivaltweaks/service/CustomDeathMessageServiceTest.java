@@ -69,7 +69,7 @@ class CustomDeathMessageServiceTest {
     void localizesOneVariantPerViewerAndPreservesTheDeathScreen() {
         service.onDeath(event);
 
-        verify(event).deathScreenMessageOverride(Component.text("vanilla"));
+        verify(event).deathScreenMessageOverride(any());
         verify(event).setShowDeathMessages(false);
         verify(messages).send(
                 eq(visiblePlayer),

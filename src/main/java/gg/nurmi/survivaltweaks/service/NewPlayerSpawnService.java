@@ -13,6 +13,9 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -35,7 +38,7 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public final class NewPlayerSpawnService implements AutoCloseable {
+public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     private static final long RETRY_DELAY_TICKS = 40L;
     private static final long GENERATION_RETRY_DELAY_TICKS = 200L;
@@ -108,6 +111,12 @@ public final class NewPlayerSpawnService implements AutoCloseable {
         assignments.putAll(state.assignments());
         retired.addAll(state.retired());
         awaitingReplacement.addAll(state.awaitingReplacement());
+        Objects.requireNonNull(PoolStatus.class.getName());
+        Objects.requireNonNull(RefillResult.class.getName());
+        Objects.requireNonNull(ClearResult.class.getName());
+        Objects.requireNonNull(ValidationReport.class.getName());
+        Objects.requireNonNull(Rejection.class.getName());
+        Objects.requireNonNull(LocationKey.class.getName());
     }
 
     public void start() {
@@ -143,6 +152,67 @@ public final class NewPlayerSpawnService implements AutoCloseable {
         waitingPlayers.remove(playerId);
         teleportingPlayers.remove(playerId);
         teleportAttempts.remove(playerId);
+    }
+
+    @EventHandler
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        if (!settings.current().newPlayerSpawnEnabled()) {
+            return;
+        }
+        if (event.isBedSpawn() || event.isAnchorSpawn()) {
+            return;
+        }
+        Player player = event.getPlayer();
+        NewPlayerSpawnAssignment assignment = assignments.get(player.getUniqueId());
+        if (assignment == null) {
+            return;
+        }
+        resolveWorld(assignment.location()).ifPresent(world -> {
+            Location loc = findSafeRespawnLocation(world, assignment.location());
+            if (loc != null) {
+                event.setRespawnLocation(loc);
+            }
+        });
+    }
+
+    private Location findSafeRespawnLocation(World world, NewPlayerSpawnLocation spawnLoc) {
+        Location base = spawnLoc.toLocation(world);
+        if (isSafeSpawnLocation(world, base.getBlockX(), base.getBlockY(), base.getBlockZ())) {
+            return base;
+        }
+        for (int r = 1; r <= 16; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) {
+                        continue;
+                    }
+                    int x = spawnLoc.x() + dx;
+                    int z = spawnLoc.z() + dz;
+                    if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+                        continue;
+                    }
+                    int y = world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
+                    if (isSafeSpawnLocation(world, x, y + 1, z)) {
+                        return new Location(
+                                world,
+                                x + 0.5,
+                                y + 1,
+                                z + 0.5,
+                                spawnLoc.yaw(),
+                                0.0f
+                        );
+                    }
+                }
+            }
+        }
+        return base;
+    }
+
+    private boolean isSafeSpawnLocation(World world, int x, int y, int z) {
+        Block feet = world.getBlockAt(x, y, z);
+        Block head = world.getBlockAt(x, y + 1, z);
+        Block ground = world.getBlockAt(x, y - 1, z);
+        return feet.isPassable() && head.isPassable() && ground.getType().isSolid() && !DANGEROUS_GROUND.contains(ground.getType());
     }
 
     public void reconfigure() {

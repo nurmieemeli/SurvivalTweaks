@@ -190,6 +190,10 @@ home:
   list: "<gray>Available homes: <green><homes></green></gray>"
   teleported: "<gray>Teleported to home <green><home></green>.</gray>"
   world-missing: "<red>The world for home <home> (<world>) is not loaded.</red>"
+  invited: "<gray>Invited <green><player></green> to your home <green><home></green>.</gray>"
+  uninvited: "<gray>Removed <green><player></green>'s access to your home <green><home></green>.</gray>"
+  invite-received: "<gray><green><player></green> invited you to their home <green><home></green>! Teleport with <green>/home <player>:<home></green>.</gray>"
+  not-shared: "<red>You do not have access to that home.</red>"
 
 set-home:
   usage: "<red>Usage: /sethome [name]</red>"
@@ -282,6 +286,9 @@ lock:
   deposit-only: "<yellow>This container accepts deposits, but you cannot remove items.</yellow>"
   nearby-radius: "<red>The nearby-lock radius must be between 1 and 8 blocks.</red>"
   nearby-created: "<gray>Locked <green><count></green> nearby containers.</gray>"
+  transferred: "<gray>Transferred lock ownership to <green><player></green>.</gray>"
+  transfer-received: "<gray>You are now the owner of a lock transferred by <green><player></green>.</gray>"
+  already-owner: "<red>That player is already the owner of this lock.</red>"
   actionbar:
     deposit-only: "<yellow>Deposit access</yellow> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
     owner: "<green>🔒 Your locked container</green> <dark_gray>•</dark_gray> <gray>/lock info</gray>"
@@ -289,8 +296,14 @@ lock:
     denied: "<red>🔒 Locked</red> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
 
 death-recovery:
-  usage: "<red>Usage: /deathlocation [guide [on|off]|dismiss]</red>"
+  usage: "<red>Usage: /deathlocation [info|guide [on|off]|dismiss]</red>"
   none: "<red>You do not have an active death marker.</red>"
+  info: |-
+    <gray><b><red>☠ Death Marker Info</red></b></gray>
+    <gray>Location: <green><world> <x>, <y>, <z></green></gray>
+    <gray>Cause: <white><cause></white></gray>
+    <gray>Distance: <white><distance></white></gray>
+    <gray>Expires in: <yellow><minutes>m <seconds>s</yellow></gray>
   recorded: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minutes.</gray>"
   recorded-one: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minute.</gray>"
   location: "<gray>Your death marker is at <green><world> <x>, <y>, <z></green> and expires in <minutes> minutes.</gray>"
@@ -317,8 +330,8 @@ death-recovery:
   guide-destination: "<red>☠ Exact death site</red> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-portal: "<light_purple>◇ Portal route</light_purple> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-world: "<red>☠ Death location</red> <dark_gray>•</dark_gray> <gray><world></gray>"
-  reached: "<green>You reached your death marker. The recovery compass was cleared.</green>"
-  dismissed: "<gray>Your death marker and its recovery compass were dismissed.</gray>"
+  reached: "<green>You reached your death marker. The floating guide was cleared.</green>"
+  dismissed: "<gray>Your death marker and floating guide were dismissed.</gray>"
 
 death-messages:
   fall:
@@ -376,7 +389,7 @@ onboarding:
   language: "<gray>SurvivalTweaks follows your Minecraft language automatically. You can override it in <green>/survival</green>.</gray>"
   home: "<gray>Your first home is ready. Open and customize it from <green>/home</green> or <green>/survival</green>.</gray>"
   teleport-inbox: "<gray>New teleport requests are collected in <green>/teleportinbox</green>.</gray>"
-  death-recovery: "<gray>Hold your recovery compass for navigation or right-click air with it to toggle a private floating guide. Use <green>/deathlocation dismiss</green> when finished.</gray>"
+  death-recovery: "<gray>Follow the floating guide to navigate to your death marker. Use <green>/deathlocation dismiss</green> when finished.</gray>"
   lock-control: "<gray>Sneak-right-click your locked container to open its control panel.</gray>"
 
 notifications:

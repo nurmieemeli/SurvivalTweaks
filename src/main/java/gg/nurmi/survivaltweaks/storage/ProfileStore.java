@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.time.Instant;
 import java.util.logging.Level;
@@ -130,7 +131,8 @@ public final class ProfileStore {
                                 HomeArrivalStyle.class,
                                 values.get("arrival-style"),
                                 HomeArrivalStyle.DEFAULT
-                        )
+                        ),
+                        parseUuidSet(values.get("shared-with"))
                 ));
             } catch (RuntimeException exception) {
                 warnInvalidHome(file, exception);
@@ -180,6 +182,7 @@ public final class ProfileStore {
         values.put("order", home.order());
         values.put("category", home.category().name());
         values.put("arrival-style", home.arrivalStyle().name());
+        values.put("shared-with", home.sharedWith().stream().map(UUID::toString).sorted().toList());
         return values;
     }
 
@@ -329,6 +332,21 @@ public final class ProfileStore {
             return null;
         }
         return UUID.fromString(value.toString());
+    }
+
+    private Set<UUID> parseUuidSet(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return Set.of();
+        }
+        Set<UUID> set = new java.util.LinkedHashSet<>();
+        for (Object item : list) {
+            if (item != null) {
+                try {
+                    set.add(UUID.fromString(item.toString()));
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+        return Set.copyOf(set);
     }
 
     private void replaceAtomically(Path source, Path target) throws IOException {

@@ -8,6 +8,7 @@ import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
 import org.bukkit.event.EventHandler;
@@ -63,15 +64,20 @@ public final class ConnectionListener implements Listener {
         if (settings.current().connectionMessagesEnabled()) {
             event.joinMessage(null);
             Server server = event.getPlayer().getServer();
+            Component nameComp = messages.formatPlayerName(event.getPlayer(), settings);
+            if (nameComp == null) {
+                nameComp = Component.text(event.getPlayer().getName());
+            }
+            Component finalNameComp = nameComp;
             server.getOnlinePlayers().forEach(viewer -> messages.send(
                     viewer,
                     "connection.join",
-                    Placeholder.unparsed("player", event.getPlayer().getName())
+                    Placeholder.component("player", finalNameComp)
             ));
             messages.send(
                     server.getConsoleSender(),
                     "connection.join",
-                    Placeholder.unparsed("player", event.getPlayer().getName())
+                    Placeholder.component("player", finalNameComp)
             );
         }
     }
@@ -86,17 +92,22 @@ public final class ConnectionListener implements Listener {
         if (settings.current().connectionMessagesEnabled()) {
             event.quitMessage(null);
             Server server = event.getPlayer().getServer();
+            Component nameComp = messages.formatPlayerName(event.getPlayer(), settings);
+            if (nameComp == null) {
+                nameComp = Component.text(event.getPlayer().getName());
+            }
+            Component finalNameComp = nameComp;
             server.getOnlinePlayers().stream()
                     .filter(viewer -> !viewer.getUniqueId().equals(event.getPlayer().getUniqueId()))
                     .forEach(viewer -> messages.send(
                             viewer,
                             "connection.quit",
-                            Placeholder.unparsed("player", event.getPlayer().getName())
+                            Placeholder.component("player", finalNameComp)
                     ));
             messages.send(
                     server.getConsoleSender(),
                     "connection.quit",
-                    Placeholder.unparsed("player", event.getPlayer().getName())
+                    Placeholder.component("player", finalNameComp)
             );
         }
     }
