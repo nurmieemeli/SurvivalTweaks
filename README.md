@@ -169,7 +169,23 @@ Players can override this from `/survival`, and changes apply immediately.
 
 Both catalogs are copied to `plugins/SurvivalTweaks/` and accept MiniMessage
 formatting. New keys merge into existing catalogs without overwriting
-customizations.
+customizations. Durations and distances take their units from the catalogs too,
+so hours, minutes, and kilometres read naturally in either language, and
+decimals follow the reader's language — a Finnish player sees `1,2 km` and
+`12,5` damage where an English one sees `1.2 km` and `12.5`.
+
+A few strings always come from `messages_en.yml`, because no single reader's
+language applies:
+
+- the server-list status and announcements, and the kick shown when a scheduled
+  restart blocks a login — both happen before the player's locale is known;
+- the TAB staff and AFK markers, which are one shared row rendered identically
+  for every viewer;
+- operator output from `/survivaltweaks doctor` and backup verification, which
+  stays English so it can be searched and quoted directly.
+
+Editing those keys in `messages_en.yml` changes them for everyone; editing them
+in `messages_fi.yml` has no effect.
 
 ## Operations
 

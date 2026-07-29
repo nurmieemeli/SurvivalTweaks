@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.command;
 
 import gg.nurmi.survivaltweaks.service.BackupService;
 import gg.nurmi.survivaltweaks.service.DiagnosticService;
+import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.MaintenanceService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
@@ -622,7 +623,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 Placeholder.unparsed("ready", Integer.toString(status.ready())),
                 Placeholder.unparsed("available", Integer.toString(status.available())),
                 Placeholder.unparsed("target", Integer.toString(status.target())),
-                Placeholder.unparsed("tps", String.format(Locale.ROOT, "%.2f", status.tps()))
+                Placeholder.unparsed("tps", DisplayFormat.decimal(messages, sender, status.tps(), 2))
         );
         messages.send(
                 sender,

@@ -2,6 +2,18 @@
 player-only: "<red>This command can only be used by a player.</red>"
 chat-format: "<gray><name></gray><dark_gray>: </dark_gray><white><message></white>"
 
+# Shared unit formatting, used wherever a duration or distance is shown.
+format:
+  duration:
+    days-hours: "<days>d <hours>h"
+    hours-minutes: "<hours>h <minutes>m"
+    days: "<days>d"
+    hours: "<hours>h"
+    minutes: "<minutes>m"
+  distance:
+    kilometres: "<value> km"
+    metres: "<value> m"
+
 connection:
   join: "<green><player> joined.</green>"
   quit: "<red><player> left.</red>"
@@ -722,8 +734,9 @@ ui:
     death: "<red>Death recovery</red>"
     death-active: "<yellow>An active death marker is waiting.</yellow>"
     death-none: "<gray>No active death marker.</gray>"
+    # Edit this to announce whatever is current on your server.
     news: "<gold>What's new</gold>"
-    news-detail: "<gray>Smart sleep, profiles, offline mail, and the contextual vanilla guide are available.</gray>"
+    news-detail: "<gray>Open <white>/survival</white> to browse homes, mail, locks, and your journey.</gray>"
     away: "<gray>You were away for <away>.</gray>"
   notifications:
     title: "<dark_green>Notifications <gray>(<unread> unread)</gray></dark_green>"

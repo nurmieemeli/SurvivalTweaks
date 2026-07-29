@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Level;
@@ -27,6 +28,9 @@ import java.util.UUID;
 import java.util.function.Function;
 
 public final class MessageService {
+
+    private static final Locale FINNISH_LOCALE = Locale.forLanguageTag("fi-FI");
+    private static final Locale ENGLISH_LOCALE = Locale.US;
 
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final JavaPlugin plugin;
@@ -125,20 +129,30 @@ public final class MessageService {
         return new Prepared(englishTemplates, finnishTemplates);
     }
 
+    /**
+     * The locale matching the catalog this audience reads, so numbers are
+     * grouped and separated the same way as the words around them.
+     */
+    public Locale locale(Audience audience) {
+        return readsFinnish(audience) ? FINNISH_LOCALE : ENGLISH_LOCALE;
+    }
+
+    private boolean readsFinnish(Audience audience) {
+        if (!(audience instanceof Player player)) {
+            return false;
+        }
+        LanguagePreference preference = languagePreference.apply(player.getUniqueId());
+        return preference == LanguagePreference.FINNISH
+                || (preference == LanguagePreference.AUTO
+                && player.locale().getLanguage().equalsIgnoreCase("fi"));
+    }
+
     private Map<String, String> templatesFor(
             Audience audience,
             Map<String, String> english,
             Map<String, String> finnish
     ) {
-        if (audience instanceof Player player) {
-            LanguagePreference preference = languagePreference.apply(player.getUniqueId());
-            if (preference == LanguagePreference.FINNISH
-                    || (preference == LanguagePreference.AUTO
-                    && player.locale().getLanguage().equalsIgnoreCase("fi"))) {
-                return finnish;
-            }
-        }
-        return english;
+        return readsFinnish(audience) ? finnish : english;
     }
 
     private YamlConfiguration loadCatalog(JavaPlugin plugin, String resourceName) {

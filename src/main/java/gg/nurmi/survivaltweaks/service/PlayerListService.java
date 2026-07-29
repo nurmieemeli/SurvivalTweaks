@@ -332,7 +332,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             firstLine = firstLine.append(SEPARATOR).append(messages.component(
                     player,
                     "player-list.ping",
-                    Placeholder.component("ping", metric(ping, pingColor(ping), 0))
+                    Placeholder.component("ping", metric(player, ping, pingColor(ping), 0))
             ));
         }
 
@@ -342,7 +342,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             performance.add(messages.component(
                     player,
                     "player-list.tps",
-                    Placeholder.component("tps", metric(tps, tpsColor(tps), 1))
+                    Placeholder.component("tps", metric(player, tps, tpsColor(tps), 1))
             ));
         }
         double mspt = context.msptTenths() / 10.0;
@@ -350,7 +350,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             performance.add(messages.component(
                     player,
                     "player-list.mspt",
-                    Placeholder.component("mspt", metric(mspt, msptColor(mspt), 1))
+                    Placeholder.component("mspt", metric(player, mspt, msptColor(mspt), 1))
             ));
         }
         if (current.playerListShowWorld()) {
@@ -421,11 +421,11 @@ public final class PlayerListService implements Listener, AutoCloseable {
         return Math.min(20.0, Math.max(0.0, samples[0]));
     }
 
-    private double finiteNonNegative(double value) {
+    static double finiteNonNegative(double value) {
         return Double.isFinite(value) ? Math.max(0.0, value) : 0.0;
     }
 
-    private boolean isAfkCommand(String message) {
+    static boolean isAfkCommand(String message) {
         String commandLine = message.stripLeading().toLowerCase(Locale.ROOT);
         int separator = commandLine.indexOf(' ');
         String root = separator < 0 ? commandLine : commandLine.substring(0, separator);
@@ -436,12 +436,11 @@ public final class PlayerListService implements Listener, AutoCloseable {
         return root.equals("/afk") || root.equals("/away") || root.equals("/poissa");
     }
 
-    private Component metric(double value, NamedTextColor color, int decimals) {
+    private Component metric(Player viewer, double value, NamedTextColor color, int decimals) {
         if (decimals == 0) {
             return Component.text(Long.toString(Math.round(value)), color);
         }
-        long tenths = Math.round(value * 10.0);
-        return Component.text((tenths / 10L) + "." + Math.abs(tenths % 10L), color);
+        return Component.text(DisplayFormat.decimal(messages, viewer, value, decimals), color);
     }
 
     private NamedTextColor pingColor(int ping) {

@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.DeathRecoveryService;
+import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
@@ -138,11 +139,13 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
             open(player);
             return;
         }
-        String away = formatAway(awayDuration(player.getUniqueId()));
         Component prompt = messages.component(
                 player,
                 "welcome-back.prompt",
-                Placeholder.unparsed("away", away),
+                Placeholder.component(
+                        "away",
+                        DisplayFormat.away(messages, player, awayDuration(player.getUniqueId()))
+                ),
                 Placeholder.unparsed(
                         "unread",
                         Long.toString(notifications.unread(player.getUniqueId()))
@@ -216,9 +219,9 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 List.of(messages.component(
                         player,
                         "ui.welcome-back.away",
-                        Placeholder.unparsed(
+                        Placeholder.component(
                                 "away",
-                                formatAway(awayDuration(player.getUniqueId()))
+                                DisplayFormat.away(messages, player, awayDuration(player.getUniqueId()))
                         )
                 ))
         ));
@@ -288,17 +291,6 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 && lastSeen != null
                 && !lastSeen.isAfter(now)
                 && !Duration.between(lastSeen, now).minus(minimumAway).isNegative();
-    }
-
-    static String formatAway(Duration away) {
-        long hours = Math.max(0, away.toHours());
-        if (hours >= 48) {
-            return hours / 24 + "d";
-        }
-        if (hours >= 1) {
-            return hours + "h";
-        }
-        return Math.max(1, away.toMinutes()) + "m";
     }
 
     private Duration awayDuration(UUID playerId) {

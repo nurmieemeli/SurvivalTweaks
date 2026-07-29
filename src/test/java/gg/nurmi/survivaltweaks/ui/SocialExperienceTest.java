@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,13 +38,5 @@ class SocialExperienceTest {
                 now,
                 Duration.ofHours(6)
         ));
-    }
-
-    @Test
-    void socialDurationsRemainCompact() {
-        assertEquals("2h 5m", SocialProfileController.formatPlaytime(150_000));
-        assertEquals("3d", WelcomeBackController.formatAway(Duration.ofHours(72)));
-        assertEquals("5h", WelcomeBackController.formatAway(Duration.ofHours(5)));
-        assertEquals("1m", WelcomeBackController.formatAway(Duration.ZERO));
     }
 }

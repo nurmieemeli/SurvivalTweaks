@@ -6,7 +6,6 @@ import org.bukkit.Statistic;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 
 public final class PlayerStatisticsService {
 
@@ -100,28 +99,6 @@ public final class PlayerStatisticsService {
                 .limit(3)
                 .toList();
         return new Snapshot(overview, travel, combat, activities, favoriteTools);
-    }
-
-    public static String formatTicks(long ticks) {
-        long totalMinutes = Math.max(0, ticks) / (20L * 60L);
-        long hours = totalMinutes / 60L;
-        long minutes = totalMinutes % 60L;
-        if (hours >= 48) {
-            return hours / 24L + "d " + hours % 24L + "h";
-        }
-        return hours + "h " + minutes + "m";
-    }
-
-    public static String formatDistance(long centimeters) {
-        double blocks = Math.max(0, centimeters) / 100.0;
-        if (blocks >= 1_000.0) {
-            return String.format(Locale.ROOT, "%.1f km", blocks / 1_000.0);
-        }
-        return Math.round(blocks) + " m";
-    }
-
-    public static String formatDamage(long rawDamage) {
-        return String.format(Locale.ROOT, "%.1f", Math.max(0, rawDamage) / 10.0);
     }
 
     private int value(OfflinePlayer player, Statistic statistic) {

@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.PlayerListService;
@@ -154,7 +155,10 @@ public final class SocialProfileController implements Listener, CommandExecutor,
                 List.of(messages.component(
                         viewer,
                         "ui.profile.playtime-value",
-                        Placeholder.unparsed("time", formatPlaytime(playTicks))
+                        Placeholder.component(
+                                "time",
+                                DisplayFormat.hoursMinutes(messages, viewer, playTicks)
+                        )
                 ))
         ));
         long firstPlayed = target.getFirstPlayed();
@@ -314,13 +318,6 @@ public final class SocialProfileController implements Listener, CommandExecutor,
                 "ui.profile.last-seen",
                 Placeholder.unparsed("minutes", Long.toString(minutes))
         );
-    }
-
-    static String formatPlaytime(long ticks) {
-        long totalMinutes = Math.max(0, ticks) / (20L * 60L);
-        long hours = totalMinutes / 60L;
-        long minutes = totalMinutes % 60L;
-        return hours + "h " + minutes + "m";
     }
 
     private ItemStack head(OfflinePlayer owner, Component name, List<Component> lore) {

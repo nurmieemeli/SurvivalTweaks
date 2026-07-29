@@ -2,6 +2,18 @@
 player-only: "<red>Tätä komentoa voi käyttää vain pelaajana.</red>"
 chat-format: "<gray><name></gray><dark_gray>: </dark_gray><white><message></white>"
 
+# Jaetut yksikkömuotoilut, käytetään kaikkialla missä näytetään kesto tai matka.
+format:
+  duration:
+    days-hours: "<days> pv <hours> t"
+    hours-minutes: "<hours> t <minutes> min"
+    days: "<days> pv"
+    hours: "<hours> t"
+    minutes: "<minutes> min"
+  distance:
+    kilometres: "<value> km"
+    metres: "<value> m"
+
 connection:
   join: "<green><player> liittyi.</green>"
   quit: "<red><player> poistui.</red>"
@@ -713,8 +725,9 @@ ui:
     death: "<red>Kuolinpaikka</red>"
     death-active: "<yellow>Aktiivinen kuolinpaikka odottaa.</yellow>"
     death-none: "<gray>Ei aktiivista kuolinpaikkaa.</gray>"
+    # Muokkaa tätä kertoaksesi palvelimesi ajankohtaisista asioista.
     news: "<gold>Mitä uutta</gold>"
-    news-detail: "<gray>Älykäs nukkuminen, profiilit, offline-posti ja tilannekohtainen vaniljaopas ovat käytettävissä.</gray>"
+    news-detail: "<gray>Avaa <white>/survival</white> selataksesi koteja, postia, lukkoja ja matkaasi.</gray>"
     away: "<gray>Olit poissa <away>.</gray>"
   notifications:
     title: "<dark_green>Ilmoitukset <gray>(<unread> lukematonta)</gray></dark_green>"

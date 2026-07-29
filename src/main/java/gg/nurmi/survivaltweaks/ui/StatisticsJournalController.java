@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.PlayerStatisticsService;
@@ -223,8 +224,8 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             PlayerStatisticsService.Overview values
     ) {
         return List.of(
-                line(viewer, "playtime", PlayerStatisticsService.formatTicks(values.playTimeTicks())),
-                line(viewer, "world-time", PlayerStatisticsService.formatTicks(values.worldTimeTicks())),
+                line(viewer, "playtime", DisplayFormat.playtime(messages, viewer, values.playTimeTicks())),
+                line(viewer, "world-time", DisplayFormat.playtime(messages, viewer, values.worldTimeTicks())),
                 line(viewer, "deaths", values.deaths()),
                 line(viewer, "mob-kills", values.mobKills()),
                 line(viewer, "player-kills", values.playerKills()),
@@ -238,14 +239,14 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             PlayerStatisticsService.Travel values
     ) {
         return List.of(
-                line(viewer, "walked", PlayerStatisticsService.formatDistance(values.walked())),
-                line(viewer, "sprinted", PlayerStatisticsService.formatDistance(values.sprinted())),
-                line(viewer, "crouched", PlayerStatisticsService.formatDistance(values.crouched())),
-                line(viewer, "swum", PlayerStatisticsService.formatDistance(values.swum())),
-                line(viewer, "boat", PlayerStatisticsService.formatDistance(values.boated())),
-                line(viewer, "minecart", PlayerStatisticsService.formatDistance(values.minecart())),
-                line(viewer, "elytra", PlayerStatisticsService.formatDistance(values.elytra())),
-                line(viewer, "horseback", PlayerStatisticsService.formatDistance(values.horseback()))
+                line(viewer, "walked", DisplayFormat.distance(messages, viewer, values.walked())),
+                line(viewer, "sprinted", DisplayFormat.distance(messages, viewer, values.sprinted())),
+                line(viewer, "crouched", DisplayFormat.distance(messages, viewer, values.crouched())),
+                line(viewer, "swum", DisplayFormat.distance(messages, viewer, values.swum())),
+                line(viewer, "boat", DisplayFormat.distance(messages, viewer, values.boated())),
+                line(viewer, "minecart", DisplayFormat.distance(messages, viewer, values.minecart())),
+                line(viewer, "elytra", DisplayFormat.distance(messages, viewer, values.elytra())),
+                line(viewer, "horseback", DisplayFormat.distance(messages, viewer, values.horseback()))
         );
     }
 
@@ -257,9 +258,9 @@ public final class StatisticsJournalController implements Listener, CommandExecu
                 line(viewer, "mob-kills", values.mobKills()),
                 line(viewer, "player-kills", values.playerKills()),
                 line(viewer, "deaths", values.deaths()),
-                line(viewer, "damage-dealt", PlayerStatisticsService.formatDamage(values.damageDealt())),
-                line(viewer, "damage-taken", PlayerStatisticsService.formatDamage(values.damageTaken())),
-                line(viewer, "damage-blocked", PlayerStatisticsService.formatDamage(values.damageBlocked())),
+                line(viewer, "damage-dealt", DisplayFormat.damage(messages, viewer, values.damageDealt())),
+                line(viewer, "damage-taken", DisplayFormat.damage(messages, viewer, values.damageTaken())),
+                line(viewer, "damage-blocked", DisplayFormat.damage(messages, viewer, values.damageBlocked())),
                 line(viewer, "raids-won", values.raidsWon()),
                 line(viewer, "targets-hit", values.targetsHit())
         );
@@ -314,6 +315,18 @@ public final class StatisticsJournalController implements Listener, CommandExecu
                         messages.component(viewer, "ui.statistics.label." + label)
                 ),
                 Placeholder.unparsed("value", value.toString())
+        );
+    }
+
+    private Component line(Player viewer, String label, Component value) {
+        return messages.component(
+                viewer,
+                "ui.statistics.line",
+                Placeholder.component(
+                        "label",
+                        messages.component(viewer, "ui.statistics.label." + label)
+                ),
+                Placeholder.component("value", value)
         );
     }
 
