@@ -19,12 +19,13 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -42,7 +43,9 @@ public class TreeFellerService implements Listener, AutoCloseable {
     private final TaskFailureIsolation failures;
     private final NamespacedKey PLACED_LOGS_KEY;
     private final Set<UUID> fellingPlayers = new HashSet<>();
-    private final Map<UUID, FellingJob> jobs = new HashMap<>();
+    private final Map<UUID, FellingJob> jobs = new LinkedHashMap<>();
+    private final ArrayDeque<UUID> jobOrder = new ArrayDeque<>();
+    private BukkitTask jobTask;
     private boolean closed;
 
     public TreeFellerService(SurvivalTweaks plugin, SettingsService settings) {
@@ -181,23 +184,36 @@ public class TreeFellerService implements Listener, AutoCloseable {
         logsToBreak.sort((b1, b2) -> Integer.compare(b2.getY(), b1.getY()));
 
         logsToBreak.remove(startBlock);
+        if (logsToBreak.isEmpty()) {
+            return;
+        }
         UUID playerId = player.getUniqueId();
         jobs.put(playerId, new FellingJob(new ArrayDeque<>(logsToBreak)));
-        processJob(playerId);
+        jobOrder.addLast(playerId);
+        if (jobTask == null) {
+            processJobs();
+        }
     }
 
-    private void processJob(UUID playerId) {
+    private void processJobs() {
+        jobTask = null;
         if (closed) {
             return;
         }
-        FellingJob job = jobs.get(playerId);
-        Player player = plugin.getServer().getPlayer(playerId);
-        if (job == null || player == null || !player.isOnline()) {
-            jobs.remove(playerId);
-            return;
-        }
-        while (!job.logs().isEmpty()
-                && (workBudget == null || workBudget.tryAcquire(1))) {
+        while (!jobOrder.isEmpty()) {
+            UUID playerId = jobOrder.removeFirst();
+            FellingJob job = jobs.get(playerId);
+            Player player = plugin.getServer().getPlayer(playerId);
+            if (job == null || player == null || !player.isOnline()) {
+                jobs.remove(playerId);
+                continue;
+            }
+            if (workBudget != null
+                    && !workBudget.tryAcquire(TickWorkBudget.Lane.TREE_FELLING, 1)) {
+                jobOrder.addFirst(playerId);
+                scheduleJobs();
+                return;
+            }
             Block log = job.logs().poll();
             fellingPlayers.add(playerId);
             try {
@@ -207,33 +223,50 @@ public class TreeFellerService implements Listener, AutoCloseable {
             } finally {
                 fellingPlayers.remove(playerId);
             }
+            if (!job.logs().isEmpty()) {
+                jobOrder.addLast(playerId);
+                continue;
+            }
+            jobs.remove(playerId);
+            if (feedback != null && job.broken > 0) {
+                feedback.play(
+                        player,
+                        FeedbackService.ENCHANT_AREA_BREAK,
+                        Math.min(2, job.broken / 16.0)
+                );
+            }
         }
-        if (!job.logs().isEmpty()) {
-            Runnable continuation = () -> processJob(playerId);
-            plugin.getServer().getScheduler().runTaskLater(
-                    plugin,
-                    failures == null
-                            ? continuation
-                            : failures.guard("tree felling", continuation),
-                    1L
-            );
+    }
+
+    private void scheduleJobs() {
+        if (closed || jobTask != null || jobOrder.isEmpty()) {
             return;
         }
-        jobs.remove(playerId);
-        if (feedback != null && job.broken > 0) {
-            feedback.play(
-                    player,
-                    FeedbackService.ENCHANT_AREA_BREAK,
-                    Math.min(2, job.broken / 16.0)
-            );
-        }
+        Runnable continuation = this::processJobs;
+        jobTask = plugin.getServer().getScheduler().runTaskLater(
+                plugin,
+                failures == null
+                        ? continuation
+                        : failures.guard("tree felling", continuation),
+                1L
+        );
     }
 
     @Override
     public void close() {
         closed = true;
+        if (jobTask != null) {
+            jobTask.cancel();
+            jobTask = null;
+        }
         jobs.clear();
+        jobOrder.clear();
         fellingPlayers.clear();
+    }
+
+    public Workload workload() {
+        int blocks = jobs.values().stream().mapToInt(job -> job.logs().size()).sum();
+        return new Workload(jobs.size(), blocks);
     }
 
     private boolean isLog(Material type) {
@@ -322,5 +355,8 @@ public class TreeFellerService implements Listener, AutoCloseable {
         private Queue<Block> logs() {
             return logs;
         }
+    }
+
+    public record Workload(int jobs, int blocks) {
     }
 }

@@ -27,7 +27,7 @@ command:
     guide: "/guide"
     deathlocation: "/deathlocation [info|guide [on|off]|dismiss]"
     teleportinbox: "/teleportinbox"
-    survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
+    survivaltweaks: "/survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart]"
     sethome: "/sethome [nimi]"
     deletehome: "/deletehome [nimi]"
     home: "/home [nimi|omistaja:nimi|invite koti pelaaja|uninvite koti pelaaja]"
@@ -448,7 +448,7 @@ notifications:
   unread-summary-one: "<yellow>Sinulla on <count> lukematon SurvivalTweaks-ilmoitus. Tarkista se komennolla <green>/survival</green>.</yellow>"
 
 admin:
-  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>Sinulla ei ole oikeutta käyttää tätä ylläpitokomentoa.</red>"
   reload-success: "<green>SurvivalTweaksin asetukset, kielet ja tehosteet ladattiin uudelleen.</green>"
   reload-failed: "<red>Uudelleenlataus hylättiin; aiemmat asetukset jäivät voimaan: <reason></red>"
@@ -478,6 +478,7 @@ admin:
     shout: "Lähetä palvelinilmoitus konsolista."
     reload: "Tarkista ja lataa lisäosan asetukset turvallisesti uudelleen."
     doctor: "Tarkista asetukset, pelaajatiedot, lukot, kuolinmerkinnät ja varmuuskopiot."
+    performance: "Tarkista mukautuva kuormanhallinta, työjonot ja toistuvien tehtävien tila."
     backup: "Listaa, luo tai tarkista varmuuskopioita tai valmistele turvallinen palautus."
     spawnpool: "Tarkista tai hallitse uusille pelaajille valmisteltuja sijainteja."
     maintenance: "Ota liittymisen estävä huoltotila käyttöön tai tarkista sen tila."
@@ -513,6 +514,21 @@ admin:
     warning: "<yellow>⚠ <detail></yellow>"
     truncated: "<gray><count> muuta havaintoa jätettiin näyttämättä chatissa.</gray>"
     truncated-one: "<gray><count> muu havainto jätettiin näyttämättä chatissa.</gray>"
+  performance:
+    header: "<dark_green><bold>SurvivalTweaksin suorituskyky</bold></dark_green>"
+    summary: "<gray>Kuormanhallinta: <level> <dark_gray>•</dark_gray> <mspt> MSPT <dark_gray>•</dark_gray> tahti 1/<cadence> <dark_gray>•</dark_gray> hiukkaset <particles>% <dark_gray>•</dark_gray> työ <work>%</gray>"
+    stable: "<green>Normaali tahti on käytössä; palautumisjaksoa ei tarvita.</green>"
+    recovery: "<yellow>Seuraava palautumisaskel <seconds> terveen sekunnin kuluttua.</yellow>"
+    budget: "<gray>Nykyisen tickin työbudjetti: <used>/<limit> käytetty, <remaining> jäljellä.</gray>"
+    lanes: "<gray>Kaistan käyttö / estot nyt / estot yhteensä: puut <tree> <dark_gray>•</dark_gray> lehdet <leaves> <dark_gray>•</dark_gray> aloituspaikat <spawn> <dark_gray>•</dark_gray> opas <guide> <dark_gray>•</dark_gray> tunnelma <atmosphere></gray>"
+    queues: "<gray>Odottava työ: <tree-jobs> puutyötä / <tree-blocks> lohkoa <dark_gray>•</dark_gray> <leaves> lehteä <dark_gray>•</dark_gray> <spawn-waiting> aloituspaikan odottajaa <dark_gray>•</dark_gray> paikan luonti <spawn-generating></gray>"
+    failures-none: "<green>Toistuvissa osajärjestelmissä ei havaittu virheitä viimeisen kymmenen minuutin aikana.</green>"
+    failures-header: "<yellow>Viimeisen kymmenen minuutin aikana havaittiin <count> toistuvan osajärjestelmän virhetietuetta:</yellow>"
+    failure: "<yellow>⚠ <subsystem>: <problem> (<count> kertaa)</yellow>"
+    level:
+      normal: "<green>normaali</green>"
+      reduced: "<yellow>rajoitettu</yellow>"
+      critical: "<red>kriittinen</red>"
   backup:
     working: "<gray>Varmuuskopiointitoiminto suoritetaan taustalla...</gray>"
     busy: "<yellow>Toinen varmuuskopiointitoiminto on jo käynnissä.</yellow>"

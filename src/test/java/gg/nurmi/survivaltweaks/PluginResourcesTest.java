@@ -57,6 +57,7 @@ class PluginResourcesTest {
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.lock.admin"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.reload"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.doctor"));
+        assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.performance"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.spawnpool"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.backup"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.enchant"));
@@ -96,6 +97,7 @@ class PluginResourcesTest {
         assertNotNull(english.getString("sleep.progress"));
         assertNotNull(english.getString("server-list.motd"));
         assertNotNull(english.getString("maintenance.restart-warning"));
+        assertNotNull(english.getString("admin.performance.summary"));
         assertNotNull(english.getString("mentions.target-afk"));
         assertNotNull(english.getString("ui.journey.objective.home"));
         assertNotNull(english.getString("mail.result.sent"));

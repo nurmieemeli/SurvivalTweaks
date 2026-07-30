@@ -138,7 +138,10 @@ public final class DeathRecoveryService
                         ? Logger.getLogger(DeathRecoveryService.class.getName())
                         : plugin.getLogger()
         );
-        this.legacyCompassOwnerKey = new NamespacedKey(plugin, "death-compass-owner");
+        this.legacyCompassOwnerKey = new NamespacedKey(
+                "survivaltweaks",
+                "death-compass-owner"
+        );
         store.load().forEach(marker -> {
             if (!marker.expired(clock.instant())) {
                 markers.put(marker.playerId(), marker);
@@ -427,7 +430,8 @@ public final class DeathRecoveryService
             return;
         }
         for (UUID playerId : List.copyOf(floatingGuidePlayers)) {
-            if (workBudget != null && !workBudget.tryAcquire(1)) {
+            if (workBudget != null
+                    && !workBudget.tryAcquire(TickWorkBudget.Lane.DEATH_GUIDE, 1)) {
                 break;
             }
             Player player = plugin.getServer().getPlayer(playerId);

@@ -28,12 +28,32 @@ class TickWorkBudgetTest {
                 tick::get
         );
 
-        assertTrue(budget.tryAcquire(250));
+        for (TickWorkBudget.Lane lane : TickWorkBudget.Lane.values()) {
+            assertTrue(budget.tryAcquire(lane, 50));
+        }
         assertEquals(6, budget.remaining());
-        assertFalse(budget.tryAcquire(7));
+        assertFalse(budget.tryAcquire(TickWorkBudget.Lane.TREE_FELLING, 3));
+        assertEquals(
+                1,
+                budget.snapshot().deferredThisTick()
+                        .get(TickWorkBudget.Lane.TREE_FELLING)
+        );
 
         tick.incrementAndGet();
         assertEquals(256, budget.remaining());
+    }
+
+    @Test
+    void oneLaneCannotConsumeAnotherLanesFairShare() {
+        TickWorkBudget budget = new TickWorkBudget(
+                new SettingsService(settings()),
+                governor(),
+                () -> 10L
+        );
+
+        assertTrue(budget.tryAcquire(TickWorkBudget.Lane.TREE_FELLING, 52));
+        assertFalse(budget.tryAcquire(TickWorkBudget.Lane.TREE_FELLING, 1));
+        assertTrue(budget.tryAcquire(TickWorkBudget.Lane.SPAWN_PREPARATION, 8));
     }
 
     private PerformanceGovernor governor() {

@@ -656,7 +656,8 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 || available.size() >= current.newPlayerSpawnPreloadLocations()) {
             return;
         }
-        if (workBudget != null && !workBudget.tryAcquire(8)) {
+        if (workBudget != null
+                && !workBudget.tryAcquire(TickWorkBudget.Lane.SPAWN_PREPARATION, 8)) {
             scheduleRefill(1L);
             return;
         }

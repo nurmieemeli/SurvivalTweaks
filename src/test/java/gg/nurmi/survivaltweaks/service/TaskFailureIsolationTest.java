@@ -14,7 +14,7 @@ class TaskFailureIsolationTest {
     @Test
     void recordsFailuresAndAllowsLaterRunsToContinue() {
         TaskFailureIsolation isolation = new TaskFailureIsolation(
-                Logger.getLogger(TaskFailureIsolationTest.class.getName()),
+                quietLogger(),
                 Clock.systemUTC()
         );
         AtomicInteger completed = new AtomicInteger();
@@ -31,5 +31,11 @@ class TaskFailureIsolationTest {
         assertEquals("test subsystem", failure.subsystem());
         assertEquals(1L, failure.count());
         assertEquals("IllegalStateException", failure.problem());
+    }
+
+    private Logger quietLogger() {
+        Logger logger = Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        return logger;
     }
 }

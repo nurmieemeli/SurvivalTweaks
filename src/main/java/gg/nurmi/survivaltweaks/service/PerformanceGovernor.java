@@ -6,12 +6,14 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Objects;
+import java.util.logging.Logger;
 
 public final class PerformanceGovernor implements AutoCloseable {
 
     private final JavaPlugin plugin;
     private final SettingsService settings;
     private final TaskFailureIsolation failures;
+    private final Logger logger;
     private volatile Level level = Level.NORMAL;
     private volatile double mspt;
     private int healthySamples;
@@ -25,6 +27,9 @@ public final class PerformanceGovernor implements AutoCloseable {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.failures = Objects.requireNonNull(failures, "failures");
+        this.logger = plugin.getLogger() == null
+                ? Logger.getLogger(PerformanceGovernor.class.getName())
+                : plugin.getLogger();
     }
 
     public void start() {
@@ -45,19 +50,19 @@ public final class PerformanceGovernor implements AutoCloseable {
         PluginSettings current = settings.current();
         mspt = Double.isFinite(measuredMspt) ? Math.max(0.0, measuredMspt) : 0.0;
         if (!current.performanceGovernorEnabled()) {
-            level = Level.NORMAL;
+            transition(Level.NORMAL, "governor disabled");
             healthySamples = 0;
             return;
         }
 
         if (mspt >= current.performanceCriticalMspt()) {
-            level = Level.CRITICAL;
+            transition(Level.CRITICAL, "critical threshold exceeded");
             healthySamples = 0;
             return;
         }
         if (mspt >= current.performanceReducedMspt()) {
             if (level == Level.NORMAL) {
-                level = Level.REDUCED;
+                transition(Level.REDUCED, "reduced threshold exceeded");
             }
             healthySamples = 0;
             return;
@@ -69,8 +74,29 @@ public final class PerformanceGovernor implements AutoCloseable {
 
         healthySamples++;
         if (healthySamples >= current.performanceRecoverySeconds()) {
-            level = level == Level.CRITICAL ? Level.REDUCED : Level.NORMAL;
+            transition(
+                    level == Level.CRITICAL ? Level.REDUCED : Level.NORMAL,
+                    "healthy recovery window completed"
+            );
             healthySamples = 0;
+        }
+    }
+
+    private void transition(Level next, String reason) {
+        Level previous = level;
+        if (previous == next) {
+            return;
+        }
+        level = next;
+        String message = "Adaptive performance governor: "
+                + previous.name().toLowerCase()
+                + " -> " + next.name().toLowerCase()
+                + " at " + String.format(java.util.Locale.ROOT, "%.1f", mspt)
+                + " MSPT (" + reason + ").";
+        if (next.ordinal() > previous.ordinal()) {
+            logger.warning(message);
+        } else {
+            logger.info(message);
         }
     }
 
@@ -103,7 +129,11 @@ public final class PerformanceGovernor implements AutoCloseable {
     }
 
     public Snapshot snapshot() {
-        return new Snapshot(level, mspt, healthySamples);
+        int recoveryTarget = settings.current().performanceRecoverySeconds();
+        int recoveryRemaining = level == Level.NORMAL
+                ? 0
+                : Math.max(0, recoveryTarget - healthySamples);
+        return new Snapshot(level, mspt, healthySamples, recoveryRemaining);
     }
 
     @Override
@@ -122,6 +152,11 @@ public final class PerformanceGovernor implements AutoCloseable {
         CRITICAL
     }
 
-    public record Snapshot(Level level, double mspt, int healthySamples) {
+    public record Snapshot(
+            Level level,
+            double mspt,
+            int healthySamples,
+            int recoverySecondsRemaining
+    ) {
     }
 }

@@ -765,6 +765,11 @@ public final class SurvivalTweaks extends JavaPlugin {
                         maintenance,
                         backups,
                         customEnchantments,
+                        performanceGovernor,
+                        workBudget,
+                        taskFailures,
+                        treeFeller,
+                        fastLeafDecay,
                         this
                 )
         );

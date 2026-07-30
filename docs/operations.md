@@ -44,10 +44,19 @@ spawn preparation, atmosphere, and death-guide work. Exhausted jobs resume on a
 later tick; they are not discarded. Teleport safety, lock enforcement, data
 persistence, and other correctness-sensitive work bypass this budget.
 
+Each batchable workload receives a fair per-tick lane, preventing one large
+canopy or tree from consuming work reserved for spawn preparation or cosmetic
+guidance. Tree jobs additionally rotate one block at a time between players.
+
 `/survivaltweaks doctor` reports an active governor reduction and any recurring
 subsystem failure seen within the previous ten minutes. Repeating cosmetic and
 status tasks catch, rate-limit, and record their own exceptions, allowing the
 next scheduled run to proceed.
+
+`/survivaltweaks performance` provides a live operator snapshot: governor level,
+MSPT, recovery progress, cosmetic scaling, used and denied lane work, deferred
+tree/leaf/spawn queues, and recent isolated failures. Governor transitions are
+logged once when the level changes, with the triggering MSPT and reason.
 
 ## Backups
 

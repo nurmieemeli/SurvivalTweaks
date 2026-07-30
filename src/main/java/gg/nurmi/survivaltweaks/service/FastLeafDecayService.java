@@ -141,7 +141,8 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
         int processed = 0;
         boolean budgetExhausted = false;
         while (processed < LEAVES_PER_BATCH && !decayQueue.isEmpty()) {
-            if (workBudget != null && !workBudget.tryAcquire(1)) {
+            if (workBudget != null
+                    && !workBudget.tryAcquire(TickWorkBudget.Lane.LEAF_DECAY, 1)) {
                 budgetExhausted = true;
                 break;
             }
@@ -207,6 +208,10 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
         }
         decayQueue.clear();
         queuedLeaves.clear();
+    }
+
+    public int queuedLeaves() {
+        return decayQueue.size();
     }
 
     private record SearchNode(Block block, int distance) {

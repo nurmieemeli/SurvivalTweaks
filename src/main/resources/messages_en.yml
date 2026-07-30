@@ -27,7 +27,7 @@ command:
     guide: "/guide"
     deathlocation: "/deathlocation [info|guide [on|off]|dismiss]"
     teleportinbox: "/teleportinbox"
-    survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
+    survivaltweaks: "/survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart]"
     sethome: "/sethome [name]"
     deletehome: "/deletehome [name]"
     home: "/home [name|owner:name|invite home player|uninvite home player]"
@@ -449,7 +449,7 @@ notifications:
   unread-summary-one: "<yellow>You have <count> unread SurvivalTweaks notification. Open <green>/survival</green> to review it.</yellow>"
 
 admin:
-  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>You do not have permission to use this administrator command.</red>"
   reload-success: "<green>SurvivalTweaks configuration, languages, and effects reloaded.</green>"
   reload-failed: "<red>Reload rejected; the previous configuration remains active: <reason></red>"
@@ -479,6 +479,7 @@ admin:
     shout: "Send a server announcement from the console."
     reload: "Safely validate and reload plugin configuration."
     doctor: "Scan configuration, player data, locks, death markers, and backups."
+    performance: "Inspect adaptive load shedding, work queues, and recurring task health."
     backup: "List, create, verify, or safely stage a backup restore."
     spawnpool: "Inspect or manage prepared new-player locations."
     maintenance: "Enable join maintenance or inspect its current state."
@@ -513,6 +514,21 @@ admin:
     warning: "<yellow>⚠ <detail></yellow>"
     truncated: "<gray><count> additional issues omitted from chat.</gray>"
     truncated-one: "<gray><count> additional issue omitted from chat.</gray>"
+  performance:
+    header: "<dark_green><bold>SurvivalTweaks performance</bold></dark_green>"
+    summary: "<gray>Governor: <level> <dark_gray>•</dark_gray> <mspt> MSPT <dark_gray>•</dark_gray> cadence 1/<cadence> <dark_gray>•</dark_gray> particles <particles>% <dark_gray>•</dark_gray> work <work>%</gray>"
+    stable: "<green>Normal cadence is active; no recovery window is needed.</green>"
+    recovery: "<yellow>Next recovery step in <seconds> healthy second(s).</yellow>"
+    budget: "<gray>Current tick budget: <used>/<limit> used, <remaining> remaining.</gray>"
+    lanes: "<gray>Lane use / blocked now / blocked total: trees <tree> <dark_gray>•</dark_gray> leaves <leaves> <dark_gray>•</dark_gray> spawn <spawn> <dark_gray>•</dark_gray> guide <guide> <dark_gray>•</dark_gray> atmosphere <atmosphere></gray>"
+    queues: "<gray>Deferred work: <tree-jobs> tree job(s) / <tree-blocks> blocks <dark_gray>•</dark_gray> <leaves> leaves <dark_gray>•</dark_gray> <spawn-waiting> spawn waiters <dark_gray>•</dark_gray> spawn generation <spawn-generating></gray>"
+    failures-none: "<green>No recurring subsystem failures were recorded in the last ten minutes.</green>"
+    failures-header: "<yellow><count> recurring subsystem failure record(s) in the last ten minutes:</yellow>"
+    failure: "<yellow>⚠ <subsystem>: <problem> (<count> occurrence(s))</yellow>"
+    level:
+      normal: "<green>normal</green>"
+      reduced: "<yellow>reduced</yellow>"
+      critical: "<red>critical</red>"
   backup:
     working: "<gray>Running the backup operation in the background...</gray>"
     busy: "<yellow>Another backup operation is already running.</yellow>"

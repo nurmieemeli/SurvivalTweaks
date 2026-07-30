@@ -8,7 +8,12 @@ import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.MaintenanceService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
+import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
+import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
 import gg.nurmi.survivaltweaks.service.ReloadService;
+import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
+import gg.nurmi.survivaltweaks.service.TickWorkBudget;
+import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.ui.PlayerHubController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -41,6 +46,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     public static final String MAINTENANCE_PERMISSION = "survivaltweaks.command.maintenance";
     public static final String BACKUP_PERMISSION = "survivaltweaks.command.backup";
     public static final String ENCHANT_PERMISSION = "survivaltweaks.command.enchant";
+    public static final String PERFORMANCE_PERMISSION = "survivaltweaks.command.performance";
     private static final int MAX_DIAGNOSTIC_ISSUES = 20;
 
     private static final List<HelpEntry> HELP_ENTRIES = List.of(
@@ -88,6 +94,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     true
             ),
             new HelpEntry(
+                    "/survivaltweaks performance",
+                    PERFORMANCE_PERMISSION,
+                    "admin.help.performance",
+                    true
+            ),
+            new HelpEntry(
                     "/survivaltweaks backup list",
                     BACKUP_PERMISSION,
                     "admin.help.backup",
@@ -128,6 +140,11 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final BackupService backups;
     private final CustomEnchantItemService enchantments;
     private final JavaPlugin plugin;
+    private final PerformanceGovernor governor;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation taskFailures;
+    private final TreeFellerService treeFeller;
+    private final FastLeafDecayService leafDecay;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
 
     public SurvivalTweaksCommand(
@@ -139,6 +156,11 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             MaintenanceService maintenance,
             BackupService backups,
             CustomEnchantItemService enchantments,
+            PerformanceGovernor governor,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation taskFailures,
+            TreeFellerService treeFeller,
+            FastLeafDecayService leafDecay,
             JavaPlugin plugin
     ) {
         this.messages = messages;
@@ -149,6 +171,11 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.maintenance = maintenance;
         this.backups = backups;
         this.enchantments = enchantments;
+        this.governor = governor;
+        this.workBudget = workBudget;
+        this.taskFailures = taskFailures;
+        this.treeFeller = treeFeller;
+        this.leafDecay = leafDecay;
         this.plugin = plugin;
     }
 
@@ -202,6 +229,14 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             return true;
         }
+        if (arguments.length == 1 && arguments[0].equalsIgnoreCase("performance")) {
+            if (!sender.hasPermission(PERFORMANCE_PERMISSION)) {
+                messages.send(sender, "admin.no-permission");
+                return true;
+            }
+            showPerformance(sender);
+            return true;
+        }
         if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("spawnpool")) {
             return handleSpawnPool(sender, arguments);
         }
@@ -240,6 +275,10 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             if (sender.hasPermission(DOCTOR_PERMISSION) && "doctor".startsWith(prefix)) {
                 options.add("doctor");
+            }
+            if (sender.hasPermission(PERFORMANCE_PERMISSION)
+                    && "performance".startsWith(prefix)) {
+                options.add("performance");
             }
             if (sender.hasPermission(SPAWN_POOL_PERMISSION) && "spawnpool".startsWith(prefix)) {
                 options.add("spawnpool");
@@ -788,6 +827,99 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     Placeholder.unparsed("count", Integer.toString(omitted))
             );
         }
+    }
+
+    private void showPerformance(CommandSender sender) {
+        PerformanceGovernor.Snapshot performance = governor.snapshot();
+        TickWorkBudget.Snapshot budget = workBudget.snapshot();
+        TreeFellerService.Workload trees = treeFeller.workload();
+        NewPlayerSpawnService.PoolStatus spawns = spawnPool.status();
+        List<TaskFailureIsolation.Failure> failures =
+                taskFailures.recent(Duration.ofMinutes(10));
+        String levelKey = "admin.performance.level."
+                + performance.level().name().toLowerCase(Locale.ROOT);
+
+        messages.send(sender, "admin.performance.header");
+        messages.send(
+                sender,
+                "admin.performance.summary",
+                Placeholder.component("level", messages.component(sender, levelKey)),
+                Placeholder.unparsed(
+                        "mspt",
+                        DisplayFormat.decimal(messages, sender, performance.mspt(), 1)
+                ),
+                Placeholder.unparsed("cadence", Integer.toString(governor.cosmeticDivisor())),
+                Placeholder.unparsed(
+                        "particles",
+                        Integer.toString((int) Math.round(governor.particleScale() * 100.0))
+                ),
+                Placeholder.unparsed(
+                        "work",
+                        Integer.toString((int) Math.round(governor.workScale() * 100.0))
+                )
+        );
+        messages.send(
+                sender,
+                performance.level() == PerformanceGovernor.Level.NORMAL
+                        ? "admin.performance.stable"
+                        : "admin.performance.recovery",
+                Placeholder.unparsed(
+                        "seconds",
+                        Integer.toString(performance.recoverySecondsRemaining())
+                )
+        );
+        messages.send(
+                sender,
+                "admin.performance.budget",
+                Placeholder.unparsed("used", Integer.toString(budget.usedTotal())),
+                Placeholder.unparsed("limit", Integer.toString(budget.limit())),
+                Placeholder.unparsed("remaining", Integer.toString(budget.remaining()))
+        );
+        messages.send(
+                sender,
+                "admin.performance.lanes",
+                Placeholder.unparsed("tree", lane(budget, TickWorkBudget.Lane.TREE_FELLING)),
+                Placeholder.unparsed("leaves", lane(budget, TickWorkBudget.Lane.LEAF_DECAY)),
+                Placeholder.unparsed("spawn", lane(budget, TickWorkBudget.Lane.SPAWN_PREPARATION)),
+                Placeholder.unparsed("guide", lane(budget, TickWorkBudget.Lane.DEATH_GUIDE)),
+                Placeholder.unparsed("atmosphere", lane(budget, TickWorkBudget.Lane.ATMOSPHERE))
+        );
+        messages.send(
+                sender,
+                "admin.performance.queues",
+                Placeholder.unparsed("tree-jobs", Integer.toString(trees.jobs())),
+                Placeholder.unparsed("tree-blocks", Integer.toString(trees.blocks())),
+                Placeholder.unparsed("leaves", Integer.toString(leafDecay.queuedLeaves())),
+                Placeholder.unparsed("spawn-waiting", Integer.toString(spawns.waitingPlayers())),
+                Placeholder.unparsed(
+                        "spawn-generating",
+                        Boolean.toString(spawns.generating())
+                )
+        );
+        if (failures.isEmpty()) {
+            messages.send(sender, "admin.performance.failures-none");
+            return;
+        }
+        messages.send(
+                sender,
+                "admin.performance.failures-header",
+                Placeholder.unparsed("count", Integer.toString(failures.size()))
+        );
+        failures.stream().limit(5).forEach(failure -> messages.send(
+                sender,
+                "admin.performance.failure",
+                Placeholder.unparsed("subsystem", failure.subsystem()),
+                Placeholder.unparsed("count", Long.toString(failure.count())),
+                Placeholder.unparsed("problem", failure.problem())
+        ));
+    }
+
+    private String lane(TickWorkBudget.Snapshot budget, TickWorkBudget.Lane lane) {
+        return budget.used().getOrDefault(lane, 0)
+                + "/"
+                + budget.deferredThisTick().getOrDefault(lane, 0)
+                + "/"
+                + budget.deferredTotal().getOrDefault(lane, 0L);
     }
 
     private void showHelp(CommandSender sender) {

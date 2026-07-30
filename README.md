@@ -133,6 +133,7 @@ trades, combine through anvils, and are removed by grindstones.
 | `/shout <message>` | Broadcast a console announcement | Operator or console |
 | `/survivaltweaks reload` | Validate and reload settings, languages, and effects | Operator |
 | `/survivaltweaks doctor` | Scan configuration and persisted data | Operator |
+| `/survivaltweaks performance` | Inspect governor state, fair work lanes, queues, and recent task failures | Operator |
 | `/survivaltweaks backup list\|create\|verify` | Inspect and create safety backups | Operator |
 | `/survivaltweaks backup restore <file> [confirm]` | Stage a maintenance-only restore | Console |
 | `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operator |
@@ -181,7 +182,8 @@ configured reduced and critical thresholds it lowers cosmetic cadence and
 particle density and spreads tree felling, leaf decay, spawn preparation, and
 guide/atmosphere work over additional ticks. It recovers gradually after a
 sustained healthy period. Persistence, lock enforcement, and teleport safety
-are never throttled.
+are never throttled. Batchable workloads receive separate fair slices of the
+shared tick budget, and concurrent tree jobs rotate between players.
 
 ## Languages
 

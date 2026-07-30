@@ -12,7 +12,11 @@ import java.time.Clock;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class PerformanceGovernorTest {
 
@@ -46,15 +50,44 @@ class PerformanceGovernorTest {
         assertEquals(0.6, governor.particleScale());
     }
 
+    @Test
+    void logsOnlyWhenTheGovernorLevelActuallyChanges() {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        Logger logger = mock(Logger.class);
+        when(plugin.getLogger()).thenReturn(logger);
+        PerformanceGovernor governor = new PerformanceGovernor(
+                plugin,
+                new SettingsService(settings()),
+                new TaskFailureIsolation(quietLogger(), Clock.systemUTC())
+        );
+
+        governor.sample(42.0);
+        governor.sample(43.0);
+        for (int sample = 0; sample < 15; sample++) {
+            governor.sample(30.0);
+        }
+
+        verify(logger, times(1)).warning(anyString());
+        verify(logger, times(1)).info(anyString());
+    }
+
     private PerformanceGovernor governor() {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getLogger()).thenReturn(quietLogger());
         return new PerformanceGovernor(
-                mock(JavaPlugin.class),
+                plugin,
                 new SettingsService(settings()),
                 new TaskFailureIsolation(
-                        Logger.getLogger(PerformanceGovernorTest.class.getName()),
+                        quietLogger(),
                         Clock.systemUTC()
                 )
         );
+    }
+
+    private Logger quietLogger() {
+        Logger logger = Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        return logger;
     }
 
     private PluginSettings settings() {

@@ -91,6 +91,9 @@ permissions:
   survivaltweaks.command.doctor:
     description: Allows running SurvivalTweaks data and configuration diagnostics.
     default: op
+  survivaltweaks.command.performance:
+    description: Allows inspecting adaptive performance and deferred work status.
+    default: op
   survivaltweaks.command.spawnpool:
     description: Allows inspecting and managing the new-player spawn pool.
     default: op

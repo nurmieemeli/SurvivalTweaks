@@ -477,7 +477,8 @@ public class AtmosphereService implements Listener, AutoCloseable {
                 }
                 int divisor = governor == null ? 1 : governor.cosmeticDivisor();
                 if (Math.floorMod(cycle / 4L + player.getUniqueId().hashCode(), divisor) != 0
-                        || (workBudget != null && !workBudget.tryAcquire(1))) {
+                        || (workBudget != null
+                        && !workBudget.tryAcquire(TickWorkBudget.Lane.ATMOSPHERE, 1))) {
                     continue;
                 }
                 ThreadLocalRandom random = ThreadLocalRandom.current();
