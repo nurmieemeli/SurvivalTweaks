@@ -405,8 +405,6 @@ player-list:
   show-mspt: true
   show-world: true
   show-unread-notifications: true
-  # Players with survivaltweaks.playerlist.staff receive a subtle star badge.
-  staff-badges: true
   afk:
     enabled: true
     after-seconds: 300

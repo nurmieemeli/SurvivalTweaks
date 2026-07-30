@@ -82,9 +82,6 @@ permissions:
   survivaltweaks.profile.bypass:
     description: Allows viewing player profiles and statistics hidden by their owners.
     default: op
-  survivaltweaks.playerlist.staff:
-    description: Shows the staff badge beside the player in the enhanced player list.
-    default: op
   survivaltweaks.command.deathlocation:
     description: Allows viewing a death marker and claiming its recovery compass.
     default: true

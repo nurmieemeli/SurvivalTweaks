@@ -61,7 +61,6 @@ class PluginResourcesTest {
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.backup"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.enchant"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.afk"));
-        assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.playerlist.staff"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.maintenance"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.maintenance.bypass"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.mail"));

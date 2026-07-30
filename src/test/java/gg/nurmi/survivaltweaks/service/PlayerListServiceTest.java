@@ -1,14 +1,10 @@
 package gg.nurmi.survivaltweaks.service;
 
-import gg.nurmi.survivaltweaks.config.PluginSettings;
-import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class PlayerListServiceTest {
 
@@ -58,24 +54,9 @@ class PlayerListServiceTest {
     }
 
     @Test
-    void staffBadgeRequiresBothTheSettingAndPermission() {
-        PluginSettings settings = mock(PluginSettings.class);
-        Player player = mock(Player.class);
-        when(settings.playerListStaffBadges()).thenReturn(true);
-        when(player.hasPermission("survivaltweaks.playerlist.staff")).thenReturn(true);
-
-        assertTrue(PlayerListService.staffBadgeVisible(settings, player));
-
-        when(settings.playerListStaffBadges()).thenReturn(false);
-        assertFalse(PlayerListService.staffBadgeVisible(settings, player));
-    }
-
-    @Test
-    void rowsGroupActiveStaffActivePlayersAndAfkPlayersInThatOrder() {
-        assertEquals(0, PlayerListService.rowPriority(true, false));
-        assertEquals(1, PlayerListService.rowPriority(false, false));
-        assertEquals(2, PlayerListService.rowPriority(true, true));
-        assertEquals(3, PlayerListService.rowPriority(false, true));
+    void rowsKeepActivePlayersAheadOfAfkPlayers() {
+        assertEquals(0, PlayerListService.rowPriority(false));
+        assertEquals(1, PlayerListService.rowPriority(true));
     }
 
     @Test

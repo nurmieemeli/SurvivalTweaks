@@ -79,7 +79,6 @@ public record PluginSettings(
         boolean playerListShowMspt,
         boolean playerListShowWorld,
         boolean playerListShowUnreadNotifications,
-        boolean playerListStaffBadges,
         boolean afkIndicatorsEnabled,
         Duration afkTimeout,
         boolean sleepVotingEnabled,
@@ -237,7 +236,6 @@ public record PluginSettings(
                 config.getBoolean("player-list.show-mspt", true),
                 config.getBoolean("player-list.show-world", true),
                 config.getBoolean("player-list.show-unread-notifications", true),
-                config.getBoolean("player-list.staff-badges", true),
                 config.getBoolean("player-list.afk.enabled", true),
                 Duration.ofSeconds(boundedInt(
                         config,
@@ -394,7 +392,6 @@ public record PluginSettings(
                 strictBoolean(config, errors, "player-list.show-mspt"),
                 strictBoolean(config, errors, "player-list.show-world"),
                 strictBoolean(config, errors, "player-list.show-unread-notifications"),
-                strictBoolean(config, errors, "player-list.staff-badges"),
                 strictBoolean(config, errors, "player-list.afk.enabled"),
                 Duration.ofSeconds(strictInt(
                         config,

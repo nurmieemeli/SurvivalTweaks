@@ -262,7 +262,6 @@ public final class PlayerListService implements Listener, AutoCloseable {
         ArrayList<Player> players = new ArrayList<>(context.players());
         players.sort(
                 Comparator.comparingInt((Player player) -> rowPriority(
-                                staffBadgeVisible(current, player),
                                 current.afkIndicatorsEnabled()
                                         && afk.isAfk(player.getUniqueId())
                         ))
@@ -274,15 +273,10 @@ public final class PlayerListService implements Listener, AutoCloseable {
             Player player = players.get(index);
             UUID playerId = player.getUniqueId();
             online.add(playerId);
-            boolean staffVisible = staffBadgeVisible(current, player);
             boolean awayVisible = current.afkIndicatorsEnabled() && afk.isAfk(playerId);
             RowState state = new RowState(
                     index,
                     player.getName(),
-                    player.getWorld().getUID(),
-                    player.getWorld().getName(),
-                    player.getWorld().getEnvironment(),
-                    staffVisible,
                     awayVisible
             );
             if (state.equals(rowStates.put(playerId, state))) {
@@ -290,17 +284,12 @@ public final class PlayerListService implements Listener, AutoCloseable {
             }
             Component formattedName = messages.formatPlayerName(player, settings);
             player.setPlayerListOrder(index);
-            Component staff = staffVisible
-                    ? messages.component("player-list.staff-marker")
-                    : Component.empty();
             Component away = awayVisible
                     ? messages.component("player-list.afk-marker")
                     : Component.empty();
             player.playerListName(messages.component(
                     "player-list.entry",
-                    Placeholder.component("world", worldMarker(player.getWorld())),
                     Placeholder.component("player", formattedName),
-                    Placeholder.component("staff", staff),
                     Placeholder.component("afk", away)
             ));
         }
@@ -449,16 +438,6 @@ public final class PlayerListService implements Listener, AutoCloseable {
                 ));
     }
 
-    private Component worldMarker(World world) {
-        String key = switch (world.getEnvironment()) {
-            case NORMAL -> "player-list.marker.overworld";
-            case NETHER -> "player-list.marker.nether";
-            case THE_END -> "player-list.marker.end";
-            default -> "player-list.marker.custom";
-        };
-        return messages.component(key);
-    }
-
     private String greetingKey() {
         int hour = LocalTime.now(ZoneId.systemDefault()).getHour();
         if (hour < 5) {
@@ -499,13 +478,8 @@ public final class PlayerListService implements Listener, AutoCloseable {
         return root.equals("/afk") || root.equals("/away") || root.equals("/poissa");
     }
 
-    static boolean staffBadgeVisible(PluginSettings settings, Player player) {
-        return settings.playerListStaffBadges()
-                && player.hasPermission("survivaltweaks.playerlist.staff");
-    }
-
-    static int rowPriority(boolean staff, boolean afk) {
-        return (afk ? 2 : 0) + (staff ? 0 : 1);
+    static int rowPriority(boolean afk) {
+        return afk ? 1 : 0;
     }
 
     static long worldTimeMinutes(long ticks) {
@@ -620,10 +594,6 @@ public final class PlayerListService implements Listener, AutoCloseable {
     private record RowState(
             int order,
             String playerName,
-            UUID worldId,
-            String worldName,
-            World.Environment environment,
-            boolean staff,
             boolean afk
     ) {
     }

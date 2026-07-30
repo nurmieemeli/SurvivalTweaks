@@ -38,7 +38,6 @@ class PluginSettingsTest {
         assertTrue(settings.newPlayerSpawnBlockedBiomes().contains("minecraft:ocean"));
         assertTrue(settings.playerListEnabled());
         assertTrue(settings.playerListShowMspt());
-        assertTrue(settings.playerListStaffBadges());
         assertEquals(2, settings.playerListRefreshSeconds());
         assertEquals(300, settings.afkTimeout().toSeconds());
         assertTrue(settings.sleepVotingEnabled());

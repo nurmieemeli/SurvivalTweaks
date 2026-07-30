@@ -62,7 +62,7 @@ defaults are introduced.
 | Container locks | Double-chest-aware locks with trusted, deposit-only, and public access; owner menus; access history; transfer; and per-lock hopper policy |
 | Death recovery | Persistent death markers, a bound recovery compass, Nether/Overworld distance scaling, and a private floating guide—without a `/back` teleport |
 | Player hub | `/survival` brings homes, requests, locks, recovery, notifications, mail, profiles, statistics, guidance, and preferences into one interface |
-| Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, unread notifications, and staff badges |
+| Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, and unread notifications |
 | Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
 | First sessions | Pre-generated unique spawn locations, onboarding, a journey tracker, and contextual explanations of vanilla mechanics |
 | Custom enchantments | Tunneling, Excavation, Cultivation, Felling, Beheading, Deflection, and Surefooted through enchanting tables, structure loot, librarians, books, anvils, and grindstones |

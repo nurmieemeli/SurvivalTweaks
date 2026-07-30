@@ -60,14 +60,8 @@ player-list:
     thunder: "<red>Thunder</red>"
   unread: "<yellow><count> unread notifications</yellow>"
   unread-one: "<yellow><count> unread notification</yellow>"
-  entry: "<world> <gray><player></gray><staff><afk>"
-  staff-marker: " <gold>★</gold>"
+  entry: "<gray><player></gray><afk>"
   afk-marker: " <yellow>[AFK]</yellow>"
-  marker:
-    overworld: "<green>●</green>"
-    nether: "<red>●</red>"
-    end: "<light_purple>●</light_purple>"
-    custom: "<aqua>●</aqua>"
   world:
     overworld: "<green>Overworld</green>"
     nether: "<red>Nether</red>"

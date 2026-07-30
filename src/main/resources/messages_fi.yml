@@ -60,14 +60,8 @@ player-list:
     thunder: "<red>Ukkosta</red>"
   unread: "<yellow><count> lukematonta ilmoitusta</yellow>"
   unread-one: "<yellow><count> lukematon ilmoitus</yellow>"
-  entry: "<world> <gray><player></gray><staff><afk>"
-  staff-marker: " <gold>★</gold>"
+  entry: "<gray><player></gray><afk>"
   afk-marker: " <yellow>[AFK]</yellow>"
-  marker:
-    overworld: "<green>●</green>"
-    nether: "<red>●</red>"
-    end: "<light_purple>●</light_purple>"
-    custom: "<aqua>●</aqua>"
   world:
     overworld: "<green>Ylämaailma</green>"
     nether: "<red>Nether</red>"
