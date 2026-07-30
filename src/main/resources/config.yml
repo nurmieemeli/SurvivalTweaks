@@ -1,3 +1,5 @@
+config-version: 1
+
 home:
   max-amount: 3
 
@@ -274,6 +276,20 @@ feedback:
       particle: "ANGRY_VILLAGER"
       count: 4
       spread: 0.25
+    afk-enabled:
+      sound: "minecraft:block.note_block.bass"
+      volume: 0.45
+      pitch: 0.8
+      particle: "SMOKE"
+      count: 4
+      spread: 0.25
+    afk-disabled:
+      sound: "minecraft:block.note_block.chime"
+      volume: 0.5
+      pitch: 1.35
+      particle: "HAPPY_VILLAGER"
+      count: 6
+      spread: 0.25
     mention:
       sound: "minecraft:entity.experience_orb.pickup"
       volume: 0.65
@@ -414,3 +430,9 @@ player-list:
   afk:
     enabled: true
     after-seconds: 300
+
+# Checks GitHub away from the server thread and only informs authorized administrators.
+updates:
+  enabled: true
+  check-interval-hours: 6
+  join-delay-ticks: 60

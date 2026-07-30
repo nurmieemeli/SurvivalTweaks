@@ -7,6 +7,7 @@ import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
+import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
 import org.bukkit.entity.Player;
@@ -37,6 +38,7 @@ class ConnectionLifecycleIntegrationTest {
         NewPlayerSpawnService spawns = mock(NewPlayerSpawnService.class);
         WelcomeBackController welcomeBack = mock(WelcomeBackController.class);
         PlayerExperienceService experience = mock(PlayerExperienceService.class);
+        ReleaseUpdateService releaseUpdates = mock(ReleaseUpdateService.class);
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(playerId);
         when(configuration.connectionMessagesEnabled()).thenReturn(false);
@@ -50,7 +52,8 @@ class ConnectionLifecycleIntegrationTest {
                 notifications,
                 spawns,
                 welcomeBack,
-                experience
+                experience,
+                releaseUpdates
         );
         AsyncPlayerPreLoginEvent preLogin = mock(AsyncPlayerPreLoginEvent.class);
         when(preLogin.getLoginResult()).thenReturn(AsyncPlayerPreLoginEvent.Result.ALLOWED);
@@ -72,6 +75,7 @@ class ConnectionLifecycleIntegrationTest {
         verify(experience, times(2)).prime(playerId);
         verify(welcomeBack, times(2)).playerJoined(player);
         verify(spawns, times(2)).playerJoined(player);
+        verify(releaseUpdates, times(2)).playerJoined(player);
         verify(welcomeBack).playerLeaving(player);
         verify(profiles).playerDisconnected(playerId);
         verify(experience).forget(playerId);

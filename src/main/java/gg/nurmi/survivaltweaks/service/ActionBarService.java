@@ -12,6 +12,7 @@ import java.util.UUID;
 public final class ActionBarService {
 
     public static final int LOCK_HINT_PRIORITY = 10;
+    public static final int ANVIL_PRIORITY = 20;
     public static final int SLEEP_PRIORITY = 30;
     public static final int TELEPORT_COOLDOWN_PRIORITY = 50;
     public static final int TELEPORT_PRIORITY = 100;

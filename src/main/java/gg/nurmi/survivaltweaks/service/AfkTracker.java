@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -59,16 +60,20 @@ public final class AfkTracker {
     }
 
     public boolean updateAutomatic(Collection<UUID> onlinePlayers, Duration timeout) {
+        return !newlyAutomaticAfk(onlinePlayers, timeout).isEmpty();
+    }
+
+    public Set<UUID> newlyAutomaticAfk(Collection<UUID> onlinePlayers, Duration timeout) {
         long now = clock.millis();
         long timeoutMillis = timeout.toMillis();
-        boolean changed = false;
+        Set<UUID> changed = new LinkedHashSet<>();
         for (UUID playerId : onlinePlayers) {
             long lastSeen = lastActivity.computeIfAbsent(playerId, ignored -> now);
-            if (now - lastSeen >= timeoutMillis) {
-                changed |= afkPlayers.add(playerId);
+            if (now - lastSeen >= timeoutMillis && afkPlayers.add(playerId)) {
+                changed.add(playerId);
             }
         }
-        return changed;
+        return Set.copyOf(changed);
     }
 
     public boolean isAfk(UUID playerId) {

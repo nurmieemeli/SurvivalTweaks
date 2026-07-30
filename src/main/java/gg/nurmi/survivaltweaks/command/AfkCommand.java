@@ -1,6 +1,5 @@
 package gg.nurmi.survivaltweaks.command;
 
-import gg.nurmi.survivaltweaks.service.AfkTracker;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.PlayerListService;
 import org.bukkit.command.Command;
@@ -30,11 +29,8 @@ public final class AfkCommand implements CommandExecutor {
             messages.send(sender, "player-only");
             return true;
         }
-        AfkTracker.State state = playerList.toggleAfk(player);
-        if (state == null) {
+        if (playerList.toggleAfk(player) == null) {
             messages.send(player, "afk.unavailable");
-        } else {
-            messages.send(player, state == AfkTracker.State.AFK ? "afk.enabled" : "afk.disabled");
         }
         return true;
     }

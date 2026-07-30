@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
+import gg.nurmi.survivaltweaks.config.ConfigMigrationService;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -93,6 +94,7 @@ public final class ReloadService {
             backups.create("reload");
         }
         YamlConfiguration candidateConfig = loadCandidateConfig();
+        ConfigMigrationService.requireCurrent(candidateConfig);
         return new Prepared(
                 PluginSettings.validate(candidateConfig),
                 messages.prepareReload(),

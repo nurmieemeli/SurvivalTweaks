@@ -92,6 +92,26 @@ other operational problems. Its worker is
 cancelled and joined during shutdown so a late report cannot outlive the plugin
 classloader.
 
+## Configuration migrations and release notices
+
+`config-version` identifies the configuration schema. Startup first creates its
+normal safety backup, then applies ordered migrations for older schemas. Known
+obsolete command-disabling and physical recovery-compass settings are removed;
+unrelated server customizations are preserved. A successful migration writes
+`config-migration-report.txt` in the plugin data folder and logs its schema
+range. A configuration created by a newer unsupported plugin build is rejected
+to prevent a destructive downgrade. Reloads require the current schema, so an
+outdated file is migrated by restarting once.
+
+The `updates` section controls the administrator release notice. Players need
+`survivaltweaks.update-notify` (operator by default). The GitHub repository is
+derived from the website in plugin metadata. The check runs asynchronously
+after `join-delay-ticks`, finds the actual downloadable
+`SurvivalTweaks-<version>.jar`, compares its filename version with the running
+build, uses short network timeouts, and caches the result for
+`check-interval-hours`. Network, API, or missing-asset failure never blocks
+joining and produces no player-facing error.
+
 ## First-join spawn pool
 
 New players can be placed at unique, pre-generated Overworld locations so

@@ -56,6 +56,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
     private final SettingsService settings;
     private final NotificationService notifications;
     private final PlayerExperienceService experience;
+    private final FeedbackService feedback;
     private final AfkTracker afk;
     private final TaskFailureIsolation failures;
     private final Map<UUID, RowState> rowStates = new HashMap<>();
@@ -69,9 +70,10 @@ public final class PlayerListService implements Listener, AutoCloseable {
             SettingsService settings,
             NotificationService notifications,
             PlayerExperienceService experience,
+            FeedbackService feedback,
             Clock clock
     ) {
-        this(plugin, messages, settings, notifications, experience, clock, null);
+        this(plugin, messages, settings, notifications, experience, feedback, clock, null);
     }
 
     public PlayerListService(
@@ -80,6 +82,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             SettingsService settings,
             NotificationService notifications,
             PlayerExperienceService experience,
+            FeedbackService feedback,
             Clock clock,
             TaskFailureIsolation failures
     ) {
@@ -89,6 +92,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.notifications = Objects.requireNonNull(notifications, "notifications");
         this.experience = Objects.requireNonNull(experience, "experience");
+        this.feedback = Objects.requireNonNull(feedback, "feedback");
         this.afk = new AfkTracker(Objects.requireNonNull(clock, "clock"));
         this.failures = failures;
     }
@@ -124,6 +128,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             return null;
         }
         AfkTracker.State state = afk.toggle(player.getUniqueId());
+        showAfkTransition(player, state);
         rowsDirty = true;
         refresh();
         return state;
@@ -161,6 +166,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
     public void onMove(PlayerMoveEvent event) {
         if (event.hasExplicitlyChangedPosition() || event.hasChangedOrientation()) {
             if (afk.movementActivity(event.getPlayer().getUniqueId())) {
+                showAfkTransition(event.getPlayer(), AfkTracker.State.ACTIVE);
                 rowsDirty = true;
                 refresh();
             }
@@ -224,6 +230,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
     public void onChat(AsyncChatEvent event) {
         if (afk.activity(event.getPlayer().getUniqueId())) {
             server.getScheduler().runTask(plugin, () -> {
+                showAfkTransition(event.getPlayer(), AfkTracker.State.ACTIVE);
                 rowsDirty = true;
                 refresh();
             });
@@ -259,8 +266,16 @@ public final class PlayerListService implements Listener, AutoCloseable {
         ArrayList<Player> players = new ArrayList<>(server.getOnlinePlayers());
         ArrayList<UUID> online = new ArrayList<>(players.size());
         players.forEach(player -> online.add(player.getUniqueId()));
-        if (current.afkIndicatorsEnabled()
-                && afk.updateAutomatic(online, current.afkTimeout())) {
+        Set<UUID> newlyAway = current.afkIndicatorsEnabled()
+                ? afk.newlyAutomaticAfk(online, current.afkTimeout())
+                : Set.of();
+        if (!newlyAway.isEmpty()) {
+            newlyAway.forEach(playerId -> {
+                Player player = server.getPlayer(playerId);
+                if (player != null) {
+                    showAfkTransition(player, AfkTracker.State.AFK);
+                }
+            });
             rowsDirty = true;
         }
         int away = 0;
@@ -291,9 +306,16 @@ public final class PlayerListService implements Listener, AutoCloseable {
 
     private void activity(Player player) {
         if (afk.activity(player.getUniqueId())) {
+            showAfkTransition(player, AfkTracker.State.ACTIVE);
             rowsDirty = true;
             refresh();
         }
+    }
+
+    private void showAfkTransition(Player player, AfkTracker.State state) {
+        boolean away = state == AfkTracker.State.AFK;
+        messages.send(player, away ? "afk.enabled" : "afk.disabled");
+        feedback.play(player, away ? FeedbackService.AFK_ENABLED : FeedbackService.AFK_DISABLED);
     }
 
     private void refreshRows(RefreshContext context) {

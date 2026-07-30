@@ -64,6 +64,7 @@ class PluginResourcesTest {
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.afk"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.maintenance"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.maintenance.bypass"));
+        assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.update-notify"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.mail"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.profile"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.stats"));
@@ -94,6 +95,8 @@ class PluginResourcesTest {
         assertNotNull(english.getString("player-list.weather.thunder"));
         assertNotNull(english.getString("player-list.afk-marker"));
         assertNotNull(english.getString("afk.enabled"));
+        assertNotNull(english.getString("updates.available"));
+        assertNotNull(english.getString("enchantments.anvil.too-expensive"));
         assertNotNull(english.getString("sleep.progress"));
         assertNotNull(english.getString("server-list.motd"));
         assertNotNull(english.getString("maintenance.restart-warning"));
@@ -169,6 +172,11 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.maintenance-warning.sound"));
         assertNotNull(config.getString("feedback.cues.enchant-discovered.sound"));
         assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
+        assertNotNull(config.getString("feedback.cues.afk-enabled.sound"));
+        assertNotNull(config.getString("feedback.cues.afk-disabled.particle"));
+        assertEquals(1, config.getInt("config-version"));
+        assertTrue(config.getBoolean("updates.enabled"));
+        assertEquals(6, config.getInt("updates.check-interval-hours"));
         assertNotNull(finnish.getString("lock.denied-open"));
     }
 

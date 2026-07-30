@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,12 +34,13 @@ class CustomEnchantAcquisitionServiceTest {
     private final CustomEnchantItemService items = mock(CustomEnchantItemService.class);
     private final MessageService messages = mock(MessageService.class);
     private final FeedbackService feedback = mock(FeedbackService.class);
+    private final ActionBarService actionBars = mock(ActionBarService.class);
     private final RandomGenerator random = mock(RandomGenerator.class);
     private CustomEnchantAcquisitionService service;
 
     @BeforeEach
     void setUp() {
-        service = new CustomEnchantAcquisitionService(items, messages, feedback, random);
+        service = new CustomEnchantAcquisitionService(items, messages, feedback, actionBars, random);
         when(random.nextInt(anyInt())).thenReturn(0);
     }
 
@@ -88,6 +90,7 @@ class CustomEnchantAcquisitionServiceTest {
         when(event.getInventory()).thenReturn(inventory);
         when(event.getView()).thenReturn(view);
         when(view.getPlayer()).thenReturn(player);
+        when(view.getMaximumRepairCost()).thenReturn(40);
         when(inventory.getFirstItem()).thenReturn(first);
         when(inventory.getSecondItem()).thenReturn(second);
         when(first.clone()).thenReturn(result);
@@ -98,6 +101,7 @@ class CustomEnchantAcquisitionServiceTest {
 
         verify(event).setResult(result);
         verify(view).setRepairCost(5);
+        verify(view, never()).setMaximumRepairCost(anyInt());
     }
 
     private ItemStack item(Material material) {

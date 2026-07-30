@@ -21,6 +21,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,25 +43,29 @@ public final class CustomEnchantAcquisitionService implements Listener {
     private final CustomEnchantItemService items;
     private final MessageService messages;
     private final FeedbackService feedback;
+    private final ActionBarService actionBars;
     private final RandomGenerator random;
 
     public CustomEnchantAcquisitionService(
             CustomEnchantItemService items,
             MessageService messages,
-            FeedbackService feedback
+            FeedbackService feedback,
+            ActionBarService actionBars
     ) {
-        this(items, messages, feedback, RandomGenerator.getDefault());
+        this(items, messages, feedback, actionBars, RandomGenerator.getDefault());
     }
 
     CustomEnchantAcquisitionService(
             CustomEnchantItemService items,
             MessageService messages,
             FeedbackService feedback,
+            ActionBarService actionBars,
             RandomGenerator random
     ) {
         this.items = Objects.requireNonNull(items, "items");
         this.messages = Objects.requireNonNull(messages, "messages");
         this.feedback = Objects.requireNonNull(feedback, "feedback");
+        this.actionBars = Objects.requireNonNull(actionBars, "actionBars");
         this.random = Objects.requireNonNull(random, "random");
     }
 
@@ -135,14 +140,23 @@ public final class CustomEnchantAcquisitionService implements Listener {
 
         Map<CustomEnchantment, Integer> supplied = items.enchantments(second);
         if (supplied.isEmpty()) {
+            showVanillaCostStatus(event);
             return;
         }
 
         ItemStack result = event.getResult() == null ? first.clone() : event.getResult().clone();
         int appliedLevels = 0;
+        boolean incompatibleItem = false;
+        boolean conflict = false;
+        boolean maximumLevel = false;
         for (Map.Entry<CustomEnchantment, Integer> entry : supplied.entrySet()) {
             CustomEnchantment enchantment = entry.getKey();
-            if (!enchantment.canApply(result) || enchantment.conflictsWith(result)) {
+            if (!enchantment.canApply(result)) {
+                incompatibleItem = true;
+                continue;
+            }
+            if (enchantment.conflictsWith(result)) {
+                conflict = true;
                 continue;
             }
             int current = items.level(result, enchantment);
@@ -150,7 +164,11 @@ public final class CustomEnchantAcquisitionService implements Listener {
             int combined = current == suppliedLevel
                     ? Math.min(enchantment.maxLevel(), current + 1)
                     : Math.max(current, suppliedLevel);
-            if (combined <= current || !items.apply(
+            if (combined <= current) {
+                maximumLevel = true;
+                continue;
+            }
+            if (!items.apply(
                     result,
                     enchantment,
                     combined,
@@ -161,6 +179,16 @@ public final class CustomEnchantAcquisitionService implements Listener {
             appliedLevels += combined;
         }
         if (appliedLevels == 0) {
+            showAnvilStatus(
+                    event,
+                    conflict
+                            ? "enchantments.anvil.conflict"
+                            : incompatibleItem
+                            ? "enchantments.anvil.incompatible"
+                            : maximumLevel
+                            ? "enchantments.anvil.maximum"
+                            : "enchantments.anvil.no-change"
+            );
             return;
         }
 
@@ -170,11 +198,11 @@ public final class CustomEnchantAcquisitionService implements Listener {
             meta.customName(Component.text(rename));
             result.setItemMeta(meta);
         }
-        event.getView().setMaximumRepairCost(100);
         event.getView().setRepairCost(
                 Math.max(1, event.getView().getRepairCost()) + appliedLevels * 4
         );
         event.setResult(result);
+        showVanillaCostStatus(event);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -236,5 +264,34 @@ public final class CustomEnchantAcquisitionService implements Listener {
 
     private boolean nonEmpty(ItemStack item) {
         return item != null && !item.isEmpty();
+    }
+
+    private void showVanillaCostStatus(PrepareAnvilEvent event) {
+        int cost = event.getView().getRepairCost();
+        if (cost >= event.getView().getMaximumRepairCost()
+                && event.getView().getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+            showAnvilStatus(event, "enchantments.anvil.too-expensive");
+        } else if (!items.enchantments(event.getInventory().getSecondItem()).isEmpty()) {
+            showAnvilStatus(
+                    event,
+                    "enchantments.anvil.ready",
+                    Placeholder.unparsed("cost", Integer.toString(cost))
+            );
+        }
+    }
+
+    private void showAnvilStatus(
+            PrepareAnvilEvent event,
+            String message,
+            net.kyori.adventure.text.minimessage.tag.resolver.TagResolver... placeholders
+    ) {
+        if (event.getView().getPlayer() instanceof Player player) {
+            actionBars.show(
+                    player,
+                    messages.component(player, message, placeholders),
+                    ActionBarService.ANVIL_PRIORITY,
+                    Duration.ofSeconds(4)
+            );
+        }
     }
 }

@@ -12,6 +12,7 @@ import gg.nurmi.survivaltweaks.command.lock.UnlockCommand;
 import gg.nurmi.survivaltweaks.command.teleport.TeleportAcceptCommand;
 import gg.nurmi.survivaltweaks.command.teleport.TeleportCommand;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
+import gg.nurmi.survivaltweaks.config.ConfigMigrationService;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.listener.ChatListener;
@@ -53,6 +54,7 @@ import gg.nurmi.survivaltweaks.service.DecorationProtectionService;
 import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
 import gg.nurmi.survivaltweaks.service.PetProtectionService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
+import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
 import gg.nurmi.survivaltweaks.service.TickWorkBudget;
@@ -115,6 +117,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private TreeFellerService treeFeller;
     private PerformanceGovernor performanceGovernor;
     private TaskFailureIsolation taskFailures;
+    private ReleaseUpdateService releaseUpdates;
     private TickWorkBudget workBudget;
     private BukkitTask autosaveTask;
     private BukkitTask purgeTask;
@@ -137,6 +140,15 @@ public final class SurvivalTweaks extends JavaPlugin {
                     exception
             );
         }
+        try {
+            ConfigMigrationService.Result migration = new ConfigMigrationService(clock, getLogger())
+                    .migrate(getConfig(), getDataFolder().toPath());
+            if (migration.changed()) {
+                saveConfig();
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not migrate config.yml safely", exception);
+        }
         mergeConfigDefaults();
 
         PluginSettings initialSettings = PluginSettings.load(getConfig(), getLogger());
@@ -154,6 +166,7 @@ public final class SurvivalTweaks extends JavaPlugin {
             saveConfig();
         }
         feedback = new FeedbackService(getConfig(), getLogger());
+        releaseUpdates = new ReleaseUpdateService(this, messages, getConfig(), clock);
         ProfileStore profileStore = new ProfileStore(
                 getDataFolder().toPath().resolve("userdata"),
                 getLogger(),
@@ -195,6 +208,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 settings,
                 notifications,
                 experience,
+                feedback,
                 clock,
                 taskFailures
         );
@@ -569,6 +583,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             performanceGovernor.close();
             performanceGovernor = null;
         }
+        if (releaseUpdates != null) {
+            releaseUpdates.close();
+            releaseUpdates = null;
+        }
         teleportRequests = null;
         settings = null;
         messages = null;
@@ -614,7 +632,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                         notifications,
                         newPlayerSpawns,
                         welcomeBack,
-                        experience
+                        experience,
+                        releaseUpdates
                 ),
                 this
         );
@@ -663,7 +682,12 @@ public final class SurvivalTweaks extends JavaPlugin {
         pluginManager.registerEvents(hub, this);
         pluginManager.registerEvents(journeyMenu, this);
         pluginManager.registerEvents(
-                new CustomEnchantAcquisitionService(customEnchantments, messages, feedback),
+                new CustomEnchantAcquisitionService(
+                        customEnchantments,
+                        messages,
+                        feedback,
+                        actionBars
+                ),
                 this
         );
         pluginManager.registerEvents(
@@ -832,6 +856,9 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         if (serverList != null) {
             serverList.reconfigure();
+        }
+        if (releaseUpdates != null) {
+            releaseUpdates.reconfigure(getConfig());
         }
     }
 

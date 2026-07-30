@@ -73,6 +73,10 @@ afk:
   disabled: "<green>You are no longer marked AFK.</green>"
   unavailable: "<red>AFK indicators are disabled on this server.</red>"
 
+updates:
+  available: "<gold>SurvivalTweaks <latest> is available.</gold> <gray>This server is running <current>.</gray> <link>"
+  open-hover: "<gray>Download the verified release JAR from GitHub.</gray>"
+
 sleep:
   progress: "<aqua>Sleeping: <white><sleeping>/<required></white> active players</aqua>"
   skipped: "<yellow>Enough active players slept. Good morning!</yellow>"
@@ -297,6 +301,13 @@ lock:
 
 enchantments:
   discovered: "<light_purple>The enchanting table revealed <enchantment> <level>.</light_purple>"
+  anvil:
+    ready: "<green>Custom enchantment ready</green> <dark_gray>•</dark_gray> <gray>Cost: <cost> levels</gray>"
+    too-expensive: "<red>Too expensive</red> <dark_gray>•</dark_gray> <gray>The vanilla anvil cost limit applies.</gray>"
+    incompatible: "<yellow>Incompatible item</yellow> <dark_gray>•</dark_gray> <gray>This enchantment cannot be applied here.</gray>"
+    conflict: "<yellow>Conflicting enchantments</yellow> <dark_gray>•</dark_gray> <gray>Remove the incompatible enchantment first.</gray>"
+    maximum: "<yellow>Maximum level reached</yellow> <dark_gray>•</dark_gray> <gray>This combination cannot raise it further.</gray>"
+    no-change: "<yellow>No enchantment change</yellow> <dark_gray>•</dark_gray> <gray>The supplied book adds nothing to this item.</gray>"
   tunneling:
     name: "Tunneling"
     description: "Breaks a 3×3 plane while sneaking with a pickaxe."

@@ -7,6 +7,7 @@ import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
+import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
 import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -28,6 +29,7 @@ public final class ConnectionListener implements Listener {
     private final NewPlayerSpawnService newPlayerSpawns;
     private final WelcomeBackController welcomeBack;
     private final PlayerExperienceService experience;
+    private final ReleaseUpdateService releaseUpdates;
 
     public ConnectionListener(
             ProfileRepository profiles,
@@ -37,7 +39,8 @@ public final class ConnectionListener implements Listener {
             NotificationService notifications,
             NewPlayerSpawnService newPlayerSpawns,
             WelcomeBackController welcomeBack,
-            PlayerExperienceService experience
+            PlayerExperienceService experience,
+            ReleaseUpdateService releaseUpdates
     ) {
         this.profiles = profiles;
         this.requests = requests;
@@ -47,6 +50,7 @@ public final class ConnectionListener implements Listener {
         this.newPlayerSpawns = newPlayerSpawns;
         this.welcomeBack = welcomeBack;
         this.experience = experience;
+        this.releaseUpdates = releaseUpdates;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -62,6 +66,7 @@ public final class ConnectionListener implements Listener {
         experience.prime(event.getPlayer().getUniqueId());
         welcomeBack.playerJoined(event.getPlayer());
         newPlayerSpawns.playerJoined(event.getPlayer());
+        releaseUpdates.playerJoined(event.getPlayer());
         long unread = notifications.unread(event.getPlayer().getUniqueId());
         if (unread > 0) {
             messages.send(

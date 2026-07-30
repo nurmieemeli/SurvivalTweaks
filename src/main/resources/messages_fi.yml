@@ -73,6 +73,10 @@ afk:
   disabled: "<green>Sinua ei enää ole merkitty poissa olevaksi.</green>"
   unavailable: "<red>AFK-ilmaisimet eivät ole käytössä tällä palvelimella.</red>"
 
+updates:
+  available: "<gold>SurvivalTweaks <latest> on saatavilla.</gold> <gray>Palvelimella on versio <current>.</gray> <link>"
+  open-hover: "<gray>Lataa tarkistettu julkaisu-JAR GitHubista.</gray>"
+
 sleep:
   progress: "<aqua>Nukkumassa: <white><sleeping>/<required></white> aktiivista pelaajaa</aqua>"
   skipped: "<yellow>Tarpeeksi aktiivisia pelaajia nukkui. Hyvää huomenta!</yellow>"
@@ -296,6 +300,13 @@ lock:
 
 enchantments:
   discovered: "<light_purple>Lumouspöytä paljasti lumouksen <enchantment> <level>.</light_purple>"
+  anvil:
+    ready: "<green>Mukautettu lumous on valmis</green> <dark_gray>•</dark_gray> <gray>Hinta: <cost> tasoa</gray>"
+    too-expensive: "<red>Liian kallis</red> <dark_gray>•</dark_gray> <gray>Vanilja-alasimen hintaraja on voimassa.</gray>"
+    incompatible: "<yellow>Yhteensopimaton esine</yellow> <dark_gray>•</dark_gray> <gray>Tätä lumousta ei voi lisätä tähän.</gray>"
+    conflict: "<yellow>Ristiriitaiset lumoukset</yellow> <dark_gray>•</dark_gray> <gray>Poista yhteensopimaton lumous ensin.</gray>"
+    maximum: "<yellow>Enimmäistaso saavutettu</yellow> <dark_gray>•</dark_gray> <gray>Tämä yhdistelmä ei voi korottaa tasoa.</gray>"
+    no-change: "<yellow>Lumous ei muutu</yellow> <dark_gray>•</dark_gray> <gray>Kirja ei lisää esineeseen mitään.</gray>"
   tunneling:
     name: "Tunnelointi"
     description: "Rikkoo hiipiessä 3×3-tason hakulla."

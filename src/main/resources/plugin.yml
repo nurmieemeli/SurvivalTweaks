@@ -109,6 +109,9 @@ permissions:
   survivaltweaks.maintenance.bypass:
     description: Allows joining during manual maintenance mode.
     default: op
+  survivaltweaks.update-notify:
+    description: Shows an administrator when a newer SurvivalTweaks release is available.
+    default: op
   survivaltweaks.command.home:
     description: Allows using /home.
     default: true

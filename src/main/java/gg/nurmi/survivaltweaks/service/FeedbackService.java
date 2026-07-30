@@ -44,6 +44,8 @@ public final class FeedbackService {
     public static final String ENCHANT_CULTIVATION = "enchant-cultivation";
     public static final String ENCHANT_BEHEADING = "enchant-beheading";
     public static final String ENCHANT_DEFLECTION = "enchant-deflection";
+    public static final String AFK_ENABLED = "afk-enabled";
+    public static final String AFK_DISABLED = "afk-disabled";
 
     private final Logger logger;
     private volatile State state;

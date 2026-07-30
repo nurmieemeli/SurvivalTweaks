@@ -62,7 +62,7 @@ defaults are introduced.
 | Container locks | Double-chest-aware locks with trusted, deposit-only, and public access; owner menus; access history; transfer; and per-lock hopper policy |
 | Death recovery | Persistent death markers, Nether/Overworld distance scaling, and an automatically restored private floating guide—without a `/back` teleport |
 | Player hub | `/survival` brings homes, requests, locks, recovery, notifications, mail, profiles, statistics, guidance, and preferences into one interface |
-| Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, and unread notifications |
+| Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, state-change feedback, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, and unread notifications |
 | Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
 | First sessions | Pre-generated unique spawn locations, onboarding, a journey tracker, and contextual explanations of vanilla mechanics |
 | Custom enchantments | Tunneling, Excavation, Cultivation, Felling, Beheading, Deflection, and Surefooted through enchanting tables, structure loot, librarians, books, anvils, and grindstones |
@@ -91,7 +91,9 @@ Enchanting tables can add one eligible custom enchantment as an unadvertised
 bonus after the selected vanilla enchantment is applied. The custom result is
 intentionally absent from the preview and is revealed after enchanting.
 Custom-enchanted books also appear in selected structure loot and librarian
-trades, combine through anvils, and are removed by grindstones.
+trades, combine through anvils, and are removed by grindstones. The anvil
+action bar explains custom compatibility, maximum levels, vanilla cost limits,
+and the final level cost without changing Minecraft's cost ceiling.
 
 ## Commands
 
@@ -166,16 +168,29 @@ feature:
 | `ui` | Chest interfaces, native dialogs, action bars, and lock hints |
 | `death-recovery`, `custom-death-messages` | Markers, an automatic floating guide, expiry, and environmental death variants |
 | `chat`, `connection-messages`, `mentions` | Formatting and social notifications |
-| `player-list`, `sleep`, `server-list` | Live metrics, AFK behavior, night voting, and multiplayer-list presentation |
+| `player-list`, `sleep`, `server-list` | Live metrics, AFK behavior and feedback, night voting, and multiplayer-list presentation |
+| `updates` | Cached asynchronous GitHub release checks and administrator join-notification delay |
 | `journey`, `welcome-back` | First-session progress, vanilla guidance, and return summaries |
 | `mail`, `player-profiles`, `statistics` | Availability, privacy, limits, and rate controls |
 | `maintenance` | Join blocking and restart safeguards |
+
+`config-version` drives ordered startup migrations. Before changing an older
+configuration, SurvivalTweaks creates its normal startup backup, removes known
+obsolete settings, preserves custom values, and writes
+`config-migration-report.txt` with a concise operator summary. A configuration
+from a newer unsupported schema is rejected instead of being rewritten.
 
 Startup replaces unsafe numeric values with logged safe defaults.
 `/survivaltweaks reload` is deliberately stricter: it validates the complete
 configuration, both language catalogs, MiniMessage templates, particles, and
 sound keys before applying anything. A rejected reload leaves the active
 configuration unchanged.
+
+Operators with `survivaltweaks.update-notify` receive a direct download link
+after joining when the release contains a newer `SurvivalTweaks-<version>.jar`.
+The repository is derived from the plugin metadata, and the downloadable
+artifact version is compared with the running build. Checks are asynchronous,
+cached for six hours by default, and never delay login or server ticks.
 
 The adaptive performance governor observes Paper's MSPT once per second. At the
 configured reduced and critical thresholds it lowers cosmetic cadence and
