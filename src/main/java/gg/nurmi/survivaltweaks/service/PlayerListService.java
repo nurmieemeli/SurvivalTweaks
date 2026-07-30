@@ -48,6 +48,7 @@ import java.util.UUID;
 public final class PlayerListService implements Listener, AutoCloseable {
 
     private static final Component SEPARATOR = Component.text(" • ", NamedTextColor.DARK_GRAY);
+    private static final long WORLD_TIME_STEP_MINUTES = 10L;
 
     private final JavaPlugin plugin;
     private final Server server;
@@ -232,10 +233,15 @@ public final class PlayerListService implements Listener, AutoCloseable {
         if (current.afkIndicatorsEnabled()) {
             afk.updateAutomatic(online, current.afkTimeout());
         }
+        int away = current.afkIndicatorsEnabled()
+                ? (int) online.stream().filter(afk::isAfk).count()
+                : 0;
         RefreshContext context = new RefreshContext(
                 current,
                 players,
                 players.size(),
+                players.size() - away,
+                away,
                 server.getMaxPlayers(),
                 greetingKey(),
                 quantizeTenths(oneMinuteTps()),
@@ -255,7 +261,12 @@ public final class PlayerListService implements Listener, AutoCloseable {
         PluginSettings current = context.settings();
         ArrayList<Player> players = new ArrayList<>(context.players());
         players.sort(
-                Comparator.comparing(Player::getName, String.CASE_INSENSITIVE_ORDER)
+                Comparator.comparingInt((Player player) -> rowPriority(
+                                staffBadgeVisible(current, player),
+                                current.afkIndicatorsEnabled()
+                                        && afk.isAfk(player.getUniqueId())
+                        ))
+                        .thenComparing(Player::getName, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(player -> player.getUniqueId().toString())
         );
         Set<UUID> online = new HashSet<>();
@@ -302,21 +313,31 @@ public final class PlayerListService implements Listener, AutoCloseable {
         long unread = current.playerListShowUnreadNotifications()
                 ? notifications.unread(player.getUniqueId())
                 : 0L;
+        World world = player.getWorld();
+        boolean showWorld = current.playerListShowWorld();
+        boolean worldDetails = showWorld
+                && world.getEnvironment() == World.Environment.NORMAL;
         ViewState state = new ViewState(
                 preferences.playerListEnabled(),
                 preferences.language(),
                 player.locale().getLanguage(),
                 player.getName(),
                 context.online(),
+                context.active(),
+                context.afk(),
                 context.maximum(),
                 context.greetingKey(),
                 current.playerListShowPing() ? player.getPing() : 0,
-                context.tpsTenths(),
-                context.msptTenths(),
-                player.getWorld().getUID(),
-                player.getWorld().getName(),
-                player.getWorld().getEnvironment(),
+                current.playerListShowTps() ? context.tpsTenths() : 0,
+                current.playerListShowMspt() ? context.msptTenths() : 0,
+                showWorld ? world.getUID() : null,
+                showWorld ? world.getName() : null,
+                showWorld ? world.getEnvironment() : null,
+                worldDetails ? worldTimeMinutes(world.getTime()) : -1,
+                worldDetails && world.hasStorm(),
+                worldDetails && world.isThundering(),
                 unread,
+                current.afkIndicatorsEnabled(),
                 current.playerListShowPing(),
                 current.playerListShowTps(),
                 current.playerListShowMspt(),
@@ -346,8 +367,12 @@ public final class PlayerListService implements Listener, AutoCloseable {
         PluginSettings current = context.settings();
         Component firstLine = messages.component(
                 player,
-                "player-list.online",
+                current.afkIndicatorsEnabled()
+                        ? "player-list.online-with-afk"
+                        : "player-list.online",
                 Placeholder.unparsed("online", Integer.toString(context.online())),
+                Placeholder.unparsed("active", Integer.toString(context.active())),
+                Placeholder.unparsed("afk", Integer.toString(context.afk())),
                 Placeholder.unparsed("maximum", Integer.toString(context.maximum()))
         );
         if (current.playerListShowPing()) {
@@ -377,7 +402,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             ));
         }
         if (current.playerListShowWorld()) {
-            performance.add(worldName(player));
+            performance.add(worldStatus(player));
         }
 
         Component footer = firstLine;
@@ -394,7 +419,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         return footer;
     }
 
-    private Component worldName(Player player) {
+    private Component worldStatus(Player player) {
         World world = player.getWorld();
         String key = switch (world.getEnvironment()) {
             case NORMAL -> "player-list.world.overworld";
@@ -402,11 +427,26 @@ public final class PlayerListService implements Listener, AutoCloseable {
             case THE_END -> "player-list.world.end";
             default -> "player-list.world.custom";
         };
-        return messages.component(
+        Component status = messages.component(
                 player,
                 key,
                 Placeholder.unparsed("world", world.getName())
         );
+        if (world.getEnvironment() != World.Environment.NORMAL) {
+            return status;
+        }
+        return status
+                .append(SEPARATOR)
+                .append(messages.component(
+                        player,
+                        "player-list.time",
+                        Placeholder.unparsed("time", formatWorldTime(world.getTime()))
+                ))
+                .append(SEPARATOR)
+                .append(messages.component(
+                        player,
+                        weatherKey(world.isThundering(), world.hasStorm())
+                ));
     }
 
     private Component worldMarker(World world) {
@@ -462,6 +502,30 @@ public final class PlayerListService implements Listener, AutoCloseable {
     static boolean staffBadgeVisible(PluginSettings settings, Player player) {
         return settings.playerListStaffBadges()
                 && player.hasPermission("survivaltweaks.playerlist.staff");
+    }
+
+    static int rowPriority(boolean staff, boolean afk) {
+        return (afk ? 2 : 0) + (staff ? 0 : 1);
+    }
+
+    static long worldTimeMinutes(long ticks) {
+        long dayTicks = Math.floorMod(ticks, 24_000L);
+        long minutes = ((dayTicks + 6_000L) % 24_000L) * 1_440L / 24_000L;
+        return minutes - minutes % WORLD_TIME_STEP_MINUTES;
+    }
+
+    static String formatWorldTime(long ticks) {
+        long minutes = worldTimeMinutes(ticks);
+        return String.format(Locale.ROOT, "%02d:%02d", minutes / 60L, minutes % 60L);
+    }
+
+    static String weatherKey(boolean thundering, boolean storming) {
+        if (thundering) {
+            return "player-list.weather.thunder";
+        }
+        return storming
+                ? "player-list.weather.rain"
+                : "player-list.weather.clear";
     }
 
     private Component metric(Player viewer, double value, NamedTextColor color, int decimals) {
@@ -544,6 +608,8 @@ public final class PlayerListService implements Listener, AutoCloseable {
             PluginSettings settings,
             List<Player> players,
             int online,
+            int active,
+            int afk,
             int maximum,
             String greetingKey,
             long tpsTenths,
@@ -568,6 +634,8 @@ public final class PlayerListService implements Listener, AutoCloseable {
             String localeLanguage,
             String playerName,
             int online,
+            int active,
+            int afk,
             int maximum,
             String greetingKey,
             int ping,
@@ -576,7 +644,11 @@ public final class PlayerListService implements Listener, AutoCloseable {
             UUID worldId,
             String worldName,
             World.Environment environment,
+            long worldTimeMinutes,
+            boolean storming,
+            boolean thundering,
             long unread,
+            boolean afkIndicators,
             boolean showPing,
             boolean showTps,
             boolean showMspt,

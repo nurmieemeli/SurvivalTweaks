@@ -88,7 +88,10 @@ class PluginResourcesTest {
         assertNotNull(english.getString("new-player-spawn.arrived"));
         assertNotNull(english.getString("new-player-spawn.replacing"));
         assertNotNull(english.getString("player-list.header"));
+        assertNotNull(english.getString("player-list.online-with-afk"));
         assertNotNull(english.getString("player-list.mspt"));
+        assertNotNull(english.getString("player-list.time"));
+        assertNotNull(english.getString("player-list.weather.thunder"));
         assertNotNull(english.getString("player-list.afk-marker"));
         assertNotNull(english.getString("afk.enabled"));
         assertNotNull(english.getString("sleep.progress"));

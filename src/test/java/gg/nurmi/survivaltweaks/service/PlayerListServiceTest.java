@@ -69,4 +69,33 @@ class PlayerListServiceTest {
         when(settings.playerListStaffBadges()).thenReturn(false);
         assertFalse(PlayerListService.staffBadgeVisible(settings, player));
     }
+
+    @Test
+    void rowsGroupActiveStaffActivePlayersAndAfkPlayersInThatOrder() {
+        assertEquals(0, PlayerListService.rowPriority(true, false));
+        assertEquals(1, PlayerListService.rowPriority(false, false));
+        assertEquals(2, PlayerListService.rowPriority(true, true));
+        assertEquals(3, PlayerListService.rowPriority(false, true));
+    }
+
+    @Test
+    void minecraftDayTimeFormatsAsACompactClock() {
+        assertEquals(360, PlayerListService.worldTimeMinutes(0));
+        assertEquals("06:00", PlayerListService.formatWorldTime(0));
+        assertEquals("12:00", PlayerListService.formatWorldTime(6_000));
+        assertEquals("18:00", PlayerListService.formatWorldTime(12_000));
+        assertEquals("00:00", PlayerListService.formatWorldTime(18_000));
+        assertEquals("06:00", PlayerListService.formatWorldTime(24_000));
+        assertEquals("00:00", PlayerListService.formatWorldTime(-6_000));
+        assertEquals("06:10", PlayerListService.formatWorldTime(250));
+        assertEquals("06:20", PlayerListService.formatWorldTime(416));
+    }
+
+    @Test
+    void thunderTakesPrecedenceOverRainInWeatherPresentation() {
+        assertEquals("player-list.weather.clear", PlayerListService.weatherKey(false, false));
+        assertEquals("player-list.weather.rain", PlayerListService.weatherKey(false, true));
+        assertEquals("player-list.weather.thunder", PlayerListService.weatherKey(true, true));
+        assertEquals("player-list.weather.thunder", PlayerListService.weatherKey(true, false));
+    }
 }
