@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.SurvivalTweaks;
 import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
@@ -30,7 +31,14 @@ class CustomEnchantItemServiceTest {
 
     private final SurvivalTweaks plugin = mock(SurvivalTweaks.class);
     private final MessageService messages = new MessageService(
-            Map.of("enchantments.tunneling.name", "Tunneling"),
+            Map.of(
+                    "enchantments.tunneling.name", "Tunneling",
+                    "enchantments.tunneling.description", "Breaks a 3x3 plane.",
+                    "enchantments.tooltip.activation-sneak", "Activation: sneak while using.",
+                    "enchantments.tooltip.activation-always", "Activation: always.",
+                    "enchantments.tooltip.conflict-looting", "Conflict: Looting.",
+                    "enchantments.tooltip.sources", "Sources: enchanting, loot, librarians, and anvils."
+            ),
             Map.of(),
             Logger.getAnonymousLogger()
     );
@@ -84,5 +92,27 @@ class CustomEnchantItemServiceTest {
         assertEquals("I", CustomEnchantItemService.roman(1));
         assertEquals("II", CustomEnchantItemService.roman(2));
         assertEquals("III", CustomEnchantItemService.roman(3));
+    }
+
+    @Test
+    void regularItemsExplainBehaviorActivationAndSources() {
+        when(item.getType()).thenReturn(Material.DIAMOND_PICKAXE);
+        when(data.get(any(NamespacedKey.class), eq(PersistentDataType.INTEGER)))
+                .thenAnswer(call -> {
+                    NamespacedKey key = call.getArgument(0);
+                    return key.getKey().contains("tunneling") ? 1 : null;
+                });
+
+        service.refresh(item, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Component>> lore = ArgumentCaptor.forClass(List.class);
+        verify(meta).lore(lore.capture());
+        String plain = lore.getValue().stream()
+                .map(PlainTextComponentSerializer.plainText()::serialize)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(plain.contains("Breaks a 3x3 plane."));
+        assertTrue(plain.contains("Activation: sneak"));
+        assertTrue(plain.contains("Sources: enchanting"));
     }
 }

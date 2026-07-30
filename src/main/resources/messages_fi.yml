@@ -1,6 +1,16 @@
 # Finnish messages. MiniMessage formatting is supported.
 player-only: "<red>Tätä komentoa voi käyttää vain pelaajana.</red>"
 chat-format: "<gray><name></gray><dark_gray>: </dark_gray><white><message></white>"
+chat-player-hover: "<green><player></green>\n<gray>Avaa profiili napsauttamalla\nTeleporttaus: /teleport <player>\nPosti: /mail send <player> ...</gray>"
+
+recovery:
+  retry: "<aqua>[Korjaa komento]</aqua>"
+  open-homes: "<aqua>[Avaa kodit]</aqua>"
+  create-home: "<aqua>[Luo koti]</aqua>"
+  open-inbox: "<aqua>[Avaa pyynnöt]</aqua>"
+  inspect-lock: "<aqua>[Tarkista lukko]</aqua>"
+  open-hub: "<aqua>[Avaa Survival]</aqua>"
+  show-help: "<aqua>[Näytä ohje]</aqua>"
 
 # Jaetut yksikkömuotoilut, käytetään kaikkialla missä näytetään kesto tai matka.
 format:
@@ -300,6 +310,11 @@ lock:
 
 enchantments:
   discovered: "<light_purple>Lumouspöytä paljasti lumouksen <enchantment> <level>.</light_purple>"
+  tooltip:
+    activation-sneak: "Aktivointi: hiivi käyttäessäsi tätä esinettä."
+    activation-always: "Aktivointi: aina käytössä esineen ollessa varustettuna tai käytössä."
+    conflict-looting: "Ristiriita: ei ole yhteensopiva Ryöstön kanssa."
+    sources: "Lähteet: lumouspöydät, rakennelöydöt, kirjastonhoitajat ja alasimet."
   anvil:
     ready: "<green>Mukautettu lumous on valmis</green> <dark_gray>•</dark_gray> <gray>Hinta: <cost> tasoa</gray>"
     too-expensive: "<red>Liian kallis</red> <dark_gray>•</dark_gray> <gray>Vanilja-alasimen hintaraja on voimassa.</gray>"
@@ -457,6 +472,18 @@ onboarding:
 notifications:
   unread-summary: "<yellow>Sinulla on <count> lukematonta SurvivalTweaks-ilmoitusta. Tarkista ne komennolla <green>/survival</green>.</yellow>"
   unread-summary-one: "<yellow>Sinulla on <count> lukematon SurvivalTweaks-ilmoitus. Tarkista se komennolla <green>/survival</green>.</yellow>"
+
+session-summary:
+  line: "<gray>Istunto:</gray> <items> <open>"
+  unread: "<yellow><count> lukematonta</yellow>"
+  unread-one: "<yellow><count> lukematon</yellow>"
+  teleports: "<light_purple><count> teleporttipyyntöä</light_purple>"
+  teleports-one: "<light_purple><count> teleporttipyyntö</light_purple>"
+  death-marker: "<red>kuolinpaikka aktiivinen</red>"
+  maintenance: "<gold>huoltotila</gold>"
+  restart: "<gold>uudelleenkäynnistys <seconds> s kuluttua</gold>"
+  open: "<aqua>[Avaa]</aqua>"
+  open-hover: "<gray>Avaa Survival-keskus.</gray>"
 
 admin:
   usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"

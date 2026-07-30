@@ -30,6 +30,12 @@ sent only when visible state changes. Profile, death-marker, spawn-pool,
 reload, and backup disk work runs off the server thread, with immutable
 snapshots and shutdown drains preserving durability.
 
+After login, players receive one compact session line only when something needs
+attention. It combines unread notifications, pending teleport requests, an
+active recovery marker, maintenance mode, and a scheduled restart, with one
+localized shortcut to the player hub. It replaces separate join-time notices
+for those states and does not appear for an empty session.
+
 ## Adaptive performance
 
 The `performance` section controls a three-level governor driven by Paper's
@@ -160,3 +166,9 @@ responsible for starting the server again.
 Paper currently marks its dialog API as experimental, so all dialog code is
 isolated from command and persistence logic. Native dialogs can be disabled with
 `ui.dialogs-enabled`, and every dialog has an equivalent command fallback.
+
+Player chat names open the sender's profile. Known failed command states append
+a localized clickable correction or relevant interface shortcut; console
+output remains plain. Custom-enchanted item lore records activation conditions,
+acquisition sources, and relevant incompatibilities without adding any runtime
+item setting.

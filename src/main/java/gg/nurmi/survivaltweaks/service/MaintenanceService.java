@@ -27,6 +27,7 @@ import java.util.Locale;
 
 public final class MaintenanceService implements Listener, AutoCloseable {
 
+    public static final String BYPASS_PERMISSION = "survivaltweaks.maintenance.bypass";
     private static final Duration FLUSH_TIMEOUT = Duration.ofSeconds(15);
     private static final Set<Long> ANNOUNCEMENT_SECONDS = Set.of(
             3600L, 1800L, 900L, 600L, 300L, 120L, 60L, 30L, 10L, 5L, 4L, 3L, 2L, 1L
@@ -146,7 +147,7 @@ public final class MaintenanceService implements Listener, AutoCloseable {
             return;
         }
         if (maintenanceMode
-                && !player.hasPermission("survivaltweaks.maintenance.bypass")) {
+                && !player.hasPermission(BYPASS_PERMISSION)) {
             player.kick(messages.component(player, "maintenance.join-blocked"));
             return;
         }

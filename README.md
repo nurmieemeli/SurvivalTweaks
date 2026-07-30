@@ -11,6 +11,7 @@
   <a href="https://github.com/nurmieemeli/SurvivalTweaks/releases/latest"><img src="https://img.shields.io/github/v/release/nurmieemeli/SurvivalTweaks" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Paper-26.2-3faffa" alt="Paper 26.2">
   <img src="https://img.shields.io/badge/Java-25-f89820" alt="Java 25">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/nurmieemeli/SurvivalTweaks" alt="MIT license"></a>
 </p>
 
 <p>
@@ -63,7 +64,8 @@ defaults are introduced.
 | Death recovery | Persistent death markers, Nether/Overworld distance scaling, and an automatically restored private floating guide—without a `/back` teleport |
 | Player hub | `/survival` brings homes, requests, locks, recovery, notifications, mail, profiles, statistics, guidance, and preferences into one interface |
 | Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, state-change feedback, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, and unread notifications |
-| Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
+| Social tools | Privacy-aware profiles and statistics, highlighted mentions, clickable chat names, welcome-back summaries, and rate-limited text-only offline mail |
+| Guided interactions | Failed commands offer localized clickable corrections, while each join condenses pending mail, teleport requests, recovery, maintenance, and restart state into one actionable summary |
 | First sessions | Pre-generated unique spawn locations, onboarding, a journey tracker, and contextual explanations of vanilla mechanics |
 | Custom enchantments | Tunneling, Excavation, Cultivation, Felling, Beheading, Deflection, and Surefooted through enchanting tables, structure loot, librarians, books, anvils, and grindstones |
 | Vanilla refinements | Bounded fast leaf decay, inventory-to-hotbar block refill, pet friendly-fire prevention, sleep voting, and deliberate decoration breaking |
@@ -94,6 +96,8 @@ Custom-enchanted books also appear in selected structure loot and librarian
 trades, combine through anvils, and are removed by grindstones. The anvil
 action bar explains custom compatibility, maximum levels, vanilla cost limits,
 and the final level cost without changing Minecraft's cost ceiling.
+Every custom-enchanted item also carries localized lore describing its effect,
+activation condition, acquisition routes, and relevant incompatibilities.
 
 ## Commands
 
@@ -258,3 +262,11 @@ release.
 
 Older profile, lock, and version 1.0 `userdata/` files are upgraded
 automatically.
+
+## Contributing and license
+
+Bug reports, feature proposals, and pull requests are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before making a change and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md) in project spaces.
+
+SurvivalTweaks is available under the [MIT License](LICENSE).

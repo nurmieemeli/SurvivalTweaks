@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.LanguagePreference;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
@@ -32,6 +33,51 @@ public final class MessageService {
 
     private static final Locale FINNISH_LOCALE = Locale.forLanguageTag("fi-FI");
     private static final Locale ENGLISH_LOCALE = Locale.US;
+    private static final Map<String, RecoveryAction> RECOVERY_ACTIONS = Map.ofEntries(
+            Map.entry("home.usage", RecoveryAction.run("recovery.open-homes", "/home")),
+            Map.entry("home.not-found", RecoveryAction.run("recovery.open-homes", "/home")),
+            Map.entry("home.none", RecoveryAction.suggest("recovery.create-home", "/sethome ")),
+            Map.entry("set-home.usage", RecoveryAction.suggest("recovery.retry", "/sethome ")),
+            Map.entry("delete-home.usage", RecoveryAction.suggest("recovery.retry", "/deletehome ")),
+            Map.entry("teleport.usage", RecoveryAction.suggest("recovery.retry", "/teleport ")),
+            Map.entry("teleport.player-not-found", RecoveryAction.suggest("recovery.retry", "/teleport ")),
+            Map.entry("teleport.accept.usage", RecoveryAction.suggest("recovery.retry", "/teleportaccept ")),
+            Map.entry("teleport.accept.none", RecoveryAction.run("recovery.open-inbox", "/teleportinbox")),
+            Map.entry("teleport.accept.not-found", RecoveryAction.run(
+                    "recovery.open-inbox",
+                    "/teleportinbox"
+            )),
+            Map.entry("mail.usage", RecoveryAction.suggest("recovery.retry", "/mail send ")),
+            Map.entry("mail.result.unknown-player", RecoveryAction.suggest(
+                    "recovery.retry",
+                    "/mail send "
+            )),
+            Map.entry("profile.usage", RecoveryAction.suggest("recovery.retry", "/profile ")),
+            Map.entry("profile.unknown", RecoveryAction.suggest("recovery.retry", "/profile ")),
+            Map.entry("statistics.usage", RecoveryAction.suggest("recovery.retry", "/stats ")),
+            Map.entry("statistics.unknown", RecoveryAction.suggest("recovery.retry", "/stats ")),
+            Map.entry("lock.usage", RecoveryAction.run("recovery.inspect-lock", "/lock info")),
+            Map.entry("lock.player-not-found", RecoveryAction.suggest(
+                    "recovery.retry",
+                    "/lock trust "
+            )),
+            Map.entry("death-recovery.usage", RecoveryAction.run(
+                    "recovery.open-hub",
+                    "/survival"
+            )),
+            Map.entry("death-recovery.none", RecoveryAction.run(
+                    "recovery.open-hub",
+                    "/survival"
+            )),
+            Map.entry("admin.usage", RecoveryAction.run(
+                    "recovery.show-help",
+                    "/survivaltweaks help"
+            )),
+            Map.entry("admin.enchant.usage", RecoveryAction.suggest(
+                    "recovery.retry",
+                    "/survivaltweaks enchant "
+            ))
+    );
 
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final JavaPlugin plugin;
@@ -69,7 +115,16 @@ public final class MessageService {
     }
 
     public void send(Audience audience, String key, TagResolver... placeholders) {
-        audience.sendMessage(component(audience, key, placeholders));
+        Component rendered = component(audience, key, placeholders);
+        RecoveryAction recovery = RECOVERY_ACTIONS.get(key);
+        if (audience instanceof Player && recovery != null) {
+            Component action = component(audience, recovery.labelKey())
+                    .clickEvent(recovery.run()
+                            ? ClickEvent.runCommand(recovery.command())
+                            : ClickEvent.suggestCommand(recovery.command()));
+            rendered = rendered.append(Component.space()).append(action);
+        }
+        audience.sendMessage(rendered);
     }
 
     /**
@@ -288,6 +343,17 @@ public final class MessageService {
         private Prepared(Map<String, String> english, Map<String, String> finnish) {
             this.english = english;
             this.finnish = finnish;
+        }
+    }
+
+    private record RecoveryAction(String labelKey, String command, boolean run) {
+
+        private static RecoveryAction run(String labelKey, String command) {
+            return new RecoveryAction(labelKey, command, true);
+        }
+
+        private static RecoveryAction suggest(String labelKey, String command) {
+            return new RecoveryAction(labelKey, command, false);
         }
     }
 }

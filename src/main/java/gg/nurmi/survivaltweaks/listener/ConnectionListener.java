@@ -4,10 +4,10 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
-import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
+import gg.nurmi.survivaltweaks.service.SessionSummaryService;
 import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -25,32 +25,32 @@ public final class ConnectionListener implements Listener {
     private final TeleportRequestService requests;
     private final MessageService messages;
     private final SettingsService settings;
-    private final NotificationService notifications;
     private final NewPlayerSpawnService newPlayerSpawns;
     private final WelcomeBackController welcomeBack;
     private final PlayerExperienceService experience;
     private final ReleaseUpdateService releaseUpdates;
+    private final SessionSummaryService sessionSummaries;
 
     public ConnectionListener(
             ProfileRepository profiles,
             TeleportRequestService requests,
             MessageService messages,
             SettingsService settings,
-            NotificationService notifications,
             NewPlayerSpawnService newPlayerSpawns,
             WelcomeBackController welcomeBack,
             PlayerExperienceService experience,
-            ReleaseUpdateService releaseUpdates
+            ReleaseUpdateService releaseUpdates,
+            SessionSummaryService sessionSummaries
     ) {
         this.profiles = profiles;
         this.requests = requests;
         this.messages = messages;
         this.settings = settings;
-        this.notifications = notifications;
         this.newPlayerSpawns = newPlayerSpawns;
         this.welcomeBack = welcomeBack;
         this.experience = experience;
         this.releaseUpdates = releaseUpdates;
+        this.sessionSummaries = sessionSummaries;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -67,14 +67,7 @@ public final class ConnectionListener implements Listener {
         welcomeBack.playerJoined(event.getPlayer());
         newPlayerSpawns.playerJoined(event.getPlayer());
         releaseUpdates.playerJoined(event.getPlayer());
-        long unread = notifications.unread(event.getPlayer().getUniqueId());
-        if (unread > 0) {
-            messages.send(
-                    event.getPlayer(),
-                    MessageService.plural("notifications.unread-summary", unread),
-                    Placeholder.unparsed("count", Long.toString(unread))
-            );
-        }
+        sessionSummaries.playerJoined(event.getPlayer());
         if (settings.current().connectionMessagesEnabled()) {
             event.joinMessage(null);
             Server server = event.getPlayer().getServer();

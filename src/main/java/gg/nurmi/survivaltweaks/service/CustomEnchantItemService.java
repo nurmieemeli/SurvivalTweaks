@@ -147,6 +147,7 @@ public final class CustomEnchantItemService {
                     .forEach(lore::add);
         }
 
+        boolean customEnchantments = false;
         for (CustomEnchantment enchantment : CustomEnchantment.values()) {
             Integer stored = meta.getPersistentDataContainer().get(
                     keys.get(enchantment),
@@ -155,6 +156,7 @@ public final class CustomEnchantItemService {
             if (stored == null || stored <= 0) {
                 continue;
             }
+            customEnchantments = true;
             int level = Math.min(enchantment.maxLevel(), stored);
             Component name = messages.component(audience, enchantment.nameKey())
                     .colorIfAbsent(NamedTextColor.GRAY)
@@ -165,16 +167,40 @@ public final class CustomEnchantItemService {
                     .append(name)
                     .append(Component.text(" " + roman(level), NamedTextColor.GRAY)
                             .decoration(TextDecoration.ITALIC, false)));
-            if (book) {
-                lore.add(Component.text(LORE_MARKER)
-                        .color(NamedTextColor.DARK_GRAY)
-                        .decoration(TextDecoration.ITALIC, false)
-                        .append(messages.component(audience, enchantment.descriptionKey())
-                                .colorIfAbsent(NamedTextColor.DARK_GRAY)
-                                .decoration(TextDecoration.ITALIC, false)));
+            lore.add(markedLine(
+                    messages.component(audience, enchantment.descriptionKey()),
+                    NamedTextColor.DARK_GRAY
+            ));
+            lore.add(markedLine(
+                    messages.component(
+                            audience,
+                            enchantment.requiresSneaking()
+                                    ? "enchantments.tooltip.activation-sneak"
+                                    : "enchantments.tooltip.activation-always"
+                    ),
+                    NamedTextColor.DARK_GRAY
+            ));
+            if (enchantment.conflictsWithLooting()) {
+                lore.add(markedLine(
+                        messages.component(audience, "enchantments.tooltip.conflict-looting"),
+                        NamedTextColor.RED
+                ));
             }
         }
+        if (customEnchantments) {
+            lore.add(markedLine(
+                    messages.component(audience, "enchantments.tooltip.sources"),
+                    book ? NamedTextColor.DARK_AQUA : NamedTextColor.DARK_GRAY
+            ));
+        }
         meta.lore(lore.isEmpty() ? null : lore);
+    }
+
+    private Component markedLine(Component content, NamedTextColor color) {
+        return Component.text(LORE_MARKER)
+                .color(color)
+                .decoration(TextDecoration.ITALIC, false)
+                .append(content.colorIfAbsent(color).decoration(TextDecoration.ITALIC, false));
     }
 
     static String roman(int level) {

@@ -1,6 +1,16 @@
 # English fallback messages. MiniMessage formatting is supported.
 player-only: "<red>This command can only be used by a player.</red>"
 chat-format: "<gray><name></gray><dark_gray>: </dark_gray><white><message></white>"
+chat-player-hover: "<green><player></green>\n<gray>Click to open profile\nTeleport: /teleport <player>\nMail: /mail send <player> ...</gray>"
+
+recovery:
+  retry: "<aqua>[Correct command]</aqua>"
+  open-homes: "<aqua>[Open homes]</aqua>"
+  create-home: "<aqua>[Create a home]</aqua>"
+  open-inbox: "<aqua>[Open requests]</aqua>"
+  inspect-lock: "<aqua>[Inspect lock]</aqua>"
+  open-hub: "<aqua>[Open Survival]</aqua>"
+  show-help: "<aqua>[Show help]</aqua>"
 
 # Shared unit formatting, used wherever a duration or distance is shown.
 format:
@@ -301,6 +311,11 @@ lock:
 
 enchantments:
   discovered: "<light_purple>The enchanting table revealed <enchantment> <level>.</light_purple>"
+  tooltip:
+    activation-sneak: "Activation: sneak while using this item."
+    activation-always: "Activation: always active while equipped or used."
+    conflict-looting: "Conflict: incompatible with Looting."
+    sources: "Sources: enchanting tables, structure loot, librarians, and anvils."
   anvil:
     ready: "<green>Custom enchantment ready</green> <dark_gray>•</dark_gray> <gray>Cost: <cost> levels</gray>"
     too-expensive: "<red>Too expensive</red> <dark_gray>•</dark_gray> <gray>The vanilla anvil cost limit applies.</gray>"
@@ -458,6 +473,18 @@ onboarding:
 notifications:
   unread-summary: "<yellow>You have <count> unread SurvivalTweaks notifications. Open <green>/survival</green> to review them.</yellow>"
   unread-summary-one: "<yellow>You have <count> unread SurvivalTweaks notification. Open <green>/survival</green> to review it.</yellow>"
+
+session-summary:
+  line: "<gray>Session:</gray> <items> <open>"
+  unread: "<yellow><count> unread</yellow>"
+  unread-one: "<yellow><count> unread</yellow>"
+  teleports: "<light_purple><count> teleport requests</light_purple>"
+  teleports-one: "<light_purple><count> teleport request</light_purple>"
+  death-marker: "<red>death marker active</red>"
+  maintenance: "<gold>maintenance mode</gold>"
+  restart: "<gold>restart in <seconds>s</gold>"
+  open: "<aqua>[Open]</aqua>"
+  open-hover: "<gray>Open the Survival hub.</gray>"
 
 admin:
   usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"

@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a vanilla-friendly improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Player or operator problem
+      description: Describe the friction this would solve, not only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed experience
+      description: Explain how the feature should look and behave for players.
+    validations:
+      required: true
+  - type: textarea
+    id: vanilla
+    attributes:
+      label: Vanilla fit
+      description: How does this preserve the vanilla survival loop and avoid client requirements?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include commands, configuration, or existing plugins you considered.
+  - type: textarea
+    id: performance
+    attributes:
+      label: Performance and compatibility
+      description: Note expected hot paths, event interactions, persistence, or compatibility concerns.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and found no duplicate.
+          required: true
+        - label: This proposal does not require a client mod or resource pack.
+          required: true

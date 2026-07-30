@@ -81,6 +81,8 @@ class PluginResourcesTest {
 
         assertEquals(messageKeys(english), messageKeys(finnish));
         assertNotNull(english.getString("chat-format"));
+        assertNotNull(english.getString("chat-player-hover"));
+        assertNotNull(english.getString("recovery.retry"));
         assertNotNull(english.getString("home.teleported"));
         assertNotNull(english.getString("teleport.accept.accepted"));
         assertNotNull(english.getString("teleport.safety.warmup"));
@@ -97,6 +99,10 @@ class PluginResourcesTest {
         assertNotNull(english.getString("afk.enabled"));
         assertNotNull(english.getString("updates.available"));
         assertNotNull(english.getString("enchantments.anvil.too-expensive"));
+        assertNotNull(english.getString("enchantments.tooltip.activation-sneak"));
+        assertNotNull(english.getString("enchantments.tooltip.sources"));
+        assertNotNull(english.getString("session-summary.line"));
+        assertNotNull(english.getString("session-summary.open-hover"));
         assertNotNull(english.getString("sleep.progress"));
         assertNotNull(english.getString("server-list.motd"));
         assertNotNull(english.getString("maintenance.restart-warning"));
@@ -261,6 +267,8 @@ class PluginResourcesTest {
         for (String key : List.of(
                 "player-list.unread",
                 "notifications.unread-summary",
+                "session-summary.unread",
+                "session-summary.teleports",
                 "ui.hub.homes-count",
                 "ui.hub.mail-count",
                 "ui.hub.notifications-count",

@@ -1,0 +1,73 @@
+name: Bug report
+description: Report reproducible incorrect behavior in SurvivalTweaks
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve SurvivalTweaks. Remove private player or server data from logs before submitting.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: SurvivalTweaks version
+      description: Use the exact version shown by the server or JAR filename.
+      placeholder: 2.19.0
+    validations:
+      required: true
+  - type: input
+    id: paper-version
+    attributes:
+      label: Paper and Java versions
+      placeholder: Paper 26.2 build 84, Java 25
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start a clean Paper server with...
+        2. Run...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or configuration
+      description: Paste the complete stack trace and relevant non-secret settings. Use drag and drop for long files.
+      render: shell
+  - type: dropdown
+    id: other-plugins
+    attributes:
+      label: Does it reproduce with only SurvivalTweaks installed?
+      options:
+        - "Yes"
+        - "No"
+        - "Not tested"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and found no duplicate.
+          required: true
+        - label: I removed passwords, tokens, IP addresses, and private player data.
+          required: true

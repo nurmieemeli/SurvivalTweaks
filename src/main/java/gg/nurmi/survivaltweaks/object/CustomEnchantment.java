@@ -52,6 +52,17 @@ public enum CustomEnchantment {
         return tableWeight;
     }
 
+    public boolean requiresSneaking() {
+        return switch (this) {
+            case TUNNELING, EXCAVATION, CULTIVATION, FELLING -> true;
+            case BEHEADING, DEFLECTION, SUREFOOTED -> false;
+        };
+    }
+
+    public boolean conflictsWithLooting() {
+        return this == BEHEADING;
+    }
+
     public int tableLevel(int cost) {
         if (maxLevel == 1) {
             return 1;

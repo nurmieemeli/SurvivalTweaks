@@ -43,6 +43,7 @@ import gg.nurmi.survivaltweaks.service.PlayerListService;
 import gg.nurmi.survivaltweaks.service.PlayerStatisticsService;
 import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
 import gg.nurmi.survivaltweaks.service.ServerListService;
+import gg.nurmi.survivaltweaks.service.SessionSummaryService;
 import gg.nurmi.survivaltweaks.service.SleepVoteService;
 import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
@@ -629,11 +630,19 @@ public final class SurvivalTweaks extends JavaPlugin {
                         teleportRequests,
                         messages,
                         settings,
-                        notifications,
                         newPlayerSpawns,
                         welcomeBack,
                         experience,
-                        releaseUpdates
+                        releaseUpdates,
+                        new SessionSummaryService(
+                                this,
+                                messages,
+                                notifications,
+                                teleportRequests,
+                                deathRecovery,
+                                maintenance,
+                                clock
+                        )
                 ),
                 this
         );
