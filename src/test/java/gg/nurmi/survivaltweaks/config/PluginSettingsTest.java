@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,9 +21,13 @@ class PluginSettingsTest {
 
         assertEquals(3, settings.maxHomes());
         assertEquals(5, settings.lockTargetDistance());
+        assertEquals(0, settings.purgeInactiveLocksDays());
+        assertTrue(settings.deathCompassOnRespawn());
         assertTrue(settings.deathFloatingGuideEnabled());
+        assertFalse(settings.deathFloatingGuideAutomaticOnRespawn());
         assertEquals(32.0, settings.deathFloatingGuideNearDistance());
         assertEquals(3.5, settings.deathFloatingGuideOffset());
+        assertEquals(30, settings.deathCompassCooldown().toSeconds());
         assertTrue(settings.customDeathMessagesEnabled());
         assertEquals(5, settings.customDeathMessageRareVariantPercent());
         assertEquals(12, settings.customDeathMessageCauses().size());
@@ -33,6 +38,7 @@ class PluginSettingsTest {
         assertTrue(settings.newPlayerSpawnBlockedBiomes().contains("minecraft:ocean"));
         assertTrue(settings.playerListEnabled());
         assertTrue(settings.playerListShowMspt());
+        assertTrue(settings.playerListStaffBadges());
         assertEquals(2, settings.playerListRefreshSeconds());
         assertEquals(300, settings.afkTimeout().toSeconds());
         assertTrue(settings.sleepVotingEnabled());
@@ -63,6 +69,8 @@ class PluginSettingsTest {
         assertTrue(settings.decorationProtectionEnabled());
         assertTrue(settings.atmosphereAmbientEffects());
         assertTrue(settings.atmosphereDeathSiteWisps());
+        assertTrue(settings.atmosphereDeepDarkSpores());
+        assertTrue(settings.atmosphereSculkWarningActionbar());
     }
 
     @Test

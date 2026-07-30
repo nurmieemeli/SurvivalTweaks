@@ -56,4 +56,16 @@ class DeathRecoveryGuideTest {
         assertEquals("↘", DeathRecoveryService.directionArrow(player, new Location(null, 10, 64, 10)));
         assertEquals("↙", DeathRecoveryService.directionArrow(player, new Location(null, -10, 64, 10)));
     }
+
+    @Test
+    void mapsStoredPaperDamageCausesToLocaleKeysAndSafelyHandlesOldValues() {
+        assertEquals("death-recovery.cause.fall", DeathRecoveryService.causeKey("FALL"));
+        assertEquals(
+                "death-recovery.cause.fly-into-wall",
+                DeathRecoveryService.causeKey("fly_into_wall")
+        );
+        assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey("UNKNOWN"));
+        assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey("removed-cause"));
+        assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey(null));
+    }
 }

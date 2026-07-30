@@ -25,16 +25,16 @@ command:
     stats: "/stats [player]"
     welcome: "/welcome"
     guide: "/guide"
-    deathlocation: "/deathlocation [guide [on|off]|dismiss]"
+    deathlocation: "/deathlocation [info|guide [on|off]|dismiss]"
     teleportinbox: "/teleportinbox"
     survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
     sethome: "/sethome [name]"
     deletehome: "/deletehome [name]"
-    home: "/home [name]"
+    home: "/home [name|owner:name|invite home player|uninvite home player]"
     teleport: "/teleport <player>"
     teleportaccept: "/teleportaccept [player]"
     shout: "/shout <message>"
-    lock: "/lock [trust|untrust|info|nearby] [player|radius]"
+    lock: "/lock [trust|untrust|transfer|info|nearby] [player|radius]"
     unlock: "/unlock [confirm]"
 
 connection:
@@ -184,7 +184,7 @@ new-player-spawn:
   failed: "<red>Your starting location could not be prepared. Please reconnect or contact an operator.</red>"
 
 home:
-  usage: "<red>Usage: /home [name]</red>"
+  usage: "<red>Usage: /home [name|owner:name|invite home player|uninvite home player]</red>"
   none: "<red>You have not set any homes.</red>"
   not-found: "<red>Home <home> was not found.</red>"
   list: "<gray>Available homes: <green><homes></green></gray>"
@@ -259,7 +259,7 @@ shout:
   message: "<red><bold>ANNOUNCEMENT:</bold></red> <white><message></white>"
 
 lock:
-  usage: "<red>Usage: /lock [trust|untrust|info|nearby] [player|radius]</red>"
+  usage: "<red>Usage: /lock [trust|untrust|transfer|info|nearby] [player|radius]</red>"
   unlock-usage: "<red>Usage: /unlock [confirm]</red>"
   not-container: "<red>Look at the container you want to manage.</red>"
   created: "<gray>Container locked.</gray>"
@@ -296,6 +296,7 @@ lock:
     denied: "<red>🔒 Locked</red> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
 
 death-recovery:
+  disabled: "<red>Death recovery is disabled on this server.</red>"
   usage: "<red>Usage: /deathlocation [info|guide [on|off]|dismiss]</red>"
   none: "<red>You do not have an active death marker.</red>"
   info: |-
@@ -304,6 +305,46 @@ death-recovery:
     <gray>Cause: <white><cause></white></gray>
     <gray>Distance: <white><distance></white></gray>
     <gray>Expires in: <yellow><minutes>m <seconds>s</yellow></gray>
+  distance:
+    same-world: "<distance> blocks (<arrow>)"
+    same-world-one: "<distance> block (<arrow>)"
+    different-world: "Different dimension (<world>)"
+    unloaded-world: "<world> (unloaded)"
+  cause:
+    kill: "Killed"
+    world-border: "World border"
+    contact: "Contact damage"
+    entity-attack: "Entity attack"
+    entity-sweep-attack: "Sweeping attack"
+    projectile: "Projectile"
+    suffocation: "Suffocation"
+    fall: "Fall"
+    fire: "Fire"
+    fire-tick: "Burning"
+    melting: "Melting"
+    lava: "Lava"
+    drowning: "Drowning"
+    block-explosion: "Block explosion"
+    entity-explosion: "Entity explosion"
+    void: "The void"
+    lightning: "Lightning"
+    suicide: "Suicide"
+    starvation: "Starvation"
+    poison: "Poison"
+    magic: "Magic"
+    wither: "Wither"
+    falling-block: "Falling block"
+    thorns: "Thorns"
+    dragon-breath: "Dragon breath"
+    fly-into-wall: "Kinetic impact"
+    hot-floor: "Hot floor"
+    campfire: "Campfire"
+    cramming: "Entity cramming"
+    dryout: "Drying out"
+    freeze: "Freezing"
+    sonic-boom: "Sonic boom"
+    custom: "Custom damage"
+    unknown: "Unknown"
   recorded: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minutes.</gray>"
   recorded-one: "<gray>Death marked at <green><world> <x>, <y>, <z></green>. It expires in <minutes> minute.</gray>"
   location: "<gray>Your death marker is at <green><world> <x>, <y>, <z></green> and expires in <minutes> minutes.</gray>"
@@ -317,7 +358,6 @@ death-recovery:
   compass-cooldown-one: "<red>You can request another compass in <seconds> second.</red>"
   actionbar-navigation: "<red>Death marker</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>blocks</gray>"
   actionbar-portal: "<light_purple>Use a portal near <x>, <z></light_purple> <dark_gray>•</dark_gray> <gray><world></gray>"
-  actionbar-distance: "<red>Death marker</red> <dark_gray>•</dark_gray> <gray><distance> blocks away</gray>"
   actionbar-world: "<red>Death marker</red> <dark_gray>•</dark_gray> <gray><world> <x>, <z></gray>"
   actionbar-expired: "<red>This recovery compass has expired.</red>"
   guide-prompt-enabled: "<green>Your floating death guide is active.</green> <click:run_command:'/deathlocation guide off'><hover:show_text:'Hide the private guide'><yellow>[Turn off]</yellow></hover></click>"
@@ -569,7 +609,6 @@ ui:
     owner: "<green>Owner: <player></green>"
     transfer-action: "<yellow>Click to transfer ownership.</yellow>"
     transferred: "<gray>Ownership transferred to <green><player></green>.</gray>"
-    transfer-unavailable: "<red>The ownership confirmation could not be opened; nothing was changed.</red>"
     transfer-prompt: "<yellow>Type the new owner's player name again in chat to confirm the transfer.</yellow>"
     transfer-cancelled: "<gray>Ownership transfer cancelled.</gray>"
     access-mode: "<green>Access: <mode></green>"
@@ -827,3 +866,4 @@ ui:
 
 atmosphere:
   low-durability: "<red>Warning: <item> is low on durability (<uses> uses remaining)!</red>"
+  sculk-warning: "<dark_purple>⚠️ Sculk Warning: <level>/4 (Warden approaching...)</dark_purple>"

@@ -214,6 +214,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 new ContainerLockStore(getDataFolder().toPath().resolve("locked-containers.yml"), getLogger()),
                 getLogger()
         );
+        purgeInactiveLocks(initialSettings);
         ContainerBlockResolver containerResolver = new ContainerBlockResolver();
         ActionBarService actionBars = new ActionBarService(clock);
         sleepVotes = new SleepVoteService(
@@ -629,7 +630,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         pluginManager.registerEvents(new PetProtectionService(settings), this);
         pluginManager.registerEvents(new BlockRefillService(this, settings), this);
         pluginManager.registerEvents(new DecorationProtectionService(settings), this);
-        atmosphere = new AtmosphereService(this, settings, messages, actionBars);
+        atmosphere = new AtmosphereService(this, settings, messages, actionBars, experience);
         pluginManager.registerEvents(atmosphere, this);
     }
 
@@ -744,6 +745,7 @@ public final class SurvivalTweaks extends JavaPlugin {
 
     private void applyReloadedSettings(PluginSettings reloaded) {
         restartAutosave(reloaded);
+        purgeInactiveLocks(reloaded);
         if (newPlayerSpawns != null) {
             newPlayerSpawns.reconfigure();
         }
@@ -755,6 +757,19 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         if (serverList != null) {
             serverList.reconfigure();
+        }
+    }
+
+    private void purgeInactiveLocks(PluginSettings current) {
+        if (containerLocks == null || current.purgeInactiveLocksDays() <= 0) {
+            return;
+        }
+        int purged = containerLocks.purgeInactiveLocks(
+                getServer(),
+                current.purgeInactiveLocksDays()
+        );
+        if (purged > 0) {
+            getLogger().info("Purged " + purged + " inactive container locks.");
         }
     }
 

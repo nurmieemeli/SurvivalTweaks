@@ -90,6 +90,8 @@ atmosphere:
   drowning-gasp: true
   nether-soul-embers: true
   spyglass-effects: true
+  deep-dark-spores: true
+  sculk-warning-actionbar: true
 
 ui:
   # Multiple homes open in a safe, paginated chest-style menu.

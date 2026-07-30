@@ -263,7 +263,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             Player player = players.get(index);
             UUID playerId = player.getUniqueId();
             online.add(playerId);
-            boolean staffVisible = false;
+            boolean staffVisible = staffBadgeVisible(current, player);
             boolean awayVisible = current.afkIndicatorsEnabled() && afk.isAfk(playerId);
             RowState state = new RowState(
                     index,
@@ -278,10 +278,10 @@ public final class PlayerListService implements Listener, AutoCloseable {
                 continue;
             }
             Component formattedName = messages.formatPlayerName(player, settings);
-            player.customName(formattedName);
-            player.setCustomNameVisible(true);
             player.setPlayerListOrder(index);
-            Component staff = Component.empty();
+            Component staff = staffVisible
+                    ? messages.component("player-list.staff-marker")
+                    : Component.empty();
             Component away = awayVisible
                     ? messages.component("player-list.afk-marker")
                     : Component.empty();
@@ -457,6 +457,11 @@ public final class PlayerListService implements Listener, AutoCloseable {
             root = "/" + root.substring(namespace + 1);
         }
         return root.equals("/afk") || root.equals("/away") || root.equals("/poissa");
+    }
+
+    static boolean staffBadgeVisible(PluginSettings settings, Player player) {
+        return settings.playerListStaffBadges()
+                && player.hasPermission("survivaltweaks.playerlist.staff");
     }
 
     private Component metric(Player viewer, double value, NamedTextColor color, int decimals) {

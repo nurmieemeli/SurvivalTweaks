@@ -1,18 +1,30 @@
 package gg.nurmi.survivaltweaks;
 
+import gg.nurmi.survivaltweaks.object.CustomDeathCause;
+import gg.nurmi.survivaltweaks.object.HomeArrivalStyle;
+import gg.nurmi.survivaltweaks.object.HomeCategory;
+import gg.nurmi.survivaltweaks.object.LanguagePreference;
+import gg.nurmi.survivaltweaks.object.LockAccessMode;
+import gg.nurmi.survivaltweaks.object.NotificationType;
+import gg.nurmi.survivaltweaks.object.VanillaGuideTopic;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -212,6 +224,23 @@ class PluginResourcesTest {
     }
 
     @Test
+    void everyBundledMessageIsNonBlankAndValidMiniMessage() {
+        MiniMessage miniMessage = MiniMessage.miniMessage();
+        for (String resource : List.of("messages_en.yml", "messages_fi.yml")) {
+            YamlConfiguration catalog = resource(resource);
+            for (String key : orderedMessageKeys(catalog)) {
+                String template = catalog.getString(key);
+                assertNotNull(template, resource + ": " + key);
+                assertFalse(template.isBlank(), resource + ": " + key);
+                assertDoesNotThrow(
+                        () -> miniMessage.deserialize(template),
+                        resource + ": " + key
+                );
+            }
+        }
+    }
+
+    @Test
     void everyCountedMessageOffersBothASingularAndAPluralForm() {
         YamlConfiguration english = resource("messages_en.yml");
         YamlConfiguration finnish = resource("messages_fi.yml");
@@ -236,6 +265,7 @@ class PluginResourcesTest {
                 "death-recovery.recorded",
                 "death-recovery.location",
                 "death-recovery.compass-cooldown",
+                "death-recovery.distance.same-world",
                 "admin.restart.scheduled",
                 "admin.doctor.truncated",
                 "admin.backup.players-online",
@@ -245,6 +275,78 @@ class PluginResourcesTest {
                 assertNotNull(catalog.getString(key), key);
                 assertNotNull(catalog.getString(key + "-one"), key + "-one");
             }
+        }
+    }
+
+    @Test
+    void everyPaperDamageCauseHasALocalizedDeathRecoveryLabel() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        for (EntityDamageEvent.DamageCause cause : EntityDamageEvent.DamageCause.values()) {
+            String key = "death-recovery.cause."
+                    + cause.name().toLowerCase(Locale.ROOT).replace('_', '-');
+            assertNotNull(english.getString(key), key);
+            assertNotNull(finnish.getString(key), key);
+        }
+        assertNotNull(english.getString("death-recovery.cause.unknown"));
+        assertNotNull(finnish.getString("death-recovery.cause.unknown"));
+    }
+
+    @Test
+    void everyEnumDrivenUiAndMessageKeyExistsInBothCatalogs() {
+        YamlConfiguration english = resource("messages_en.yml");
+        YamlConfiguration finnish = resource("messages_fi.yml");
+
+        for (NotificationType type : NotificationType.values()) {
+            assertLocalized(
+                    english,
+                    finnish,
+                    "ui.notifications.type." + enumKey(type.name())
+            );
+        }
+        for (HomeCategory category : HomeCategory.values()) {
+            assertLocalized(
+                    english,
+                    finnish,
+                    "ui.home-editor.category." + enumKey(category.name())
+            );
+        }
+        for (HomeArrivalStyle style : HomeArrivalStyle.values()) {
+            assertLocalized(
+                    english,
+                    finnish,
+                    "ui.home-editor.arrival-style." + enumKey(style.name())
+            );
+        }
+        for (LanguagePreference language : LanguagePreference.values()) {
+            assertLocalized(
+                    english,
+                    finnish,
+                    "ui.preferences.language." + enumKey(language.name())
+            );
+        }
+        for (LockAccessMode mode : LockAccessMode.values()) {
+            assertLocalized(
+                    english,
+                    finnish,
+                    "ui.lock-panel.mode." + mode.name().toLowerCase(Locale.ROOT)
+            );
+        }
+        for (VanillaGuideTopic topic : VanillaGuideTopic.values()) {
+            for (String prefix : List.of(
+                    "vanilla-guide.hint.",
+                    "ui.vanilla-guide.topic.",
+                    "ui.vanilla-guide.description.",
+                    "ui.vanilla-guide.discovery."
+            )) {
+                assertLocalized(english, finnish, prefix + topic.key());
+            }
+        }
+        for (CustomDeathCause cause : CustomDeathCause.values()) {
+            assertLocalized(english, finnish, cause.messageKey(1, false));
+            assertLocalized(english, finnish, cause.messageKey(2, false));
+            assertLocalized(english, finnish, cause.messageKey(1, true));
         }
     }
 
@@ -268,6 +370,19 @@ class PluginResourcesTest {
                 Objects.requireNonNull(getClass().getClassLoader().getResourceAsStream(name)),
                 StandardCharsets.UTF_8
         ));
+    }
+
+    private void assertLocalized(
+            YamlConfiguration english,
+            YamlConfiguration finnish,
+            String key
+    ) {
+        assertNotNull(english.getString(key), key);
+        assertNotNull(finnish.getString(key), key);
+    }
+
+    private String enumKey(String name) {
+        return name.toLowerCase(Locale.ROOT).replace('_', '-');
     }
 
     private List<String> orderedMessageKeys(YamlConfiguration catalog) {

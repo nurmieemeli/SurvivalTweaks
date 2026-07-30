@@ -25,16 +25,16 @@ command:
     stats: "/stats [pelaaja]"
     welcome: "/welcome"
     guide: "/guide"
-    deathlocation: "/deathlocation [guide [on|off]|dismiss]"
+    deathlocation: "/deathlocation [info|guide [on|off]|dismiss]"
     teleportinbox: "/teleportinbox"
     survivaltweaks: "/survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]"
     sethome: "/sethome [nimi]"
     deletehome: "/deletehome [nimi]"
-    home: "/home [nimi]"
+    home: "/home [nimi|omistaja:nimi|invite koti pelaaja|uninvite koti pelaaja]"
     teleport: "/teleport <pelaaja>"
     teleportaccept: "/teleportaccept [pelaaja]"
     shout: "/shout <viesti>"
-    lock: "/lock [trust|untrust|info|nearby] [pelaaja|säde]"
+    lock: "/lock [trust|untrust|transfer|info|nearby] [pelaaja|säde]"
     unlock: "/unlock [confirm]"
 
 connection:
@@ -183,7 +183,7 @@ new-player-spawn:
   failed: "<red>Aloituspaikkaasi ei voitu valmistella. Liity uudelleen tai ota yhteyttä ylläpitoon.</red>"
 
 home:
-  usage: "<red>Käyttö: /home [nimi]</red>"
+  usage: "<red>Käyttö: /home [nimi|omistaja:nimi|invite koti pelaaja|uninvite koti pelaaja]</red>"
   none: "<red>Et ole asettanut kotia.</red>"
   not-found: "<red>Kotia <home> ei löytynyt.</red>"
   list: "<gray>Saatavilla olevat kodit: <green><homes></green></gray>"
@@ -258,7 +258,7 @@ shout:
   message: "<red><bold>ILMOITUS:</bold></red> <white><message></white>"
 
 lock:
-  usage: "<red>Käyttö: /lock [trust|untrust|info|nearby] [pelaaja|säde]</red>"
+  usage: "<red>Käyttö: /lock [trust|untrust|transfer|info|nearby] [pelaaja|säde]</red>"
   unlock-usage: "<red>Käyttö: /unlock [confirm]</red>"
   not-container: "<red>Katso lukittavaa säiliötä.</red>"
   created: "<gray>Säiliö lukittu.</gray>"
@@ -295,14 +295,55 @@ lock:
     denied: "<red>🔒 Lukittu</red> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
 
 death-recovery:
+  disabled: "<red>Kuolinpaikan palautus ei ole käytössä tällä palvelimella.</red>"
   usage: "<red>Käyttö: /deathlocation [info|guide [on|off]|dismiss]</red>"
   none: "<red>Sinulla ei ole aktiivista kuolinmerkintää.</red>"
   info: |-
-    <gray><b><red>☠ Kuolinpaikan Tiedot</red></b></gray>
+    <gray><b><red>☠ Kuolinpaikan tiedot</red></b></gray>
     <gray>Sijainti: <green><world> <x>, <y>, <z></green></gray>
-    <gray>Syystiedot: <white><cause></white></gray>
+    <gray>Kuolinsyy: <white><cause></white></gray>
     <gray>Etäisyys: <white><distance></white></gray>
     <gray>Vanhenee: <yellow><minutes>min <seconds>s</yellow></gray>
+  distance:
+    same-world: "<distance> palikan päässä (<arrow>)"
+    same-world-one: "<distance> palikan päässä (<arrow>)"
+    different-world: "Eri ulottuvuus (<world>)"
+    unloaded-world: "<world> (lataamatta)"
+  cause:
+    kill: "tappaminen"
+    world-border: "maailman raja"
+    contact: "kosketusvahinko"
+    entity-attack: "olennon hyökkäys"
+    entity-sweep-attack: "laaja hyökkäys"
+    projectile: "ammus"
+    suffocation: "tukehtuminen"
+    fall: "putoaminen"
+    fire: "tuli"
+    fire-tick: "palaminen"
+    melting: "sulaminen"
+    lava: "laava"
+    drowning: "hukkuminen"
+    block-explosion: "palikan räjähdys"
+    entity-explosion: "olennon räjähdys"
+    void: "tyhjyys"
+    lightning: "salama"
+    suicide: "itsemurha"
+    starvation: "nälkiintyminen"
+    poison: "myrkky"
+    magic: "taikuus"
+    wither: "näivetys"
+    falling-block: "putoava palikka"
+    thorns: "piikit"
+    dragon-breath: "lohikäärmeen henkäys"
+    fly-into-wall: "törmäys"
+    hot-floor: "kuuma lattia"
+    campfire: "nuotio"
+    cramming: "ahtautuminen"
+    dryout: "kuivuminen"
+    freeze: "jäätyminen"
+    sonic-boom: "ääniaalto"
+    custom: "mukautettu vahinko"
+    unknown: "tuntematon"
   recorded: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   recorded-one: "<gray>Kuolinpaikka merkitty: <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
   location: "<gray>Kuolinpaikkasi on <green><world> <x>, <y>, <z></green>. Merkintä vanhenee <minutes> minuutissa.</gray>"
@@ -316,7 +357,6 @@ death-recovery:
   compass-cooldown-one: "<red>Voit pyytää uuden kompassin <seconds> sekunnin kuluttua.</red>"
   actionbar-navigation: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <white><arrow></white> <distance> <gray>palikkaa</gray>"
   actionbar-portal: "<light_purple>Käytä portaalia lähellä kohtaa <x>, <z></light_purple> <dark_gray>•</dark_gray> <gray><world></gray>"
-  actionbar-distance: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><distance> palikan päässä</gray>"
   actionbar-world: "<red>Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world> <x>, <z></gray>"
   actionbar-expired: "<red>Tämä palautuskompassi on vanhentunut.</red>"
   guide-prompt-enabled: "<green>Kelluva kuolinpaikkaoppaasi on käytössä.</green> <click:run_command:'/deathlocation guide off'><hover:show_text:'Piilota yksityinen opas'><yellow>[Poista käytöstä]</yellow></hover></click>"
@@ -330,7 +370,7 @@ death-recovery:
   guide-portal: "<light_purple>◇ Portaalireitti</light_purple> <dark_gray>•</dark_gray> <distance> <gray>m</gray>"
   guide-world: "<red>☠ Kuolinpaikka</red> <dark_gray>•</dark_gray> <gray><world></gray>"
   reached: "<green>Saavuit kuolinpaikallesi. Kelluva opas poistettiin.</green>"
-  dismissed: "<gray>Kuolinpaikkasi kelluva opas poistettiin.</gray>"
+  dismissed: "<gray>Kuolinpaikkamerkintäsi ja kelluva opas poistettiin.</gray>"
 
 death-messages:
   fall:
@@ -569,7 +609,6 @@ ui:
     owner: "<green>Omistaja: <player></green>"
     transfer-action: "<yellow>Napsauta siirtääksesi omistajuuden.</yellow>"
     transferred: "<gray>Omistajuus siirrettiin pelaajalle <green><player></green>.</gray>"
-    transfer-unavailable: "<red>Omistajuuden vahvistusta ei voitu avata; mitään ei muutettu.</red>"
     transfer-prompt: "<yellow>Vahvista siirto kirjoittamalla uuden omistajan pelaajanimi uudelleen chattiin.</yellow>"
     transfer-cancelled: "<gray>Omistajuuden siirto peruttiin.</gray>"
     access-mode: "<green>Käyttöoikeus: <mode></green>"
@@ -828,3 +867,4 @@ ui:
 
 atmosphere:
   low-durability: "<red>Varoitus: Esineen <item> kestävyys on vähissä (<uses> käyttökertaa jäljellä)!</red>"
+  sculk-warning: "<dark_purple>⚠️ Sculk-varoitus: <level>/4 (Vartija lähestyy...)</dark_purple>"

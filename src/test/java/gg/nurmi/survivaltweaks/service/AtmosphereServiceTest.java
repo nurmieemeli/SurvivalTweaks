@@ -3,18 +3,19 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.SurvivalTweaks;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import org.bukkit.Material;
 import org.bukkit.Server;
+import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +36,9 @@ public class AtmosphereServiceTest {
     @Mock
     private ActionBarService actionBars;
 
+    @Mock
+    private PlayerExperienceService experience;
+
     private AtmosphereService service;
 
     @BeforeEach
@@ -47,7 +51,7 @@ public class AtmosphereServiceTest {
         when(plugin.getServer()).thenReturn(server);
         when(server.getScheduler()).thenReturn(scheduler);
 
-        service = new AtmosphereService(plugin, settingsService, messages, actionBars);
+        service = new AtmosphereService(plugin, settingsService, messages, actionBars, experience);
     }
 
     @Test
@@ -58,5 +62,39 @@ public class AtmosphereServiceTest {
         assertTrue(service.isRareMaterial(Material.ELYTRA));
         assertFalse(service.isRareMaterial(Material.DIRT));
         assertFalse(service.isRareMaterial(Material.COBBLESTONE));
+    }
+
+    @Test
+    void sculkWarningRequiresBothGlobalAndPlayerActionBarSettings() {
+        Player player = mock(Player.class);
+        when(settings.atmosphereSculkWarningActionbar()).thenReturn(true);
+        when(settings.actionBarEnabled()).thenReturn(true);
+        when(experience.actionBars(player)).thenReturn(true);
+
+        assertTrue(service.sculkWarningEnabled(player));
+
+        when(experience.actionBars(player)).thenReturn(false);
+        assertFalse(service.sculkWarningEnabled(player));
+
+        when(experience.actionBars(player)).thenReturn(true);
+        when(settings.actionBarEnabled()).thenReturn(false);
+        assertFalse(service.sculkWarningEnabled(player));
+    }
+
+    @Test
+    void particlePreferencesDisableOrReduceAtmosphereEffects() {
+        Player player = mock(Player.class);
+        when(experience.preferences(player)).thenReturn(
+                PlayerPreferences.DEFAULTS.withReducedEffects(true)
+        );
+
+        assertTrue(service.particlesEnabled(player));
+        assertEquals(3, service.particleCount(player, 10));
+        assertEquals(1, service.particleCount(player, 2));
+
+        when(experience.preferences(player)).thenReturn(
+                PlayerPreferences.DEFAULTS.withParticles(false)
+        );
+        assertFalse(service.particlesEnabled(player));
     }
 }
