@@ -487,7 +487,7 @@ session-summary:
   open-hover: "<gray>Open the Survival hub.</gray>"
 
 admin:
-  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>You do not have permission to use this administrator command.</red>"
   reload-success: "<green>SurvivalTweaks configuration, languages, and effects reloaded.</green>"
   reload-failed: "<red>Reload rejected; the previous configuration remains active: <reason></red>"
@@ -519,6 +519,7 @@ admin:
     doctor: "Scan configuration, player data, locks, death markers, and backups."
     performance: "Inspect adaptive load shedding, work queues, and recurring task health."
     backup: "List, create, verify, or safely stage a backup restore."
+    storage: "Inspect, verify, export, test, or migrate the active data store."
     spawnpool: "Inspect or manage prepared new-player locations."
     maintenance: "Enable join maintenance or inspect its current state."
     restart: "Schedule or cancel a safe supervised server restart."
@@ -567,6 +568,20 @@ admin:
       normal: "<green>normal</green>"
       reduced: "<yellow>reduced</yellow>"
       critical: "<red>critical</red>"
+  storage:
+    working: "<gray>Running the storage operation in the background...</gray>"
+    busy: "<yellow>Another storage operation is already running.</yellow>"
+    usage: "<red>Usage: /survivaltweaks storage [status|verify|export|test [backend]|migrate [backend]]</red>"
+    unknown-backend: "<red>Unknown backend. Choose sqlite, postgresql, or mysql.</red>"
+    remote-not-configured: "<red>Configure storage.remote.type as <backend> and provide its connection settings first.</red>"
+    status: "<gray>Storage: <green><backend></green> • Schema: <schema> • Latency: <latency> ms • Pool: <active> active / <idle> idle / <waiting> waiting</gray>"
+    status-failed: "<red>Storage <backend> is unavailable: <reason></red> <gray>Schema: <schema> • Pool: <active>/<idle>/<waiting></gray>"
+    verify-valid: "<green>The active database passed its schema, connection, and integrity checks.</green>"
+    verify-invalid: "<red>Storage verification failed: <problems></red>"
+    test-success: "<green>Connected to <backend> in <latency> ms.</green> <gray>Destination empty: <empty></gray>"
+    exported: "<green>Created verified portable export <file>.</green> <gray><records> logical records • SHA-256 <sha></gray>"
+    migration-staged: "<green>Storage migration <id> staged from <source> to <target>.</green> <yellow>Restart Paper to perform and verify the cutover before players can join.</yellow>"
+    failed: "<red>Storage operation failed: <reason></red>"
   backup:
     working: "<gray>Running the backup operation in the background...</gray>"
     busy: "<yellow>Another backup operation is already running.</yellow>"

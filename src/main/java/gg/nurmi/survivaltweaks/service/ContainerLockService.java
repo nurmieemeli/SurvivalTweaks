@@ -3,7 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.object.BlockKey;
 import gg.nurmi.survivaltweaks.object.ContainerLock;
 import gg.nurmi.survivaltweaks.object.ContainerLockSnapshot;
-import gg.nurmi.survivaltweaks.storage.ContainerLockStore;
+import gg.nurmi.survivaltweaks.storage.ContainerLockDataStore;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -28,7 +28,7 @@ public final class ContainerLockService implements AutoCloseable {
 
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
-    private final ContainerLockStore store;
+    private final ContainerLockDataStore store;
     private final Logger logger;
     private final Map<UUID, ContainerLock> locksById = new HashMap<>();
     private final Map<BlockKey, ContainerLock> locksByBlock = new HashMap<>();
@@ -39,7 +39,7 @@ public final class ContainerLockService implements AutoCloseable {
     private final ExecutorService writer;
     private boolean closing;
 
-    public ContainerLockService(ContainerLockStore store, Logger logger) {
+    public ContainerLockService(ContainerLockDataStore store, Logger logger) {
         this.store = store;
         this.logger = logger;
         this.writer = Executors.newSingleThreadExecutor(task -> {
@@ -284,7 +284,7 @@ public final class ContainerLockService implements AutoCloseable {
     }
 
     private void load() {
-        for (ContainerLockSnapshot snapshot : store.load()) {
+        for (ContainerLockSnapshot snapshot : store.loadLocks()) {
             if (snapshot.blocks().stream().anyMatch(locksByBlock::containsKey)) {
                 logger.warning("Skipped overlapping container lock " + snapshot.id());
                 continue;
@@ -326,7 +326,7 @@ public final class ContainerLockService implements AutoCloseable {
             List<ContainerLockSnapshot> locks;
             while ((locks = pending.getAndSet(null)) != null) {
                 try {
-                    store.save(locks);
+                    store.saveLocks(locks);
                 } catch (IOException exception) {
                     latestRequested.compareAndSet(locks, null);
                     logger.log(Level.SEVERE, "Could not save container locks", exception);

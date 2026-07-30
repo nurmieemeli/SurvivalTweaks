@@ -76,6 +76,10 @@ public final class MessageService {
             Map.entry("admin.enchant.usage", RecoveryAction.suggest(
                     "recovery.retry",
                     "/survivaltweaks enchant "
+            )),
+            Map.entry("admin.storage.usage", RecoveryAction.suggest(
+                    "recovery.retry",
+                    "/survivaltweaks storage "
             ))
     );
 

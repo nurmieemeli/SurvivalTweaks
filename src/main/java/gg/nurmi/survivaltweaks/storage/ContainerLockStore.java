@@ -23,7 +23,7 @@ import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public final class ContainerLockStore {
+public final class ContainerLockStore implements ContainerLockDataStore {
 
     static final int SCHEMA_VERSION = 3;
 
@@ -52,6 +52,11 @@ public final class ContainerLockStore {
         return List.copyOf(locks);
     }
 
+    @Override
+    public List<ContainerLockSnapshot> loadLocks() {
+        return load();
+    }
+
     public void save(Collection<ContainerLockSnapshot> locks) throws IOException {
         Path parent = Objects.requireNonNull(file.getParent(), "lock file parent");
         Files.createDirectories(parent);
@@ -67,6 +72,11 @@ public final class ContainerLockStore {
         } finally {
             Files.deleteIfExists(temporary);
         }
+    }
+
+    @Override
+    public void saveLocks(Collection<ContainerLockSnapshot> locks) throws IOException {
+        save(locks);
     }
 
     private ContainerLockSnapshot deserialize(Map<?, ?> serialized) {

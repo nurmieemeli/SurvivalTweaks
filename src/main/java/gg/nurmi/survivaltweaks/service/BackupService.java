@@ -44,7 +44,9 @@ public final class BackupService {
             "messages_fi.yml",
             "locked-containers.yml",
             "death-markers.yml",
-            "new-player-spawns.yml"
+            "new-player-spawns.yml",
+            "storage-state.yml",
+            "storage-migration.yml"
     );
     private static final String PENDING_RESTORE_FILE = ".restore-pending.zip";
     private static final int MAX_ARCHIVE_ENTRIES = 100_000;
@@ -55,6 +57,9 @@ public final class BackupService {
     private final Clock clock;
     private final Logger logger;
     private final int retention;
+    private SnapshotLeaseFactory snapshotLeaseFactory = () -> () -> {
+    };
+    private String databaseFilename = "survivaltweaks.db";
     private long generation;
 
     public BackupService(Path dataFolder, Clock clock, Logger logger) {
@@ -74,27 +79,41 @@ public final class BackupService {
 
     public synchronized Optional<Path> create(String reason) throws IOException {
         String normalizedReason = normalizeReason(reason);
-        List<Path> sources = sources();
-        if (sources.isEmpty()) {
-            return Optional.empty();
-        }
+        try (SnapshotLease ignored = snapshotLeaseFactory.acquire()) {
+            List<Path> sources = sources();
+            if (sources.isEmpty()) {
+                return Optional.empty();
+            }
 
-        Files.createDirectories(backupFolder);
-        Path target = availableTarget(normalizedReason);
-        Path temporary = Files.createTempFile(backupFolder, ".backup-", ".tmp");
-        try {
-            writeArchive(temporary, sources);
-            replaceAtomically(temporary, target);
-            Files.setLastModifiedTime(
-                    target,
-                    FileTime.fromMillis(clock.instant().toEpochMilli() + generation++)
-            );
-        } finally {
-            Files.deleteIfExists(temporary);
+            Files.createDirectories(backupFolder);
+            Path target = availableTarget(normalizedReason);
+            Path temporary = Files.createTempFile(backupFolder, ".backup-", ".tmp");
+            try {
+                writeArchive(temporary, sources);
+                replaceAtomically(temporary, target);
+                Files.setLastModifiedTime(
+                        target,
+                        FileTime.fromMillis(clock.instant().toEpochMilli() + generation++)
+                );
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+            rotate();
+            logger.info("Created SurvivalTweaks safety backup " + target.getFileName());
+            return Optional.of(target);
         }
-        rotate();
-        logger.info("Created SurvivalTweaks safety backup " + target.getFileName());
-        return Optional.of(target);
+    }
+
+    public synchronized void snapshotLeaseFactory(SnapshotLeaseFactory updatedFactory) {
+        snapshotLeaseFactory = Objects.requireNonNull(updatedFactory, "updatedFactory");
+    }
+
+    public synchronized void databaseFilename(String updatedFilename) {
+        String normalized = Objects.requireNonNull(updatedFilename, "updatedFilename").strip();
+        if (!validDatabaseFilename(normalized)) {
+            throw new IllegalArgumentException("SQLite backup filename is invalid");
+        }
+        databaseFilename = normalized;
     }
 
     public synchronized List<ArchiveInfo> archives() throws IOException {
@@ -174,6 +193,7 @@ public final class BackupService {
         Path staging = Files.createTempDirectory(dataFolder, ".restore-stage-");
         Path rollback = Files.createTempDirectory(dataFolder, ".restore-rollback-");
         List<String> managedPaths = new ArrayList<>(ROOT_FILES);
+        managedPaths.addAll(databaseEntries(pending));
         managedPaths.add("userdata");
         List<String> touchedPaths = new ArrayList<>();
         boolean preserveRollback = false;
@@ -291,6 +311,10 @@ public final class BackupService {
             if (Files.isRegularFile(candidate) && !Files.isSymbolicLink(candidate)) {
                 sources.add(candidate);
             }
+        }
+        Path database = dataFolder.resolve(databaseFilename);
+        if (Files.isRegularFile(database) && !Files.isSymbolicLink(database)) {
+            sources.add(database);
         }
         Path userdata = dataFolder.resolve("userdata");
         if (Files.isDirectory(userdata) && !Files.isSymbolicLink(userdata)) {
@@ -502,6 +526,9 @@ public final class BackupService {
         if (ROOT_FILES.contains(name)) {
             return true;
         }
+        if (validDatabaseFilename(name)) {
+            return true;
+        }
         if (!name.startsWith("userdata/") || !name.endsWith(".yml")) {
             return false;
         }
@@ -510,6 +537,26 @@ public final class BackupService {
                 && !filename.contains("/")
                 && !filename.equals(".")
                 && !filename.equals("..");
+    }
+
+    private static boolean validDatabaseFilename(String name) {
+        return name != null
+                && name.matches("[A-Za-z0-9._-]{1,128}\\.db")
+                && !name.startsWith(".");
+    }
+
+    private static List<String> databaseEntries(Path archive) throws IOException {
+        ArrayList<String> databases = new ArrayList<>();
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement().getName();
+                if (validDatabaseFilename(name) && !databases.contains(name)) {
+                    databases.add(name);
+                }
+            }
+        }
+        return List.copyOf(databases);
     }
 
     private static String sha256(Path archive) throws IOException {
@@ -576,6 +623,19 @@ public final class BackupService {
     public enum RestoreResult {
         NONE,
         APPLIED
+    }
+
+    @FunctionalInterface
+    public interface SnapshotLeaseFactory {
+
+        SnapshotLease acquire() throws IOException;
+    }
+
+    @FunctionalInterface
+    public interface SnapshotLease extends AutoCloseable {
+
+        @Override
+        void close();
     }
 
     private static final class ArchiveInspectionException extends RuntimeException {

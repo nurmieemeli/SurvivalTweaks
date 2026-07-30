@@ -107,6 +107,8 @@ class PluginResourcesTest {
         assertNotNull(english.getString("server-list.motd"));
         assertNotNull(english.getString("maintenance.restart-warning"));
         assertNotNull(english.getString("admin.performance.summary"));
+        assertNotNull(english.getString("admin.storage.status"));
+        assertNotNull(english.getString("admin.storage.migration-staged"));
         assertNotNull(english.getString("mentions.target-afk"));
         assertNotNull(english.getString("ui.journey.objective.home"));
         assertNotNull(english.getString("mail.result.sent"));
@@ -180,7 +182,10 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
         assertNotNull(config.getString("feedback.cues.afk-enabled.sound"));
         assertNotNull(config.getString("feedback.cues.afk-disabled.particle"));
-        assertEquals(1, config.getInt("config-version"));
+        assertEquals(2, config.getInt("config-version"));
+        assertEquals("auto", config.getString("storage.backend"));
+        assertEquals("survivaltweaks.db", config.getString("storage.sqlite.file"));
+        assertEquals(4, config.getInt("storage.remote.pool-size"));
         assertTrue(config.getBoolean("updates.enabled"));
         assertEquals(6, config.getInt("updates.check-interval-hours"));
         assertNotNull(finnish.getString("lock.denied-open"));

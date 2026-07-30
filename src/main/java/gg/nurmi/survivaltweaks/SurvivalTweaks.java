@@ -60,10 +60,7 @@ import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
 import gg.nurmi.survivaltweaks.service.TickWorkBudget;
 import gg.nurmi.survivaltweaks.service.VanillaGuideService;
-import gg.nurmi.survivaltweaks.storage.ProfileStore;
-import gg.nurmi.survivaltweaks.storage.ContainerLockStore;
-import gg.nurmi.survivaltweaks.storage.DeathMarkerStore;
-import gg.nurmi.survivaltweaks.storage.NewPlayerSpawnStore;
+import gg.nurmi.survivaltweaks.storage.StorageManager;
 import gg.nurmi.survivaltweaks.ui.ConfirmationDialogService;
 import gg.nurmi.survivaltweaks.ui.HomeMenuController;
 import gg.nurmi.survivaltweaks.ui.JourneyMenuController;
@@ -105,6 +102,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private MessageService messages;
     private FeedbackService feedback;
     private BackupService backups;
+    private StorageManager storageManager;
     private DiagnosticService diagnostics;
     private DeathRecoveryService deathRecovery;
     private NewPlayerSpawnService newPlayerSpawns;
@@ -127,6 +125,9 @@ public final class SurvivalTweaks extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         backups = new BackupService(getDataFolder().toPath(), clock, getLogger());
+        backups.databaseFilename(
+                getConfig().getString("storage.sqlite.file", "survivaltweaks.db")
+        );
         try {
             if (backups.hasPendingRestore()) {
                 backups.create("pre-restore");
@@ -168,25 +169,31 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         feedback = new FeedbackService(getConfig(), getLogger());
         releaseUpdates = new ReleaseUpdateService(this, messages, getConfig(), clock);
-        ProfileStore profileStore = new ProfileStore(
-                getDataFolder().toPath().resolve("userdata"),
+        try {
+            storageManager = StorageManager.open(
+                getConfig(),
+                getDataFolder().toPath(),
                 getLogger(),
                 worldName -> {
                     org.bukkit.World world = getServer().getWorld(worldName);
                     return world == null ? null : world.getUID();
                 }
-        );
+            );
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not initialize SurvivalTweaks storage", exception);
+        }
+        backups.snapshotLeaseFactory(() -> {
+            var lease = storageManager.acquireSnapshotLease();
+            return lease::close;
+        });
 
-        profiles = new ProfileRepository(profileStore, getLogger());
+        profiles = new ProfileRepository(storageManager.store(), getLogger());
         PlayerExperienceService experience = new PlayerExperienceService(profiles);
         messages.languagePreference(playerId -> experience.preferences(playerId).language());
         feedback.preferenceProvider(experience::preferences);
         newPlayerSpawns = new NewPlayerSpawnService(
                 this,
-                new NewPlayerSpawnStore(
-                        getDataFolder().toPath().resolve("new-player-spawns.yml"),
-                        getLogger()
-                ),
+                storageManager.store(),
                 messages,
                 feedback,
                 settings,
@@ -213,7 +220,13 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock,
                 taskFailures
         );
-        diagnostics = new DiagnosticService(this, clock, performanceGovernor, taskFailures);
+        diagnostics = new DiagnosticService(
+                this,
+                clock,
+                performanceGovernor,
+                taskFailures,
+                storageManager
+        );
         OnboardingService onboarding = new OnboardingService(profiles, messages);
         onboarding.guidancePreference(playerId ->
                 experience.preferences(playerId).journeyGuidanceEnabled());
@@ -247,7 +260,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         teleportRequests = new TeleportRequestService();
         containerLocks = new ContainerLockService(
-                new ContainerLockStore(getDataFolder().toPath().resolve("locked-containers.yml"), getLogger()),
+                storageManager.store(),
                 getLogger()
         );
         purgeInactiveLocks(initialSettings);
@@ -321,7 +334,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         deathRecovery = new DeathRecoveryService(
                 this,
-                new DeathMarkerStore(getDataFolder().toPath().resolve("death-markers.yml"), getLogger()),
+                storageManager.store(),
                 messages,
                 settings,
                 clock,
@@ -580,6 +593,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             profiles.close();
             profiles = null;
         }
+        if (storageManager != null) {
+            storageManager.close();
+            storageManager = null;
+        }
         if (performanceGovernor != null) {
             performanceGovernor.close();
             performanceGovernor = null;
@@ -803,6 +820,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                         taskFailures,
                         treeFeller,
                         fastLeafDecay,
+                        storageManager,
                         this
                 )
         );

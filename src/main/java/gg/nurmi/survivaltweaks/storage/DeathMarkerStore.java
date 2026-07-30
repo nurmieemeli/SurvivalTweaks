@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public final class DeathMarkerStore {
+public final class DeathMarkerStore implements DeathMarkerDataStore {
 
     private final Path file;
     private final Logger logger;
@@ -55,6 +55,11 @@ public final class DeathMarkerStore {
         return List.copyOf(markers);
     }
 
+    @Override
+    public List<DeathMarker> loadDeathMarkers() {
+        return load();
+    }
+
     public void save(Collection<DeathMarker> markers) throws IOException {
         Path parent = Objects.requireNonNull(file.getParent());
         Files.createDirectories(parent);
@@ -72,6 +77,11 @@ public final class DeathMarkerStore {
         } finally {
             Files.deleteIfExists(temporary);
         }
+    }
+
+    @Override
+    public void saveDeathMarkers(Collection<DeathMarker> markers) throws IOException {
+        save(markers);
     }
 
     private Map<String, Object> serialize(DeathMarker marker) {

@@ -5,7 +5,7 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnAssignment;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnLocation;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnState;
-import gg.nurmi.survivaltweaks.storage.NewPlayerSpawnStore;
+import gg.nurmi.survivaltweaks.storage.NewPlayerSpawnDataStore;
 import net.kyori.adventure.title.Title;
 import org.bukkit.HeightMap;
 import org.bukkit.Location;
@@ -60,7 +60,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     );
 
     private final JavaPlugin plugin;
-    private final NewPlayerSpawnStore store;
+    private final NewPlayerSpawnDataStore store;
     private final MessageService messages;
     private final FeedbackService feedback;
     private final SettingsService settings;
@@ -90,7 +90,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     public NewPlayerSpawnService(
             JavaPlugin plugin,
-            NewPlayerSpawnStore store,
+            NewPlayerSpawnDataStore store,
             MessageService messages,
             FeedbackService feedback,
             SettingsService settings
@@ -100,7 +100,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     public NewPlayerSpawnService(
             JavaPlugin plugin,
-            NewPlayerSpawnStore store,
+            NewPlayerSpawnDataStore store,
             MessageService messages,
             FeedbackService feedback,
             SettingsService settings,
@@ -117,12 +117,12 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         this.writer = new CoalescingSnapshotWriter<>(
                 "SurvivalTweaks-new-player-spawn-writer",
                 "new-player spawn state",
-                store::save,
+                store::saveSpawnState,
                 plugin.getLogger() == null
                         ? Logger.getLogger(NewPlayerSpawnService.class.getName())
                         : plugin.getLogger()
         );
-        NewPlayerSpawnState state = store.load();
+        NewPlayerSpawnState state = store.loadSpawnState();
         available.addAll(state.available());
         assignments.putAll(state.assignments());
         retired.addAll(state.retired());

@@ -486,7 +486,7 @@ session-summary:
   open-hover: "<gray>Avaa Survival-keskus.</gray>"
 
 admin:
-  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>Sinulla ei ole oikeutta käyttää tätä ylläpitokomentoa.</red>"
   reload-success: "<green>SurvivalTweaksin asetukset, kielet ja tehosteet ladattiin uudelleen.</green>"
   reload-failed: "<red>Uudelleenlataus hylättiin; aiemmat asetukset jäivät voimaan: <reason></red>"
@@ -518,6 +518,7 @@ admin:
     doctor: "Tarkista asetukset, pelaajatiedot, lukot, kuolinmerkinnät ja varmuuskopiot."
     performance: "Tarkista mukautuva kuormanhallinta, työjonot ja toistuvien tehtävien tila."
     backup: "Listaa, luo tai tarkista varmuuskopioita tai valmistele turvallinen palautus."
+    storage: "Tarkista, varmista, vie, testaa tai siirrä aktiivinen tietovarasto."
     spawnpool: "Tarkista tai hallitse uusille pelaajille valmisteltuja sijainteja."
     maintenance: "Ota liittymisen estävä huoltotila käyttöön tai tarkista sen tila."
     restart: "Ajasta tai peru turvallinen valvottu palvelimen uudelleenkäynnistys."
@@ -567,6 +568,20 @@ admin:
       normal: "<green>normaali</green>"
       reduced: "<yellow>rajoitettu</yellow>"
       critical: "<red>kriittinen</red>"
+  storage:
+    working: "<gray>Tietovarastotoiminto suoritetaan taustalla...</gray>"
+    busy: "<yellow>Toinen tietovarastotoiminto on jo käynnissä.</yellow>"
+    usage: "<red>Käyttö: /survivaltweaks storage [status|verify|export|test [taustajärjestelmä]|migrate [taustajärjestelmä]]</red>"
+    unknown-backend: "<red>Tuntematon taustajärjestelmä. Valitse sqlite, postgresql tai mysql.</red>"
+    remote-not-configured: "<red>Määritä ensin storage.remote.type arvoksi <backend> ja anna sen yhteysasetukset.</red>"
+    status: "<gray>Tietovarasto: <green><backend></green> • Skeema: <schema> • Viive: <latency> ms • Yhteydet: <active> käytössä / <idle> vapaana / <waiting> odottaa</gray>"
+    status-failed: "<red>Tietovarasto <backend> ei ole käytettävissä: <reason></red> <gray>Skeema: <schema> • Yhteydet: <active>/<idle>/<waiting></gray>"
+    verify-valid: "<green>Aktiivinen tietokanta läpäisi skeema-, yhteys- ja eheystarkistukset.</green>"
+    verify-invalid: "<red>Tietovaraston tarkistus epäonnistui: <problems></red>"
+    test-success: "<green>Yhteys taustajärjestelmään <backend> muodostettiin <latency> ms:ssa.</green> <gray>Kohde tyhjä: <empty></gray>"
+    exported: "<green>Luotiin tarkistettu siirrettävä vienti <file>.</green> <gray><records> loogista tietuetta • SHA-256 <sha></gray>"
+    migration-staged: "<green>Tietovaraston siirto <id> valmisteltiin lähteestä <source> kohteeseen <target>.</green> <yellow>Käynnistä Paper uudelleen, jotta vaihto tehdään ja tarkistetaan ennen pelaajien liittymistä.</yellow>"
+    failed: "<red>Tietovarastotoiminto epäonnistui: <reason></red>"
   backup:
     working: "<gray>Varmuuskopiointitoiminto suoritetaan taustalla...</gray>"
     busy: "<yellow>Toinen varmuuskopiointitoiminto on jo käynnissä.</yellow>"

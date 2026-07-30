@@ -32,11 +32,11 @@ class ConfigMigrationServiceTest {
         ConfigMigrationService.Result result = migrations.migrate(config, dataFolder);
 
         assertTrue(result.changed());
-        assertEquals(1, config.getInt("config-version"));
+        assertEquals(2, config.getInt("config-version"));
         assertFalse(config.contains("disabled-commands", true));
         assertFalse(config.contains("death-recovery.give-compass", true));
         assertTrue(Files.readString(dataFolder.resolve("config-migration-report.txt"))
-                .contains("Schema: 0 -> 1"));
+                .contains("Schema: 0 -> 2"));
     }
 
     @Test

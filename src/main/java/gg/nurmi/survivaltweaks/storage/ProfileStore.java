@@ -32,7 +32,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.function.Function;
 
-public final class ProfileStore {
+public final class ProfileStore implements ProfileDataStore {
 
     static final int SCHEMA_VERSION = 6;
 

@@ -22,7 +22,7 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public final class NewPlayerSpawnStore {
+public final class NewPlayerSpawnStore implements NewPlayerSpawnDataStore {
 
     public static final int SCHEMA_VERSION = 2;
 
@@ -83,6 +83,11 @@ public final class NewPlayerSpawnStore {
         return new NewPlayerSpawnState(available, assignments, retired, awaitingReplacement);
     }
 
+    @Override
+    public NewPlayerSpawnState loadSpawnState() {
+        return load();
+    }
+
     public void save(NewPlayerSpawnState state) throws IOException {
         Path parent = Objects.requireNonNull(file.getParent(), "spawn file parent");
         Files.createDirectories(parent);
@@ -105,6 +110,11 @@ public final class NewPlayerSpawnStore {
         } finally {
             Files.deleteIfExists(temporary);
         }
+    }
+
+    @Override
+    public void saveSpawnState(NewPlayerSpawnState state) throws IOException {
+        save(state);
     }
 
     private Map<String, Object> serializeAssignment(NewPlayerSpawnAssignment assignment) {

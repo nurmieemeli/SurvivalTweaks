@@ -69,6 +69,7 @@ class PermissionContractTest {
                 SurvivalTweaksCommand.PERFORMANCE_PERMISSION,
                 SurvivalTweaksCommand.SPAWN_POOL_PERMISSION,
                 SurvivalTweaksCommand.BACKUP_PERMISSION,
+                SurvivalTweaksCommand.STORAGE_PERMISSION,
                 SurvivalTweaksCommand.MAINTENANCE_PERMISSION,
                 SurvivalTweaksCommand.ENCHANT_PERMISSION,
                 LockCommand.ADMIN_PERMISSION,

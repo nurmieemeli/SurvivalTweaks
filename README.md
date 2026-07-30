@@ -142,6 +142,9 @@ activation condition, acquisition routes, and relevant incompatibilities.
 | `/survivaltweaks performance` | Inspect governor state, fair work lanes, queues, and recent task failures | Operator |
 | `/survivaltweaks backup list\|create\|verify` | Inspect and create safety backups | Operator |
 | `/survivaltweaks backup restore <file> [confirm]` | Stage a maintenance-only restore | Console |
+| `/survivaltweaks storage status\|verify\|export` | Inspect, verify, or export the active database | Operator |
+| `/survivaltweaks storage test <sqlite\|postgresql\|mysql>` | Test a configured destination without switching | Operator |
+| `/survivaltweaks storage migrate <sqlite\|postgresql\|mysql>` | Stage a verified database migration for restart | Operator |
 | `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operator |
 | `/survivaltweaks maintenance on\|off\|status` | Control join-blocking maintenance mode | Operator |
 | `/survivaltweaks restart <10s\|5m\|1h\|cancel\|status>` | Schedule, inspect, or cancel a safe restart | Operator |
@@ -162,7 +165,7 @@ feature:
 | Sections | Controls |
 | --- | --- |
 | `performance` | Adaptive MSPT thresholds, recovery hysteresis, and the shared per-tick budget for batchable work |
-| `home`, `storage` | Home limits and profile persistence |
+| `home`, `storage` | Home limits, SQLite file, remote database connection, pooling, and timeouts |
 | `teleport` | Requests, warm-up, cooldown, cancellation, and safe landing |
 | `new-player-spawn` | World, coordinate bounds, pool size, spacing, pacing, TPS floor, landing checks, and blocked biomes |
 | `locked-containers` | Targeting, limits, explosion protection, and automation defaults |
@@ -221,9 +224,22 @@ English catalog.
 
 ## Data safety and operations
 
-Profiles, locks, death markers, and spawn state use ordered background
-persistence with atomic file replacement. Mutable Bukkit state never crosses
-the asynchronous storage boundary.
+Profiles, locks, death markers, and first-join spawn state share one normalized,
+transactional SQL store. SQLite is automatic and requires no setup. PostgreSQL
+and MySQL are optional remote backends with bounded connection pooling; their
+JDBC drivers are bundled in the plugin JAR.
+
+The first SQL startup imports existing YAML data only when the database is
+empty, verifies record counts and a deterministic checksum, and preserves the
+original files. The chosen backend and endpoint are then pinned in
+`storage-state.yml`. If a configured remote database is unavailable, startup
+fails visibly instead of silently writing to SQLite and splitting player data.
+
+Database changes are explicit two-phase operations: configure the remote
+endpoint while leaving the active backend selected, run `storage test`, then
+run `storage migrate`. On restart, SurvivalTweaks copies the complete logical
+snapshot in one transaction, verifies it, and switches the pinned backend only
+after success. The source remains authoritative after any failure.
 
 SurvivalTweaks creates safety archives before startup data loading and
 configuration reloads, retaining the newest ten. Restores are staged while the

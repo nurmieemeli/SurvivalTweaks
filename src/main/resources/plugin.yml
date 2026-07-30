@@ -100,6 +100,9 @@ permissions:
   survivaltweaks.command.backup:
     description: Allows creating, verifying, and staging restoration of SurvivalTweaks backups.
     default: op
+  survivaltweaks.command.storage:
+    description: Allows inspecting, exporting, testing, and migrating SurvivalTweaks storage.
+    default: op
   survivaltweaks.command.maintenance:
     description: Allows managing maintenance mode and safe restart countdowns.
     default: op

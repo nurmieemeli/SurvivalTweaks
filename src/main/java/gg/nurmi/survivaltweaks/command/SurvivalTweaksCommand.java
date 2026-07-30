@@ -14,6 +14,8 @@ import gg.nurmi.survivaltweaks.service.ReloadService;
 import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
 import gg.nurmi.survivaltweaks.service.TickWorkBudget;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
+import gg.nurmi.survivaltweaks.storage.StorageBackend;
+import gg.nurmi.survivaltweaks.storage.StorageManager;
 import gg.nurmi.survivaltweaks.ui.PlayerHubController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -34,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -47,6 +50,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     public static final String BACKUP_PERMISSION = "survivaltweaks.command.backup";
     public static final String ENCHANT_PERMISSION = "survivaltweaks.command.enchant";
     public static final String PERFORMANCE_PERMISSION = "survivaltweaks.command.performance";
+    public static final String STORAGE_PERMISSION = "survivaltweaks.command.storage";
     private static final int MAX_DIAGNOSTIC_ISSUES = 20;
 
     private static final List<HelpEntry> HELP_ENTRIES = List.of(
@@ -106,6 +110,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     false
             ),
             new HelpEntry(
+                    "/survivaltweaks storage status",
+                    STORAGE_PERMISSION,
+                    "admin.help.storage",
+                    false
+            ),
+            new HelpEntry(
                     "/survivaltweaks spawnpool status",
                     SPAWN_POOL_PERMISSION,
                     "admin.help.spawnpool",
@@ -145,7 +155,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final TaskFailureIsolation taskFailures;
     private final TreeFellerService treeFeller;
     private final FastLeafDecayService leafDecay;
+    private final StorageManager storage;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
+    private final AtomicBoolean storageOperation = new AtomicBoolean();
 
     public SurvivalTweaksCommand(
             MessageService messages,
@@ -161,6 +173,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             TaskFailureIsolation taskFailures,
             TreeFellerService treeFeller,
             FastLeafDecayService leafDecay,
+            StorageManager storage,
             JavaPlugin plugin
     ) {
         this.messages = messages;
@@ -176,6 +189,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.taskFailures = taskFailures;
         this.treeFeller = treeFeller;
         this.leafDecay = leafDecay;
+        this.storage = storage;
         this.plugin = plugin;
     }
 
@@ -243,6 +257,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("backup")) {
             return handleBackup(sender, arguments);
         }
+        if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("storage")) {
+            return handleStorage(sender, arguments);
+        }
         if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("maintenance")) {
             return handleMaintenance(sender, arguments);
         }
@@ -285,6 +302,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             if (sender.hasPermission(BACKUP_PERMISSION) && "backup".startsWith(prefix)) {
                 options.add("backup");
+            }
+            if (sender.hasPermission(STORAGE_PERMISSION) && "storage".startsWith(prefix)) {
+                options.add("storage");
             }
             if (sender.hasPermission(MAINTENANCE_PERMISSION)) {
                 if ("maintenance".startsWith(prefix)) {
@@ -344,6 +364,24 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     && arguments[1].equalsIgnoreCase("restore")
                     && "confirm".startsWith(arguments[3].toLowerCase(Locale.ROOT))) {
                 return List.of("confirm");
+            }
+            return List.of();
+        }
+        if (sender.hasPermission(STORAGE_PERMISSION)
+                && arguments[0].equalsIgnoreCase("storage")) {
+            if (arguments.length == 2) {
+                String prefix = arguments[1].toLowerCase(Locale.ROOT);
+                return List.of("status", "verify", "export", "test", "migrate").stream()
+                        .filter(option -> option.startsWith(prefix))
+                        .toList();
+            }
+            if (arguments.length == 3
+                    && (arguments[1].equalsIgnoreCase("test")
+                    || arguments[1].equalsIgnoreCase("migrate"))) {
+                String prefix = arguments[2].toLowerCase(Locale.ROOT);
+                return List.of("sqlite", "postgresql", "mysql").stream()
+                        .filter(option -> option.startsWith(prefix))
+                        .toList();
             }
             return List.of();
         }
@@ -528,6 +566,155 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         }
         messages.send(sender, "admin.backup.usage");
         return true;
+    }
+
+    private boolean handleStorage(CommandSender sender, String[] arguments) {
+        if (!sender.hasPermission(STORAGE_PERMISSION)) {
+            messages.send(sender, "admin.no-permission");
+            return true;
+        }
+        if (arguments.length == 2 && arguments[1].equalsIgnoreCase("status")) {
+            runStorageOperation(sender, storage::status, status -> {
+                messages.send(
+                        sender,
+                        status.healthy()
+                                ? "admin.storage.status"
+                                : "admin.storage.status-failed",
+                        Placeholder.unparsed("backend", status.backend().key()),
+                        Placeholder.unparsed("schema", Integer.toString(status.schemaVersion())),
+                        Placeholder.unparsed("latency", Long.toString(status.latencyMillis())),
+                        Placeholder.unparsed("active", Integer.toString(status.activeConnections())),
+                        Placeholder.unparsed("idle", Integer.toString(status.idleConnections())),
+                        Placeholder.unparsed("waiting", Integer.toString(status.waitingThreads())),
+                        Placeholder.unparsed("reason", status.problem())
+                );
+            });
+            return true;
+        }
+        if (arguments.length == 2 && arguments[1].equalsIgnoreCase("verify")) {
+            runStorageOperation(sender, storage::verify, verification -> {
+                if (verification.healthy()) {
+                    messages.send(sender, "admin.storage.verify-valid");
+                } else {
+                    messages.send(
+                            sender,
+                            "admin.storage.verify-invalid",
+                            Placeholder.unparsed(
+                                    "problems",
+                                    String.join("; ", verification.problems())
+                            )
+                    );
+                }
+            });
+            return true;
+        }
+        if (arguments.length == 2 && arguments[1].equalsIgnoreCase("export")) {
+            runStorageOperation(sender, storage::exportPortable, exported ->
+                    messages.send(
+                            sender,
+                            "admin.storage.exported",
+                            Placeholder.unparsed("file", exported.file().getFileName().toString()),
+                            Placeholder.unparsed(
+                                    "records",
+                                    Integer.toString(exported.counts().total())
+                            ),
+                            Placeholder.unparsed("sha", exported.checksum())
+                    )
+            );
+            return true;
+        }
+        if (arguments.length == 3
+                && (arguments[1].equalsIgnoreCase("test")
+                || arguments[1].equalsIgnoreCase("migrate"))) {
+            StorageBackend target;
+            try {
+                target = StorageBackend.parse(arguments[2]);
+            } catch (IllegalArgumentException exception) {
+                messages.send(sender, "admin.storage.unknown-backend");
+                return true;
+            }
+            if (target != StorageBackend.SQLITE) {
+                String configuredType = plugin.getConfig()
+                        .getString("storage.remote.type", "")
+                        .strip();
+                if (!configuredType.equalsIgnoreCase(target.key())) {
+                    messages.send(
+                            sender,
+                            "admin.storage.remote-not-configured",
+                            Placeholder.unparsed("backend", target.key())
+                    );
+                    return true;
+                }
+            }
+            if (arguments[1].equalsIgnoreCase("test")) {
+                runStorageOperation(sender, () -> storage.testBackend(target), result ->
+                        messages.send(
+                                sender,
+                                "admin.storage.test-success",
+                                Placeholder.unparsed("backend", result.backend().key()),
+                                Placeholder.unparsed(
+                                        "empty",
+                                        Boolean.toString(result.empty())
+                                ),
+                                Placeholder.unparsed(
+                                        "latency",
+                                        Long.toString(result.latencyMillis())
+                                )
+                        )
+                );
+                return true;
+            }
+            runStorageOperation(sender, () -> storage.stageMigration(target), migration -> {
+                plugin.getConfig().set("storage.backend", target.key());
+                plugin.saveConfig();
+                messages.send(
+                        sender,
+                        "admin.storage.migration-staged",
+                        Placeholder.unparsed("source", migration.source().key()),
+                        Placeholder.unparsed("target", migration.target().key()),
+                        Placeholder.unparsed("id", migration.id().toString())
+                );
+            });
+            return true;
+        }
+        messages.send(sender, "admin.storage.usage");
+        return true;
+    }
+
+    private <T> void runStorageOperation(
+            CommandSender sender,
+            CheckedSupplier<T> operation,
+            Consumer<T> completion
+    ) {
+        if (!storageOperation.compareAndSet(false, true)) {
+            messages.send(sender, "admin.storage.busy");
+            return;
+        }
+        messages.send(sender, "admin.storage.working");
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            T result;
+            try {
+                result = operation.get();
+            } catch (Exception exception) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    storageOperation.set(false);
+                    String reason = Objects.requireNonNullElse(
+                            exception.getMessage(),
+                            exception.getClass().getSimpleName()
+                    );
+                    messages.send(
+                            sender,
+                            "admin.storage.failed",
+                            Placeholder.unparsed("reason", reason)
+                    );
+                });
+                return;
+            }
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                storageOperation.set(false);
+                completion.accept(result);
+            });
+        });
     }
 
     private void backupFailed(CommandSender sender, Exception exception) {

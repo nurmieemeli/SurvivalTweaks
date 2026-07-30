@@ -1,4 +1,4 @@
-config-version: 1
+config-version: 2
 
 home:
   max-amount: 3
@@ -55,6 +55,23 @@ new-player-spawn:
 
 storage:
   autosave-seconds: 300
+  # auto uses SQLite unless a remote type is configured. Once initialized,
+  # the selected endpoint is pinned and can only change through a migration.
+  backend: auto
+  sqlite:
+    file: "survivaltweaks.db"
+  remote:
+    # Leave blank for SQLite. Supported values: postgresql, mysql.
+    type: ""
+    host: "localhost"
+    # 0 selects the engine default: PostgreSQL 5432 or MySQL 3306.
+    port: 0
+    database: "survivaltweaks"
+    username: "survivaltweaks"
+    password: ""
+    ssl: true
+    pool-size: 4
+    connection-timeout-millis: 5000
 
 locked-containers:
   target-distance: 5

@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 
 public final class ConfigMigrationService {
 
-    public static final int CURRENT_VERSION = 1;
+    public static final int CURRENT_VERSION = 2;
     private static final List<String> VERSION_ONE_OBSOLETE_PATHS = List.of(
             "disabled-commands",
             "commands.disabled",
@@ -59,6 +59,26 @@ public final class ConfigMigrationService {
             version = 1;
             changes.add("Recorded configuration schema version 1.");
         }
+        if (version == 1) {
+            setIfMissing(config, "storage.backend", "auto", changes);
+            setIfMissing(config, "storage.sqlite.file", "survivaltweaks.db", changes);
+            setIfMissing(config, "storage.remote.type", "", changes);
+            setIfMissing(config, "storage.remote.host", "localhost", changes);
+            setIfMissing(config, "storage.remote.port", 0, changes);
+            setIfMissing(config, "storage.remote.database", "survivaltweaks", changes);
+            setIfMissing(config, "storage.remote.username", "survivaltweaks", changes);
+            setIfMissing(config, "storage.remote.password", "", changes);
+            setIfMissing(config, "storage.remote.ssl", true, changes);
+            setIfMissing(config, "storage.remote.pool-size", 4, changes);
+            setIfMissing(
+                    config,
+                    "storage.remote.connection-timeout-millis",
+                    5_000,
+                    changes
+            );
+            version = 2;
+            changes.add("Recorded configuration schema version 2.");
+        }
         config.set("config-version", version);
 
         Result result = new Result(sourceVersion, version, List.copyOf(changes));
@@ -89,6 +109,18 @@ public final class ConfigMigrationService {
             throw new IllegalArgumentException("config-version must be a non-negative integer");
         }
         return number.intValue();
+    }
+
+    private void setIfMissing(
+            FileConfiguration config,
+            String path,
+            Object value,
+            List<String> changes
+    ) {
+        if (!config.contains(path, true)) {
+            config.set(path, value);
+            changes.add("Added storage setting: " + path);
+        }
     }
 
     private void writeReport(Path target, Result result, Instant migratedAt) throws IOException {

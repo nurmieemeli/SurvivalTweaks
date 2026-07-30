@@ -2,7 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
-import gg.nurmi.survivaltweaks.storage.ProfileStore;
+import gg.nurmi.survivaltweaks.storage.ProfileDataStore;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -24,7 +24,7 @@ public final class ProfileRepository implements AutoCloseable {
 
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
-    private final ProfileStore store;
+    private final ProfileDataStore store;
     private final Logger logger;
     private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> latestRequested = new ConcurrentHashMap<>();
@@ -34,7 +34,7 @@ public final class ProfileRepository implements AutoCloseable {
     private final ExecutorService writer;
     private boolean closing;
 
-    public ProfileRepository(ProfileStore store, Logger logger) {
+    public ProfileRepository(ProfileDataStore store, Logger logger) {
         this.store = Objects.requireNonNull(store, "store");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.writer = Executors.newSingleThreadExecutor(task -> {

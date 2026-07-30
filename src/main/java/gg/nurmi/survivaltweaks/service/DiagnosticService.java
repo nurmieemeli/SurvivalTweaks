@@ -1,6 +1,8 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
+import gg.nurmi.survivaltweaks.storage.StorageManager;
+import gg.nurmi.survivaltweaks.storage.StorageSnapshot;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -42,11 +44,12 @@ public final class DiagnosticService implements AutoCloseable {
     private final ExecutorService executor;
     private final PerformanceGovernor governor;
     private final TaskFailureIsolation taskFailures;
+    private final StorageManager storage;
     private volatile boolean closed;
     private volatile long generation;
 
     public DiagnosticService(JavaPlugin plugin, Clock clock) {
-        this(plugin, clock, null, null);
+        this(plugin, clock, (PerformanceGovernor) null, null, null);
     }
 
     public DiagnosticService(
@@ -55,6 +58,16 @@ public final class DiagnosticService implements AutoCloseable {
             PerformanceGovernor governor,
             TaskFailureIsolation taskFailures
     ) {
+        this(plugin, clock, governor, taskFailures, null);
+    }
+
+    public DiagnosticService(
+            JavaPlugin plugin,
+            Clock clock,
+            PerformanceGovernor governor,
+            TaskFailureIsolation taskFailures,
+            StorageManager storage
+    ) {
         this(
                 plugin,
                 clock,
@@ -62,12 +75,13 @@ public final class DiagnosticService implements AutoCloseable {
                         Thread.ofPlatform().name("SurvivalTweaks diagnostics").daemon(true).factory()
                 ),
                 governor,
-                taskFailures
+                taskFailures,
+                storage
         );
     }
 
     DiagnosticService(JavaPlugin plugin, Clock clock, ExecutorService executor) {
-        this(plugin, clock, executor, null, null);
+        this(plugin, clock, executor, null, null, null);
     }
 
     DiagnosticService(
@@ -77,12 +91,24 @@ public final class DiagnosticService implements AutoCloseable {
             PerformanceGovernor governor,
             TaskFailureIsolation taskFailures
     ) {
+        this(plugin, clock, executor, governor, taskFailures, null);
+    }
+
+    DiagnosticService(
+            JavaPlugin plugin,
+            Clock clock,
+            ExecutorService executor,
+            PerformanceGovernor governor,
+            TaskFailureIsolation taskFailures,
+            StorageManager storage
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.dataFolder = plugin.getDataFolder().toPath();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.governor = governor;
         this.taskFailures = taskFailures;
+        this.storage = storage;
     }
 
     DiagnosticService(Path dataFolder, Clock clock) {
@@ -92,6 +118,7 @@ public final class DiagnosticService implements AutoCloseable {
         this.executor = null;
         this.governor = null;
         this.taskFailures = null;
+        this.storage = null;
     }
 
     public boolean run(Consumer<Report> completion) {
@@ -126,13 +153,19 @@ public final class DiagnosticService implements AutoCloseable {
         ensureActive();
         inspectRuntimeHealth(issues);
         ensureActive();
-        int profiles = inspectProfiles(snapshot, issues);
-        ensureActive();
-        int locks = inspectLocks(snapshot, issues);
-        ensureActive();
-        DeathSummary deaths = inspectDeaths(snapshot, issues);
-        ensureActive();
-        inspectNewPlayerSpawns(snapshot, issues);
+        DataSummary data;
+        if (storage == null) {
+            int profiles = inspectProfiles(snapshot, issues);
+            ensureActive();
+            int locks = inspectLocks(snapshot, issues);
+            ensureActive();
+            DeathSummary deaths = inspectDeaths(snapshot, issues);
+            ensureActive();
+            inspectNewPlayerSpawns(snapshot, issues);
+            data = new DataSummary(profiles, locks, deaths.total());
+        } else {
+            data = inspectSqlStorage(snapshot, issues);
+        }
         ensureActive();
         int backups = inspectBackups(issues);
         long errors = issues.stream().filter(issue -> issue.severity() == Severity.ERROR).count();
@@ -140,12 +173,71 @@ public final class DiagnosticService implements AutoCloseable {
         return new Report(
                 Math.toIntExact(errors),
                 Math.toIntExact(warnings),
-                profiles,
-                locks,
-                deaths.total(),
+                data.profiles(),
+                data.locks(),
+                data.deaths(),
                 backups,
                 List.copyOf(issues)
         );
+    }
+
+    private DataSummary inspectSqlStorage(Snapshot runtime, List<Issue> issues) {
+        var verification = storage.verify();
+        if (!verification.healthy()) {
+            issues.add(new Issue(
+                    Severity.ERROR,
+                    "SQL storage integrity check failed: "
+                            + String.join("; ", verification.problems())
+            ));
+        }
+        try {
+            StorageSnapshot data = storage.exportSnapshot();
+            data.profiles().forEach(profile -> profile.homes().forEach(home -> {
+                if (!loaded(home.worldId(), home.worldName(), runtime)) {
+                    issues.add(new Issue(
+                            Severity.WARNING,
+                            "Profile " + profile.uniqueId() + " home '" + home.name()
+                                    + "' references an unloaded world."
+                    ));
+                }
+            }));
+            data.locks().forEach(lock -> lock.blocks().forEach(block -> {
+                if (!runtime.worldIds().contains(block.worldId())) {
+                    issues.add(new Issue(
+                            Severity.WARNING,
+                            "Lock " + lock.id() + " references unloaded world "
+                                    + block.worldId() + "."
+                    ));
+                }
+            }));
+            data.deathMarkers().forEach(marker -> {
+                if (!loaded(marker.worldId(), marker.worldName(), runtime)) {
+                    issues.add(new Issue(
+                            Severity.WARNING,
+                            "Death marker for " + marker.playerId()
+                                    + " references an unloaded world."
+                    ));
+                }
+                if (marker.expired(runtime.now())) {
+                    issues.add(new Issue(
+                            Severity.WARNING,
+                            "Expired death marker for " + marker.playerId()
+                                    + " is still persisted."
+                    ));
+                }
+            });
+            return new DataSummary(
+                    data.profiles().size(),
+                    data.locks().size(),
+                    data.deathMarkers().size()
+            );
+        } catch (Exception exception) {
+            issues.add(new Issue(
+                    Severity.ERROR,
+                    "Could not inspect SQL storage: " + reason(exception)
+            ));
+            return new DataSummary(0, 0, 0);
+        }
     }
 
     private void inspectAsync(
@@ -763,5 +855,8 @@ public final class DiagnosticService implements AutoCloseable {
     }
 
     private record DeathSummary(int total, Map<UUID, Set<String>> activeMarkers) {
+    }
+
+    private record DataSummary(int profiles, int locks, int deaths) {
     }
 }

@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -103,6 +104,32 @@ class BackupServiceTest {
         assertFalse(Files.exists(dataFolder.resolve("userdata/extra.yml")));
         assertFalse(Files.exists(dataFolder.resolve("death-markers.yml")));
         assertFalse(backups.hasPendingRestore());
+    }
+
+    @Test
+    void snapshotsAndRestoresACustomSqliteDatabaseUnderALease() throws IOException {
+        Files.writeString(dataFolder.resolve("config.yml"), "storage: sqlite\n");
+        Files.writeString(dataFolder.resolve("players.db"), "snapshot");
+        BackupService backups = service(10);
+        backups.databaseFilename("players.db");
+        AtomicBoolean acquired = new AtomicBoolean();
+        AtomicBoolean closed = new AtomicBoolean();
+        backups.snapshotLeaseFactory(() -> {
+            acquired.set(true);
+            return () -> closed.set(true);
+        });
+
+        Path archive = backups.create("manual").orElseThrow();
+        assertTrue(acquired.get());
+        assertTrue(closed.get());
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            assertTrue(zip.stream().map(ZipEntry::getName).anyMatch("players.db"::equals));
+        }
+
+        Files.writeString(dataFolder.resolve("players.db"), "newer");
+        backups.stageRestore(archive.getFileName().toString());
+        backups.applyPendingRestore();
+        assertEquals("snapshot", Files.readString(dataFolder.resolve("players.db")));
     }
 
     @Test

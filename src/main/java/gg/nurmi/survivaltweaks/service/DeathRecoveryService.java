@@ -4,7 +4,7 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.DeathMarker;
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.object.OnboardingHint;
-import gg.nurmi.survivaltweaks.storage.DeathMarkerStore;
+import gg.nurmi.survivaltweaks.storage.DeathMarkerDataStore;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.Component;
@@ -59,7 +59,7 @@ public final class DeathRecoveryService
     private static final float GUIDE_ROTATION_EPSILON = 2.0f;
 
     private final JavaPlugin plugin;
-    private final DeathMarkerStore store;
+    private final DeathMarkerDataStore store;
     private final MessageService messages;
     private final SettingsService settings;
     private final Clock clock;
@@ -83,7 +83,7 @@ public final class DeathRecoveryService
 
     public DeathRecoveryService(
             JavaPlugin plugin,
-            DeathMarkerStore store,
+            DeathMarkerDataStore store,
             MessageService messages,
             SettingsService settings,
             Clock clock,
@@ -108,7 +108,7 @@ public final class DeathRecoveryService
 
     public DeathRecoveryService(
             JavaPlugin plugin,
-            DeathMarkerStore store,
+            DeathMarkerDataStore store,
             MessageService messages,
             SettingsService settings,
             Clock clock,
@@ -133,7 +133,7 @@ public final class DeathRecoveryService
         this.writer = new CoalescingSnapshotWriter<>(
                 "SurvivalTweaks-death-marker-writer",
                 "death markers",
-                store::save,
+                store::saveDeathMarkers,
                 plugin.getLogger() == null
                         ? Logger.getLogger(DeathRecoveryService.class.getName())
                         : plugin.getLogger()
@@ -142,7 +142,7 @@ public final class DeathRecoveryService
                 "survivaltweaks",
                 "death-compass-owner"
         );
-        store.load().forEach(marker -> {
+        store.loadDeathMarkers().forEach(marker -> {
             if (!marker.expired(clock.instant())) {
                 markers.put(marker.playerId(), marker);
             }

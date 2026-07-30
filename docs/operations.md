@@ -11,24 +11,73 @@ arrival style, ordering, and a UUID-first world reference — alongside
 preferences, one-time onboarding progress, last-seen and cached playtime
 metadata, UUID-based mail blocks, and a capped notification inbox.
 
-Saves go through one ordered, coalescing background writer using atomic file
-replacement, so Bukkit objects and mutable collections never cross a thread
-boundary. Unchanged and intermediate snapshots are skipped. Data is written
-after changes, on disconnect, during periodic autosaves, and at shutdown.
+Saves go through ordered, coalescing background writers into one transactional
+SQL store. Profiles, homes and shares, preferences, notifications, locks,
+death markers, and first-join spawn state are updated as complete aggregates:
+either the entire change commits or none of it does. Bukkit objects and mutable
+collections never cross the asynchronous persistence boundary.
 
-The latest death marker per player lives in `death-markers.yml`, recorded with
-both world UUID and name so markers survive restarts and expire on schedule.
-Container locks persist independently in `locked-containers.yml` using world
-UUIDs and block coordinates.
+SQLite is used automatically when `storage.remote.type` is blank. It keeps
+`survivaltweaks.db` in the plugin data directory, uses WAL journaling and full
+synchronous durability, and serializes writes through a single pooled
+connection. PostgreSQL and MySQL use a small bounded HikariCP pool. All three
+JDBC drivers are included in the release JAR.
 
-Older schemas — including version 1.0 `userdata/<uuid>.yml` home files — are
-detected on load and queued for migration into the current versioned format.
+On the first SQL startup, existing `userdata/*.yml`,
+`locked-containers.yml`, `death-markers.yml`, and
+`new-player-spawns.yml` are parsed and imported only if the SQL database is
+empty. SurvivalTweaks verifies logical counts and a deterministic SHA-256
+before accepting the import. The YAML originals remain untouched as a manual
+rollback source.
+
+The active engine, endpoint fingerprint, and random server-instance UUID are
+pinned in `storage-state.yml`. Changing `storage.backend`, the SQLite filename,
+or a remote endpoint by hand is rejected after initialization. A remote outage
+also fails startup: SurvivalTweaks never silently falls back to SQLite, because
+doing so could create two divergent copies of player data.
 
 Runtime work is deliberately event-driven. Idle teleport, death-guide, and
 sleep-vote tasks stop themselves, and player-list and action-bar updates are
 sent only when visible state changes. Profile, death-marker, spawn-pool,
 reload, and backup disk work runs off the server thread, with immutable
 snapshots and shutdown drains preserving durability.
+
+## Database administration
+
+| Command | Effect |
+| --- | --- |
+| `/survivaltweaks storage status` | Show backend, schema, latency, and pool use |
+| `/survivaltweaks storage verify` | Run engine integrity and orphan checks |
+| `/survivaltweaks storage export` | Create a verified, portable SQLite snapshot |
+| `/survivaltweaks storage test <backend>` | Connect to and verify a destination without switching |
+| `/survivaltweaks storage migrate <backend>` | Stage a verified migration for the next restart |
+
+### Moving SQLite to PostgreSQL or MySQL
+
+1. Create an empty database and a dedicated user with permission to create,
+   read, update, and delete its tables.
+2. Keep `storage.backend: sqlite`, then set `storage.remote.type` to either
+   `postgresql` or `mysql` and fill in the host, port, database, username,
+   password, and TLS setting.
+3. Reload is only a validator; it does not switch the live store. Run
+   `/survivaltweaks storage test <backend>`.
+4. Run `/survivaltweaks storage migrate <backend>`. This records a migration
+   plan and updates `storage.backend`, but does not move live data.
+5. Restart Paper. Before services start, SurvivalTweaks opens both endpoints,
+   requires an empty destination, copies every aggregate in a transaction,
+   compares counts and SHA-256, runs integrity checks, and only then changes
+   the pinned backend.
+
+If any connection, copy, checksum, or integrity check fails, startup stops and
+the source database remains authoritative. A partially written destination is
+cleaned so the same staged migration can be retried after fixing the cause.
+Do not manually copy the SQLite file while Paper is running; use
+`storage export` for a closed, verified portable snapshot.
+
+The same command can stage a move from the configured remote backend back to
+SQLite. Direct PostgreSQL-to-MySQL moves are intentionally not implicit:
+migrate to SQLite first, update the one remote endpoint configuration, start
+successfully on SQLite, and then stage the second migration.
 
 After login, players receive one compact session line only when something needs
 attention. It combines unread notifications, pending teleport requests, an
@@ -68,8 +117,13 @@ logged once when the level changes, with the triggering MSPT and reason.
 
 Before startup loads or migrates data, and before every configuration reload,
 the plugin writes an atomic ZIP snapshot into `plugins/SurvivalTweaks/backups/`.
-Archives contain configuration, both language catalogs, locks, death markers,
-first-join spawn state, and profile YAML files. The newest ten are retained.
+Archives contain configuration, both language catalogs, the pinned storage
+identity, the default SQLite database, and preserved legacy YAML files. SQLite
+writes are paused briefly and its WAL is checkpointed while the database enters
+the ZIP, so the archived file is self-contained. Remote database contents must
+also be backed up using the database provider's native backup tooling; use
+`storage export` when a portable SQLite copy is useful. The newest ten archives
+are retained.
 
 | Command | Effect |
 | --- | --- |
@@ -92,9 +146,9 @@ Restoration is deliberately staged and cannot be completed in one step:
 
 ## Diagnostics
 
-`/survivaltweaks doctor` verifies every archive and scans the remaining data
-asynchronously for invalid schemas, unresolved worlds, overlapping locks, and
-other operational problems. Its worker is
+`/survivaltweaks doctor` verifies every archive and scans the active SQL store
+asynchronously for failed integrity checks, unresolved worlds, expired markers,
+and other operational problems. Its worker is
 cancelled and joined during shutdown so a late report cannot outlive the plugin
 classloader.
 
