@@ -8,7 +8,9 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Server;
 import org.bukkit.damage.DamageSource;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -57,7 +59,7 @@ public final class CustomDeathMessageService implements Listener {
 
         Player player = event.getEntity();
         EntityDamageEvent damage = player.getLastDamageCause();
-        if (damage == null || hasEntityAttribution(event.getDamageSource())) {
+        if (damage == null || resolveKiller(event.getDamageSource()) != null) {
             return;
         }
 
@@ -86,7 +88,21 @@ public final class CustomDeathMessageService implements Listener {
         messages.send(server.getConsoleSender(), key, playerName);
     }
 
-    private boolean hasEntityAttribution(DamageSource source) {
-        return source.getCausingEntity() != null || source.getDirectEntity() != null;
+    static Entity resolveKiller(DamageSource source) {
+        if (source == null) {
+            return null;
+        }
+
+        Entity causingEntity = source.getCausingEntity();
+        if (causingEntity != null) {
+            return causingEntity;
+        }
+
+        Entity directEntity = source.getDirectEntity();
+        if (directEntity instanceof Projectile projectile
+                && projectile.getShooter() instanceof Entity shooter) {
+            return shooter;
+        }
+        return directEntity;
     }
 }

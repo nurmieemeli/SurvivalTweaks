@@ -8,7 +8,9 @@ import org.bukkit.Server;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.random.RandomGenerator;
 
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
@@ -96,5 +100,35 @@ class CustomDeathMessageServiceTest {
 
         verify(event, never()).setShowDeathMessages(anyBoolean());
         verify(messages, never()).send(any(), any(String.class), any(TagResolver[].class));
+    }
+
+    @Test
+    void resolvesTheProjectileShooterAsTheKiller() {
+        Projectile projectile = mock(Projectile.class);
+        LivingEntity shooter = mock(LivingEntity.class);
+        when(source.getDirectEntity()).thenReturn(projectile);
+        when(projectile.getShooter()).thenReturn(shooter);
+
+        assertSame(shooter, CustomDeathMessageService.resolveKiller(source));
+
+        service.onDeath(event);
+
+        verify(event, never()).setShowDeathMessages(anyBoolean());
+        verify(messages, never()).send(any(), any(String.class), any(TagResolver[].class));
+    }
+
+    @Test
+    void prefersPaperCausingEntityAttributionOverTheDirectProjectile() {
+        Entity shooter = mock(Entity.class);
+        Projectile projectile = mock(Projectile.class);
+        when(source.getCausingEntity()).thenReturn(shooter);
+        when(source.getDirectEntity()).thenReturn(projectile);
+
+        assertSame(shooter, CustomDeathMessageService.resolveKiller(source));
+    }
+
+    @Test
+    void reportsNoKillerForEnvironmentalDamage() {
+        assertNull(CustomDeathMessageService.resolveKiller(source));
     }
 }
