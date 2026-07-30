@@ -295,6 +295,30 @@ lock:
     trusted: "<green>🔓 Access granted</green> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
     denied: "<red>🔒 Locked</red> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
 
+enchantments:
+  discovered: "<light_purple>The enchanting table revealed <enchantment> <level>.</light_purple>"
+  tunneling:
+    name: "Tunneling"
+    description: "Breaks a 3×3 plane while sneaking with a pickaxe."
+  excavation:
+    name: "Excavation"
+    description: "Digs a 3×3 plane while sneaking with a shovel."
+  cultivation:
+    name: "Cultivation"
+    description: "Harvests and replants mature crops in a 3×3 area while sneaking."
+  felling:
+    name: "Felling"
+    description: "Fells a natural tree while sneaking with an axe."
+  beheading:
+    name: "Beheading"
+    description: "May recover the head of an eligible defeated creature."
+  deflection:
+    name: "Deflection"
+    description: "Reflects a projectile toward its shooter when blocked with a shield."
+  surefooted:
+    name: "Surefooted"
+    description: "Prevents farmland from being trampled."
+
 death-recovery:
   disabled: "<red>Death recovery is disabled on this server.</red>"
   usage: "<red>Usage: /deathlocation [info|guide [on|off]|dismiss]</red>"
@@ -437,7 +461,7 @@ notifications:
   unread-summary-one: "<yellow>You have <count> unread SurvivalTweaks notification. Open <green>/survival</green> to review it.</yellow>"
 
 admin:
-  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]</red>"
+  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>You do not have permission to use this administrator command.</red>"
   reload-success: "<green>SurvivalTweaks configuration, languages, and effects reloaded.</green>"
   reload-failed: "<red>Reload rejected; the previous configuration remains active: <reason></red>"
@@ -471,6 +495,13 @@ admin:
     spawnpool: "Inspect or manage prepared new-player locations."
     maintenance: "Enable join maintenance or inspect its current state."
     restart: "Schedule or cancel a safe supervised server restart."
+    enchant: "Give yourself a custom enchanted book for testing or administration."
+  enchant:
+    usage: "<red>Usage: /survivaltweaks enchant [enchantment] [level]</red>"
+    player-only: "<red>Custom enchanted books must be given from an in-game player account.</red>"
+    unknown: "<red>Unknown custom enchantment.</red>"
+    invalid-level: "<red>That level is not valid for this enchantment.</red>"
+    given: "<green>Received an <enchantment> <level> enchanted book.</green>"
   maintenance:
     usage: "<red>Usage: /survivaltweaks maintenance [on|off|status]</red>"
     enabled: "<yellow>Maintenance mode enabled. New joins are blocked.</yellow>"

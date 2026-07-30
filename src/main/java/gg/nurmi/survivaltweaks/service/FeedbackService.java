@@ -39,6 +39,11 @@ public final class FeedbackService {
     public static final String GUIDE_HINT = "guide-hint";
     public static final String MAINTENANCE_WARNING = "maintenance-warning";
     public static final String ANNOUNCEMENT = "announcement";
+    public static final String ENCHANT_DISCOVERED = "enchant-discovered";
+    public static final String ENCHANT_AREA_BREAK = "enchant-area-break";
+    public static final String ENCHANT_CULTIVATION = "enchant-cultivation";
+    public static final String ENCHANT_BEHEADING = "enchant-beheading";
+    public static final String ENCHANT_DEFLECTION = "enchant-deflection";
 
     private final Logger logger;
     private volatile State state;

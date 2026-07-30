@@ -1,6 +1,8 @@
 package gg.nurmi.survivaltweaks.command;
 
+import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import gg.nurmi.survivaltweaks.service.BackupService;
+import gg.nurmi.survivaltweaks.service.CustomEnchantItemService;
 import gg.nurmi.survivaltweaks.service.DiagnosticService;
 import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.MessageService;
@@ -18,6 +20,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
@@ -37,6 +40,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     public static final String SPAWN_POOL_PERMISSION = "survivaltweaks.command.spawnpool";
     public static final String MAINTENANCE_PERMISSION = "survivaltweaks.command.maintenance";
     public static final String BACKUP_PERMISSION = "survivaltweaks.command.backup";
+    public static final String ENCHANT_PERMISSION = "survivaltweaks.command.enchant";
     private static final int MAX_DIAGNOSTIC_ISSUES = 20;
 
     private static final List<HelpEntry> HELP_ENTRIES = List.of(
@@ -106,6 +110,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     MAINTENANCE_PERMISSION,
                     "admin.help.restart",
                     true
+            ),
+            new HelpEntry(
+                    "/survivaltweaks enchant ",
+                    ENCHANT_PERMISSION,
+                    "admin.help.enchant",
+                    true
             )
     );
 
@@ -116,6 +126,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final NewPlayerSpawnService spawnPool;
     private final MaintenanceService maintenance;
     private final BackupService backups;
+    private final CustomEnchantItemService enchantments;
     private final JavaPlugin plugin;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
 
@@ -127,6 +138,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             NewPlayerSpawnService spawnPool,
             MaintenanceService maintenance,
             BackupService backups,
+            CustomEnchantItemService enchantments,
             JavaPlugin plugin
     ) {
         this.messages = messages;
@@ -136,6 +148,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.spawnPool = spawnPool;
         this.maintenance = maintenance;
         this.backups = backups;
+        this.enchantments = enchantments;
         this.plugin = plugin;
     }
 
@@ -201,6 +214,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("restart")) {
             return handleRestart(sender, arguments);
         }
+        if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("enchant")) {
+            return handleEnchant(sender, arguments);
+        }
 
         messages.send(sender, "admin.usage");
         return true;
@@ -239,7 +255,30 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     options.add("restart");
                 }
             }
+            if (sender.hasPermission(ENCHANT_PERMISSION) && "enchant".startsWith(prefix)) {
+                options.add("enchant");
+            }
             return List.copyOf(options);
+        }
+        if (sender.hasPermission(ENCHANT_PERMISSION)
+                && arguments[0].equalsIgnoreCase("enchant")) {
+            if (arguments.length == 2) {
+                String prefix = arguments[1].toLowerCase(Locale.ROOT);
+                return java.util.Arrays.stream(CustomEnchantment.values())
+                        .map(CustomEnchantment::key)
+                        .filter(key -> key.startsWith(prefix))
+                        .toList();
+            }
+            if (arguments.length == 3) {
+                return CustomEnchantment.fromKey(arguments[1])
+                        .map(enchantment -> java.util.stream.IntStream
+                                .rangeClosed(1, enchantment.maxLevel())
+                                .mapToObj(Integer::toString)
+                                .filter(level -> level.startsWith(arguments[2]))
+                                .toList())
+                        .orElseGet(List::of);
+            }
+            return List.of();
         }
         if (sender.hasPermission(BACKUP_PERMISSION)
                 && arguments[0].equalsIgnoreCase("backup")) {
@@ -301,6 +340,54 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             return List.of("confirm");
         }
         return List.of();
+    }
+
+    private boolean handleEnchant(CommandSender sender, String[] arguments) {
+        if (!sender.hasPermission(ENCHANT_PERMISSION)) {
+            messages.send(sender, "admin.no-permission");
+            return true;
+        }
+        if (!(sender instanceof Player player)) {
+            messages.send(sender, "admin.enchant.player-only");
+            return true;
+        }
+        if (arguments.length < 2 || arguments.length > 3) {
+            messages.send(sender, "admin.enchant.usage");
+            return true;
+        }
+
+        CustomEnchantment enchantment = CustomEnchantment.fromKey(arguments[1]).orElse(null);
+        if (enchantment == null) {
+            messages.send(sender, "admin.enchant.unknown");
+            return true;
+        }
+        int level = 1;
+        if (arguments.length == 3) {
+            try {
+                level = Integer.parseInt(arguments[2]);
+            } catch (NumberFormatException exception) {
+                messages.send(sender, "admin.enchant.invalid-level");
+                return true;
+            }
+        }
+        if (level < 1 || level > enchantment.maxLevel()) {
+            messages.send(sender, "admin.enchant.invalid-level");
+            return true;
+        }
+
+        ItemStack book = enchantments.createBook(enchantment, level, player);
+        player.getInventory().addItem(book).values().forEach(leftover ->
+                player.getWorld().dropItemNaturally(player.getLocation(), leftover));
+        messages.send(
+                player,
+                "admin.enchant.given",
+                Placeholder.component(
+                        "enchantment",
+                        messages.component(player, enchantment.nameKey())
+                ),
+                Placeholder.unparsed("level", Integer.toString(level))
+        );
+        return true;
     }
 
     private boolean handleBackup(CommandSender sender, String[] arguments) {

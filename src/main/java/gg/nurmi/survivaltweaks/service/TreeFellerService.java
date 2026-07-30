@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.SurvivalTweaks;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -32,12 +33,33 @@ public class TreeFellerService implements Listener {
 
     private final SurvivalTweaks plugin;
     private final SettingsService settings;
+    private final CustomEnchantItemService enchantments;
+    private final FeedbackService feedback;
     private final NamespacedKey PLACED_LOGS_KEY;
     private final Set<UUID> fellingPlayers = new HashSet<>();
 
     public TreeFellerService(SurvivalTweaks plugin, SettingsService settings) {
+        this(plugin, settings, null, null);
+    }
+
+    public TreeFellerService(
+            SurvivalTweaks plugin,
+            SettingsService settings,
+            CustomEnchantItemService enchantments
+    ) {
+        this(plugin, settings, enchantments, null);
+    }
+
+    public TreeFellerService(
+            SurvivalTweaks plugin,
+            SettingsService settings,
+            CustomEnchantItemService enchantments,
+            FeedbackService feedback
+    ) {
         this.plugin = plugin;
         this.settings = settings;
+        this.enchantments = enchantments;
+        this.feedback = feedback;
         this.PLACED_LOGS_KEY = new NamespacedKey("survivaltweaks", "placed_logs");
     }
 
@@ -65,12 +87,12 @@ public class TreeFellerService implements Listener {
         boolean wasPlaced = isPlayerPlaced(block);
         removePlayerPlaced(block);
 
-        PluginSettings currentSettings = settings.current();
-        if (!currentSettings.treeFellerEnabled()) {
-            return;
-        }
-
-        if (currentSettings.treeFellerRequireSneak() && !player.isSneaking()) {
+        if (!player.isSneaking()
+                || enchantments == null
+                || !enchantments.has(
+                        player.getInventory().getItemInMainHand(),
+                        CustomEnchantment.FELLING
+                )) {
             return;
         }
 
@@ -83,6 +105,7 @@ public class TreeFellerService implements Listener {
             return;
         }
 
+        PluginSettings currentSettings = settings.current();
         fellTree(block, player, currentSettings);
     }
 
@@ -134,14 +157,24 @@ public class TreeFellerService implements Listener {
 
         logsToBreak.sort((b1, b2) -> Integer.compare(b2.getY(), b1.getY()));
 
+        int broken = 0;
         fellingPlayers.add(player.getUniqueId());
         try {
             for (Block log : logsToBreak) {
                 if (log.equals(startBlock)) continue;
-                player.breakBlock(log);
+                if (player.breakBlock(log)) {
+                    broken++;
+                }
             }
         } finally {
             fellingPlayers.remove(player.getUniqueId());
+        }
+        if (feedback != null && broken > 0) {
+            feedback.play(
+                    player,
+                    FeedbackService.ENCHANT_AREA_BREAK,
+                    Math.min(2, broken / 16.0)
+            );
         }
     }
 

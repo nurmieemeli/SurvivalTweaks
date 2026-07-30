@@ -23,6 +23,9 @@ import gg.nurmi.survivaltweaks.service.BackupService;
 import gg.nurmi.survivaltweaks.service.ContainerBlockResolver;
 import gg.nurmi.survivaltweaks.service.ContainerLockService;
 import gg.nurmi.survivaltweaks.service.CustomDeathMessageService;
+import gg.nurmi.survivaltweaks.service.CustomEnchantAcquisitionService;
+import gg.nurmi.survivaltweaks.service.CustomEnchantEffectService;
+import gg.nurmi.survivaltweaks.service.CustomEnchantItemService;
 import gg.nurmi.survivaltweaks.service.DeathRecoveryService;
 import gg.nurmi.survivaltweaks.service.DiagnosticService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
@@ -427,6 +430,8 @@ public final class SurvivalTweaks extends JavaPlugin {
         inbox.backTo(hub::open);
 
         getServer().getOnlinePlayers().forEach(player -> profiles.load(player.getUniqueId()));
+        CustomEnchantItemService customEnchantments =
+                new CustomEnchantItemService(this, messages);
         registerListeners(
                 containerResolver,
                 homeMenu,
@@ -449,7 +454,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 welcomeBack,
                 notifications,
                 experience,
-                actionBars
+                actionBars,
+                customEnchantments
         );
         registerCommands(
                 dialogs,
@@ -468,7 +474,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 statistics,
                 socialProfile,
                 welcomeBack,
-                vanillaGuide
+                vanillaGuide,
+                customEnchantments
         );
         startTasks(initialSettings, notifications);
         newPlayerSpawns.start();
@@ -564,7 +571,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             WelcomeBackController welcomeBack,
             NotificationService notifications,
             PlayerExperienceService experience,
-            ActionBarService actionBars
+            ActionBarService actionBars,
+            CustomEnchantItemService customEnchantments
     ) {
         PluginManager pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(
@@ -624,7 +632,18 @@ public final class SurvivalTweaks extends JavaPlugin {
         pluginManager.registerEvents(lockList, this);
         pluginManager.registerEvents(hub, this);
         pluginManager.registerEvents(journeyMenu, this);
-        pluginManager.registerEvents(new TreeFellerService(this, settings), this);
+        pluginManager.registerEvents(
+                new CustomEnchantAcquisitionService(customEnchantments, messages, feedback),
+                this
+        );
+        pluginManager.registerEvents(
+                new CustomEnchantEffectService(this, customEnchantments, feedback),
+                this
+        );
+        pluginManager.registerEvents(
+                new TreeFellerService(this, settings, customEnchantments, feedback),
+                this
+        );
         fastLeafDecay = new FastLeafDecayService(this, settings);
         pluginManager.registerEvents(fastLeafDecay, this);
         pluginManager.registerEvents(new PetProtectionService(settings), this);
@@ -651,7 +670,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             StatisticsJournalController statistics,
             SocialProfileController socialProfile,
             WelcomeBackController welcomeBack,
-            VanillaGuideController vanillaGuide
+            VanillaGuideController vanillaGuide,
+            CustomEnchantItemService customEnchantments
     ) {
         register("teleport", new TeleportCommand(
                 getServer(),
@@ -700,6 +720,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                         newPlayerSpawns,
                         maintenance,
                         backups,
+                        customEnchantments,
                         this
                 )
         );

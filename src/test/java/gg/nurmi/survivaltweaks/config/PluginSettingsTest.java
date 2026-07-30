@@ -60,7 +60,7 @@ class PluginSettingsTest {
         assertTrue(settings.mailEnabled());
         assertEquals(160, settings.mailMaximumLength());
         assertEquals(10, settings.mailMaximumPerHour());
-        assertTrue(settings.treeFellerEnabled());
+        assertEquals(128, settings.treeFellerMaxBlocks());
         assertTrue(settings.fastLeafDecayEnabled());
         assertEquals(2, settings.fastLeafDecayDelayTicks());
         assertEquals(5, settings.fastLeafDecayRadius());

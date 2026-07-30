@@ -52,8 +52,7 @@ locked-containers:
   purge-inactive-days: 0
 
 tree-feller:
-  enabled: true
-  require-sneak: true
+  # Felling I always requires sneaking; this caps work performed by one tree.
   max-blocks: 128
 
 fast-leaf-decay:
@@ -289,6 +288,41 @@ feedback:
       sound: "minecraft:block.note_block.bell"
       volume: 0.9
       pitch: 0.85
+    enchant-discovered:
+      sound: "minecraft:block.enchantment_table.use"
+      volume: 0.75
+      pitch: 1.25
+      particle: "ENCHANT"
+      count: 24
+      spread: 0.55
+    enchant-area-break:
+      sound: "minecraft:block.stone.break"
+      volume: 0.35
+      pitch: 0.8
+      particle: "POOF"
+      count: 8
+      spread: 0.45
+    enchant-cultivation:
+      sound: "minecraft:block.crop.break"
+      volume: 0.5
+      pitch: 1.15
+      particle: "HAPPY_VILLAGER"
+      count: 10
+      spread: 0.5
+    enchant-beheading:
+      sound: "minecraft:entity.player.attack.crit"
+      volume: 0.7
+      pitch: 0.75
+      particle: "CRIT"
+      count: 14
+      spread: 0.45
+    enchant-deflection:
+      sound: "minecraft:item.shield.block"
+      volume: 0.75
+      pitch: 1.35
+      particle: "ELECTRIC_SPARK"
+      count: 12
+      spread: 0.4
 
 chat:
   enabled: true

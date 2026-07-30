@@ -29,8 +29,9 @@ operators get strict configuration validation, diagnostics, backups, and safe
 maintenance tools.
 
 The survival loop remains recognizably vanilla. SurvivalTweaks adds no custom
-items, recipes, currency, economy, or progression system, and it does not
-require a scoreboard, permissions, or chat plugin.
+currency, economy, or parallel progression system, and it does not require a
+scoreboard, permissions, resource pack, or chat plugin. Its custom enchanted
+books use ordinary enchanting, loot, villager, anvil, and grindstone flows.
 
 ## Quick start
 
@@ -64,13 +65,33 @@ defaults are introduced.
 | Player list | Localized TAB header and footer with capacity, ping, TPS, MSPT, dimension, unread notifications, staff badges, and automatic or manual AFK state |
 | Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
 | First sessions | Pre-generated unique spawn locations, onboarding, a journey tracker, and contextual explanations of vanilla mechanics |
-| Vanilla refinements | Optional tree felling, bounded fast leaf decay, inventory-to-hotbar block refill, pet friendly-fire prevention, sleep voting, and deliberate decoration breaking |
+| Custom enchantments | Tunneling, Excavation, Cultivation, Felling, Beheading, Deflection, and Surefooted through enchanting tables, structure loot, librarians, books, anvils, and grindstones |
+| Vanilla refinements | Bounded fast leaf decay, inventory-to-hotbar block refill, pet friendly-fire prevention, sleep voting, and deliberate decoration breaking |
 | Atmosphere | Independently configurable sounds and particles for durability, health, pickups, shields, advancements, death sites, weather, caves, biomes, arrows, and interactions |
 | Server presentation | Rotating multiplayer-list announcements, localized connection messages, custom environmental death messages, and maintenance status |
 
-Every feature is configurable, and player-facing preferences such as language,
+Server systems are configurable, and player-facing preferences such as language,
 sound, particles, dialogs, action-bar guidance, mentions, and player-list
-visibility can be changed in game.
+visibility can be changed in game. Enchantments are item-driven: passive effects
+are always active, while area tools require sneaking.
+
+### Custom enchantments
+
+| Enchantment | Equipment | Behavior |
+| --- | --- | --- |
+| Tunneling I | Pickaxe | Sneak-mine a protected-event-aware 3×3 plane |
+| Excavation I | Shovel | Sneak-dig a 3×3 plane of shovel-compatible blocks |
+| Cultivation I | Hoe | Sneak-harvest and replant mature crops in a 3×3 area |
+| Felling I | Axe | Sneak-fell a natural tree while ignoring player-placed logs |
+| Beheading I–III | Sword or axe | Adds a small level-scaled chance for eligible mob or player heads; incompatible with Looting |
+| Deflection I | Shield | Returns a properly blocked projectile toward its original shooter |
+| Surefooted I | Boots | Prevents farmland trampling |
+
+Enchanting tables can add one eligible custom enchantment as an unadvertised
+bonus after the selected vanilla enchantment is applied. The custom result is
+intentionally absent from the preview and is revealed after enchanting.
+Custom-enchanted books also appear in selected structure loot and librarian
+trades, combine through anvils, and are removed by grindstones.
 
 ## Commands
 
@@ -117,6 +138,7 @@ visibility can be changed in game.
 | `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operator |
 | `/survivaltweaks maintenance on\|off\|status` | Control join-blocking maintenance mode | Operator |
 | `/survivaltweaks restart <10s\|5m\|1h\|cancel\|status>` | Schedule, inspect, or cancel a safe restart | Operator |
+| `/survivaltweaks enchant <enchantment> [level]` | Create a custom enchanted book for testing or administration | Operator |
 
 </details>
 
@@ -136,7 +158,7 @@ feature:
 | `teleport` | Requests, warm-up, cooldown, cancellation, and safe landing |
 | `new-player-spawn` | World, coordinate bounds, pool size, spacing, pacing, TPS floor, landing checks, and blocked biomes |
 | `locked-containers` | Targeting, limits, explosion protection, and automation defaults |
-| `tree-feller`, `fast-leaf-decay` | Forestry activation, work limits, and decay pacing |
+| `tree-feller`, `fast-leaf-decay` | Felling safety limits and leaf-decay pacing |
 | `pet-protection`, `hotbar-refill`, `decoration-protection` | Small interaction safeguards and conveniences |
 | `atmosphere`, `feedback` | Ambient, interaction, warning, sound, particle, and trail effects |
 | `ui` | Chest interfaces, native dialogs, action bars, and lock hints |

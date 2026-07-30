@@ -294,6 +294,30 @@ lock:
     trusted: "<green>🔓 Käyttöoikeus</green> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
     denied: "<red>🔒 Lukittu</red> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
 
+enchantments:
+  discovered: "<light_purple>Lumouspöytä paljasti lumouksen <enchantment> <level>.</light_purple>"
+  tunneling:
+    name: "Tunnelointi"
+    description: "Rikkoo hiipiessä 3×3-tason hakulla."
+  excavation:
+    name: "Kaivuu"
+    description: "Kaivaa hiipiessä 3×3-tason lapiolla."
+  cultivation:
+    name: "Viljely"
+    description: "Korjaa ja istuttaa kypsät kasvit uudelleen 3×3-alueella hiipiessä."
+  felling:
+    name: "Puunkaato"
+    description: "Kaataa luonnollisen puun kirveellä hiipiessä."
+  beheading:
+    name: "Mestaus"
+    description: "Voi pudottaa surmatun soveltuvan olennon pään."
+  deflection:
+    name: "Heijastus"
+    description: "Heijastaa kilvellä torjutun ammuksen takaisin ampujaa kohti."
+  surefooted:
+    name: "Vakaa askel"
+    description: "Estää viljelysmaan tallaantumisen."
+
 death-recovery:
   disabled: "<red>Kuolinpaikan palautus ei ole käytössä tällä palvelimella.</red>"
   usage: "<red>Käyttö: /deathlocation [info|guide [on|off]|dismiss]</red>"
@@ -436,7 +460,7 @@ notifications:
   unread-summary-one: "<yellow>Sinulla on <count> lukematon SurvivalTweaks-ilmoitus. Tarkista se komennolla <green>/survival</green>.</yellow>"
 
 admin:
-  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart]</red>"
+  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|backup|spawnpool|maintenance|restart|enchant]</red>"
   no-permission: "<red>Sinulla ei ole oikeutta käyttää tätä ylläpitokomentoa.</red>"
   reload-success: "<green>SurvivalTweaksin asetukset, kielet ja tehosteet ladattiin uudelleen.</green>"
   reload-failed: "<red>Uudelleenlataus hylättiin; aiemmat asetukset jäivät voimaan: <reason></red>"
@@ -470,6 +494,13 @@ admin:
     spawnpool: "Tarkista tai hallitse uusille pelaajille valmisteltuja sijainteja."
     maintenance: "Ota liittymisen estävä huoltotila käyttöön tai tarkista sen tila."
     restart: "Ajasta tai peru turvallinen valvottu palvelimen uudelleenkäynnistys."
+    enchant: "Anna itsellesi mukautettu lumottu kirja testausta tai ylläpitoa varten."
+  enchant:
+    usage: "<red>Käyttö: /survivaltweaks enchant [lumous] [taso]</red>"
+    player-only: "<red>Mukautetun lumotun kirjan voi antaa vain pelissä olevalle pelaajalle.</red>"
+    unknown: "<red>Tuntematon mukautettu lumous.</red>"
+    invalid-level: "<red>Taso ei kelpaa tälle lumoukselle.</red>"
+    given: "<green>Sait lumotun kirjan: <enchantment> <level>.</green>"
   maintenance:
     usage: "<red>Käyttö: /survivaltweaks maintenance [on|off|status]</red>"
     enabled: "<yellow>Huoltotila käytössä. Uudet liittymiset on estetty.</yellow>"

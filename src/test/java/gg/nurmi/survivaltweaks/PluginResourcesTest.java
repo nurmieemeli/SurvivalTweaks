@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks;
 
 import gg.nurmi.survivaltweaks.object.CustomDeathCause;
+import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import gg.nurmi.survivaltweaks.object.HomeArrivalStyle;
 import gg.nurmi.survivaltweaks.object.HomeCategory;
 import gg.nurmi.survivaltweaks.object.LanguagePreference;
@@ -58,6 +59,7 @@ class PluginResourcesTest {
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.doctor"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.spawnpool"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.backup"));
+        assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.enchant"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.afk"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.playerlist.staff"));
         assertNotNull(descriptor.getConfigurationSection("permissions.survivaltweaks.command.maintenance"));
@@ -164,6 +166,8 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.mail.sound"));
         assertNotNull(config.getString("feedback.cues.guide-hint.sound"));
         assertNotNull(config.getString("feedback.cues.maintenance-warning.sound"));
+        assertNotNull(config.getString("feedback.cues.enchant-discovered.sound"));
+        assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
         assertNotNull(finnish.getString("lock.denied-open"));
     }
 
@@ -347,6 +351,10 @@ class PluginResourcesTest {
             assertLocalized(english, finnish, cause.messageKey(1, false));
             assertLocalized(english, finnish, cause.messageKey(2, false));
             assertLocalized(english, finnish, cause.messageKey(1, true));
+        }
+        for (CustomEnchantment enchantment : CustomEnchantment.values()) {
+            assertLocalized(english, finnish, enchantment.nameKey());
+            assertLocalized(english, finnish, enchantment.descriptionKey());
         }
     }
 
