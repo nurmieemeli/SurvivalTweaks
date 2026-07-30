@@ -2,15 +2,13 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import org.bukkit.NamespacedKey;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -41,38 +39,59 @@ public final class DiagnosticService implements AutoCloseable {
     private final Path dataFolder;
     private final Clock clock;
     private final AtomicBoolean running = new AtomicBoolean();
-    private final NamespacedKey compassOwnerKey;
-    private final NamespacedKey compassMarkerKey;
     private final ExecutorService executor;
+    private final PerformanceGovernor governor;
+    private final TaskFailureIsolation taskFailures;
     private volatile boolean closed;
     private volatile long generation;
 
     public DiagnosticService(JavaPlugin plugin, Clock clock) {
+        this(plugin, clock, null, null);
+    }
+
+    public DiagnosticService(
+            JavaPlugin plugin,
+            Clock clock,
+            PerformanceGovernor governor,
+            TaskFailureIsolation taskFailures
+    ) {
         this(
                 plugin,
                 clock,
                 Executors.newSingleThreadExecutor(
                         Thread.ofPlatform().name("SurvivalTweaks diagnostics").daemon(true).factory()
-                )
+                ),
+                governor,
+                taskFailures
         );
     }
 
     DiagnosticService(JavaPlugin plugin, Clock clock, ExecutorService executor) {
+        this(plugin, clock, executor, null, null);
+    }
+
+    DiagnosticService(
+            JavaPlugin plugin,
+            Clock clock,
+            ExecutorService executor,
+            PerformanceGovernor governor,
+            TaskFailureIsolation taskFailures
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.dataFolder = plugin.getDataFolder().toPath();
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.compassOwnerKey = new NamespacedKey(plugin, "death-compass-owner");
-        this.compassMarkerKey = new NamespacedKey(plugin, "death-compass-marker");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.governor = governor;
+        this.taskFailures = taskFailures;
     }
 
     DiagnosticService(Path dataFolder, Clock clock) {
         this.plugin = null;
         this.dataFolder = dataFolder;
         this.clock = clock;
-        this.compassOwnerKey = null;
-        this.compassMarkerKey = null;
         this.executor = null;
+        this.governor = null;
+        this.taskFailures = null;
     }
 
     public boolean run(Consumer<Report> completion) {
@@ -105,6 +124,8 @@ public final class DiagnosticService implements AutoCloseable {
         ensureActive();
         inspectMessages(issues);
         ensureActive();
+        inspectRuntimeHealth(issues);
+        ensureActive();
         int profiles = inspectProfiles(snapshot, issues);
         ensureActive();
         int locks = inspectLocks(snapshot, issues);
@@ -114,8 +135,6 @@ public final class DiagnosticService implements AutoCloseable {
         inspectNewPlayerSpawns(snapshot, issues);
         ensureActive();
         int backups = inspectBackups(issues);
-        ensureActive();
-        inspectCompasses(snapshot, deaths.activeMarkers(), issues);
         long errors = issues.stream().filter(issue -> issue.severity() == Severity.ERROR).count();
         long warnings = issues.size() - errors;
         return new Report(
@@ -211,26 +230,7 @@ public final class DiagnosticService implements AutoCloseable {
         Set<String> worldNames = plugin.getServer().getWorlds().stream()
                 .map(world -> world.getName().toLowerCase(Locale.ROOT))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        ArrayList<CompassReference> compasses = new ArrayList<>();
-        plugin.getServer().getOnlinePlayers().forEach(player -> {
-            for (ItemStack item : player.getInventory().getContents()) {
-                if (item == null) {
-                    continue;
-                }
-                String owner = item.getItemMeta().getPersistentDataContainer().get(
-                        compassOwnerKey,
-                        PersistentDataType.STRING
-                );
-                String marker = item.getItemMeta().getPersistentDataContainer().get(
-                        compassMarkerKey,
-                        PersistentDataType.STRING
-                );
-                if (owner != null || marker != null) {
-                    compasses.add(new CompassReference(player.getUniqueId(), owner, marker));
-                }
-            }
-        });
-        return new Snapshot(worldIds, worldNames, List.copyOf(compasses), clock.instant());
+        return new Snapshot(worldIds, worldNames, clock.instant());
     }
 
     private void inspectDataDirectory(List<Issue> issues) {
@@ -279,6 +279,31 @@ public final class DiagnosticService implements AutoCloseable {
             }
         } catch (Exception exception) {
             issues.add(new Issue(Severity.ERROR, "Language catalog validation failed: " + reason(exception)));
+        }
+    }
+
+    private void inspectRuntimeHealth(List<Issue> issues) {
+        if (governor != null) {
+            PerformanceGovernor.Snapshot performance = governor.snapshot();
+            if (performance.level() != PerformanceGovernor.Level.NORMAL) {
+                issues.add(new Issue(
+                        Severity.WARNING,
+                        "Adaptive performance governor is "
+                                + performance.level().name().toLowerCase(Locale.ROOT)
+                                + " at " + String.format(Locale.ROOT, "%.1f", performance.mspt())
+                                + " MSPT."
+                ));
+            }
+        }
+        if (taskFailures != null) {
+            taskFailures.recent(Duration.ofMinutes(10)).stream()
+                    .limit(5)
+                    .forEach(failure -> issues.add(new Issue(
+                            Severity.WARNING,
+                            "Recurring subsystem '" + failure.subsystem() + "' failed "
+                                    + failure.count() + " time(s); latest problem: "
+                                    + failure.problem() + "."
+                    )));
         }
     }
 
@@ -637,29 +662,6 @@ public final class DiagnosticService implements AutoCloseable {
         }
     }
 
-    private void inspectCompasses(
-            Snapshot snapshot,
-            Map<UUID, Set<String>> activeMarkers,
-            List<Issue> issues
-    ) {
-        int stale = 0;
-        for (CompassReference compass : snapshot.compasses()) {
-            UUID owner = uuid(compass.owner());
-            if (owner == null
-                    || !owner.equals(compass.holder())
-                    || compass.marker() == null
-                    || !activeMarkers.getOrDefault(owner, Set.of()).contains(compass.marker())) {
-                stale++;
-            }
-        }
-        if (stale > 0) {
-            issues.add(new Issue(
-                    Severity.WARNING,
-                    stale + " stale or mismatched recovery compass item(s) are online."
-            ));
-        }
-    }
-
     private void inspectSchema(
             String source,
             int actual,
@@ -756,12 +758,8 @@ public final class DiagnosticService implements AutoCloseable {
     record Snapshot(
             Set<UUID> worldIds,
             Set<String> worldNames,
-            List<CompassReference> compasses,
             Instant now
     ) {
-    }
-
-    record CompassReference(UUID holder, String owner, String marker) {
     }
 
     private record DeathSummary(int total, Map<UUID, Set<String>> activeMarkers) {

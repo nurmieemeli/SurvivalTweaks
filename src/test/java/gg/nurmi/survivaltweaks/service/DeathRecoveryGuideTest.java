@@ -1,9 +1,16 @@
 package gg.nurmi.survivaltweaks.service;
 
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DeathRecoveryGuideTest {
 
@@ -67,5 +74,28 @@ class DeathRecoveryGuideTest {
         assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey("UNKNOWN"));
         assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey("removed-cause"));
         assertEquals("death-recovery.cause.unknown", DeathRecoveryService.causeKey(null));
+    }
+
+    @Test
+    void detectsChunkTransitionsWithoutTreatingMovementInsideAChunkAsOne() {
+        World world = mock(World.class);
+        when(world.getUID()).thenReturn(UUID.randomUUID());
+
+        assertTrue(DeathRecoveryService.sameChunk(
+                new Location(world, 1, 64, 1),
+                new Location(world, 15.9, 70, 15.9)
+        ));
+        assertFalse(DeathRecoveryService.sameChunk(
+                new Location(world, 15.9, 64, 1),
+                new Location(world, 16.0, 64, 1)
+        ));
+    }
+
+    @Test
+    void clampsFallbackDisplaysInsideThePlayersLoadedChunk() {
+        assertEquals(0.25, DeathRecoveryService.clampToChunk(-5.0, 0), 0.000_001);
+        assertEquals(15.75, DeathRecoveryService.clampToChunk(20.0, 0), 0.000_001);
+        assertEquals(-15.75, DeathRecoveryService.clampToChunk(-20.0, -1), 0.000_001);
+        assertEquals(-0.25, DeathRecoveryService.clampToChunk(5.0, -1), 0.000_001);
     }
 }

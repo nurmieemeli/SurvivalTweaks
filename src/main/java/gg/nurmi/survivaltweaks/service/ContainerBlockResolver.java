@@ -42,19 +42,44 @@ public final class ContainerBlockResolver {
         return Set.copyOf(blocks);
     }
 
-    private void addInventoryBlock(Set<BlockKey> blocks, Inventory inventory) {
-        InventoryHolder holder = inventory.getHolder();
-        if (holder instanceof Container container) {
-            blocks.add(BlockKey.from(container.getBlock()));
-            return;
+    /**
+     * Resolves the one or two backing blocks without allocating a collection.
+     * Inventory move events use this path because hopper networks can produce
+     * a very large number of checks per tick.
+     */
+    public BlockPair blockPairFor(Inventory inventory) {
+        if (inventory instanceof DoubleChestInventory doubleChest) {
+            return new BlockPair(
+                    inventoryBlock(doubleChest.getLeftSide()),
+                    inventoryBlock(doubleChest.getRightSide())
+            );
         }
+        return new BlockPair(inventoryBlock(inventory), null);
+    }
 
-        Location location = inventory.getLocation();
-        if (location != null && location.getBlock().getState() instanceof Container) {
-            blocks.add(BlockKey.from(location.getBlock()));
+    private void addInventoryBlock(Set<BlockKey> blocks, Inventory inventory) {
+        BlockKey block = inventoryBlock(inventory);
+        if (block != null) {
+            blocks.add(block);
         }
     }
 
+    private BlockKey inventoryBlock(Inventory inventory) {
+        InventoryHolder holder = inventory.getHolder();
+        if (holder instanceof Container container) {
+            return BlockKey.from(container.getBlock());
+        }
+
+        Location location = inventory.getLocation();
+        if (location != null && location.getBlock().getState() instanceof Container container) {
+            return BlockKey.from(container.getBlock());
+        }
+        return null;
+    }
+
     public record Target(Block block, Set<BlockKey> blocks) {
+    }
+
+    public record BlockPair(BlockKey first, BlockKey second) {
     }
 }

@@ -83,7 +83,7 @@ permissions:
     description: Allows viewing player profiles and statistics hidden by their owners.
     default: op
   survivaltweaks.command.deathlocation:
-    description: Allows viewing a death marker and claiming its recovery compass.
+    description: Allows viewing a death marker and managing its private guide.
     default: true
   survivaltweaks.command.reload:
     description: Allows safely reloading SurvivalTweaks configuration and languages.

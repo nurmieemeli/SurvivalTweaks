@@ -15,6 +15,12 @@ import java.util.logging.Logger;
 public record PluginSettings(
         int maxHomes,
         Duration autosaveInterval,
+        boolean performanceGovernorEnabled,
+        double performanceReducedMspt,
+        double performanceCriticalMspt,
+        double performanceRecoveryMspt,
+        int performanceRecoverySeconds,
+        int performanceWorkBudgetPerTick,
         Duration teleportRequestLifetime,
         Duration teleportWarmup,
         Duration teleportCooldown,
@@ -59,13 +65,10 @@ public record PluginSettings(
         boolean actionBarEnabled,
         boolean lockTargetHintsEnabled,
         boolean deathRecoveryEnabled,
-        boolean deathCompassOnRespawn,
         boolean deathFloatingGuideEnabled,
-        boolean deathFloatingGuideAutomaticOnRespawn,
         double deathFloatingGuideNearDistance,
         double deathFloatingGuideOffset,
         Duration deathMarkerLifetime,
-        Duration deathCompassCooldown,
         boolean customDeathMessagesEnabled,
         int customDeathMessageRareVariantPercent,
         Set<String> customDeathMessageCauses,
@@ -137,6 +140,12 @@ public record PluginSettings(
         PluginSettings settings = new PluginSettings(
                 boundedInt(config, logger, "home.max-amount", 3, 1, 100),
                 Duration.ofSeconds(boundedInt(config, logger, "storage.autosave-seconds", 300, 10, 86_400)),
+                config.getBoolean("performance.enabled", true),
+                boundedDouble(config, logger, "performance.reduced-mspt", 40.0, 35.0, 45.0),
+                boundedDouble(config, logger, "performance.critical-mspt", 47.0, 46.0, 50.0),
+                boundedDouble(config, logger, "performance.recovery-mspt", 32.0, 10.0, 34.0),
+                boundedInt(config, logger, "performance.recovery-seconds", 15, 5, 300),
+                boundedInt(config, logger, "performance.work-budget-per-tick", 256, 32, 4_096),
                 Duration.ofSeconds(boundedInt(
                         config,
                         logger,
@@ -188,9 +197,7 @@ public record PluginSettings(
                 config.getBoolean("ui.action-bar-enabled", true),
                 config.getBoolean("ui.lock-target-hints-enabled", true),
                 config.getBoolean("death-recovery.enabled", true),
-                config.getBoolean("death-recovery.compass-on-respawn", true),
                 config.getBoolean("death-recovery.floating-guide.enabled", true),
-                config.getBoolean("death-recovery.floating-guide.automatic-on-respawn", false),
                 boundedDouble(
                         config,
                         logger,
@@ -214,14 +221,6 @@ public record PluginSettings(
                         3600,
                         60,
                         604_800
-                )),
-                Duration.ofSeconds(boundedInt(
-                        config,
-                        logger,
-                        "death-recovery.compass-cooldown-seconds",
-                        30,
-                        0,
-                        3_600
                 )),
                 config.getBoolean("custom-death-messages.enabled", true),
                 boundedInt(config, logger, "custom-death-messages.rare-variant-percent", 5, 0, 100),
@@ -316,6 +315,12 @@ public record PluginSettings(
         PluginSettings settings = new PluginSettings(
                 strictInt(config, errors, "home.max-amount", 1, 100),
                 Duration.ofSeconds(strictInt(config, errors, "storage.autosave-seconds", 10, 86_400)),
+                strictBoolean(config, errors, "performance.enabled"),
+                strictDouble(config, errors, "performance.reduced-mspt", 35.0, 45.0),
+                strictDouble(config, errors, "performance.critical-mspt", 46.0, 50.0),
+                strictDouble(config, errors, "performance.recovery-mspt", 10.0, 34.0),
+                strictInt(config, errors, "performance.recovery-seconds", 5, 300),
+                strictInt(config, errors, "performance.work-budget-per-tick", 32, 4_096),
                 Duration.ofSeconds(strictInt(config, errors, "teleport.request-lifetime-seconds", 5, 300)),
                 Duration.ofSeconds(strictInt(config, errors, "teleport.warmup-seconds", 0, 60)),
                 Duration.ofSeconds(strictInt(config, errors, "teleport.cooldown-seconds", 0, 3_600)),
@@ -360,9 +365,7 @@ public record PluginSettings(
                 strictBoolean(config, errors, "ui.action-bar-enabled"),
                 strictBoolean(config, errors, "ui.lock-target-hints-enabled"),
                 strictBoolean(config, errors, "death-recovery.enabled"),
-                strictBoolean(config, errors, "death-recovery.compass-on-respawn"),
                 strictBoolean(config, errors, "death-recovery.floating-guide.enabled"),
-                strictBoolean(config, errors, "death-recovery.floating-guide.automatic-on-respawn"),
                 strictDouble(config, errors, "death-recovery.floating-guide.near-distance", 8.0, 64.0),
                 strictDouble(config, errors, "death-recovery.floating-guide.offset", 1.5, 8.0),
                 Duration.ofSeconds(strictInt(
@@ -371,13 +374,6 @@ public record PluginSettings(
                         "death-recovery.marker-lifetime-seconds",
                         60,
                         604_800
-                )),
-                Duration.ofSeconds(strictInt(
-                        config,
-                        errors,
-                        "death-recovery.compass-cooldown-seconds",
-                        0,
-                        3_600
                 )),
                 strictBoolean(config, errors, "custom-death-messages.enabled"),
                 strictInt(config, errors, "custom-death-messages.rare-variant-percent", 0, 100),

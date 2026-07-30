@@ -1,6 +1,16 @@
 home:
   max-amount: 3
 
+# Adaptive load shedding only changes cosmetic cadence and spreads batchable work.
+# Teleport safety, container locks, persistence, and other correctness paths are never throttled.
+performance:
+  enabled: true
+  reduced-mspt: 40.0
+  critical-mspt: 47.0
+  recovery-mspt: 32.0
+  recovery-seconds: 15
+  work-budget-per-tick: 256
+
 teleport:
   request-lifetime-seconds: 30
   warmup-seconds: 3
@@ -103,19 +113,15 @@ ui:
 
 death-recovery:
   enabled: true
-  # Give a bound recovery compass after respawning.
-  compass-on-respawn: true
   floating-guide:
-    # Private, non-persistent text display that guides only its owner.
+    # Private, non-persistent text display that automatically returns after
+    # respawning or rejoining while a death marker remains active.
     enabled: true
-    # Players can always toggle the guide through the compass or command.
-    automatic-on-respawn: false
     # Inside this distance, the display moves onto the exact death location.
     near-distance: 32.0
     # While farther away, keep the directional display this many blocks away.
     offset: 3.5
   marker-lifetime-seconds: 3600
-  compass-cooldown-seconds: 30
 
 # Subtle localized alternatives for environmental deaths. Deaths attributed to
 # players, mobs, projectiles, or other entities always retain Minecraft's native

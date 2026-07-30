@@ -57,9 +57,14 @@ public class AtmosphereService implements Listener, AutoCloseable {
     private final MessageService messages;
     private final ActionBarService actionBars;
     private final PlayerExperienceService experience;
+    private final PerformanceGovernor governor;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation failures;
     private final Map<UUID, Long> durabilityAlertCooldowns = new HashMap<>();
     private final Set<BukkitTask> transientTasks = new HashSet<>();
     private BukkitTask ambientTask;
+    private int ambientPhase;
+    private long ambientCycles;
 
     public AtmosphereService(
             SurvivalTweaks plugin,
@@ -68,11 +73,27 @@ public class AtmosphereService implements Listener, AutoCloseable {
             ActionBarService actionBars,
             PlayerExperienceService experience
     ) {
+        this(plugin, settings, messages, actionBars, experience, null, null, null);
+    }
+
+    public AtmosphereService(
+            SurvivalTweaks plugin,
+            SettingsService settings,
+            MessageService messages,
+            ActionBarService actionBars,
+            PlayerExperienceService experience,
+            PerformanceGovernor governor,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures
+    ) {
         this.plugin = plugin;
         this.settings = settings;
         this.messages = messages;
         this.actionBars = actionBars;
         this.experience = experience;
+        this.governor = governor;
+        this.workBudget = workBudget;
+        this.failures = failures;
         startAmbientTask();
     }
 
@@ -441,17 +462,31 @@ public class AtmosphereService implements Listener, AutoCloseable {
     }
 
     private void startAmbientTask() {
-        ambientTask = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+        Runnable ambient = () -> {
             PluginSettings current = settings.current();
+            int phase = ambientPhase;
+            ambientPhase = (ambientPhase + 1) & 3;
+            long cycle = ambientCycles++;
             if (!current.atmosphereAmbientEffects()) {
                 return;
             }
 
             for (Player player : plugin.getServer().getOnlinePlayers()) {
+                if (Math.floorMod(player.getUniqueId().hashCode(), 4) != phase) {
+                    continue;
+                }
+                int divisor = governor == null ? 1 : governor.cosmeticDivisor();
+                if (Math.floorMod(cycle / 4L + player.getUniqueId().hashCode(), divisor) != 0
+                        || (workBudget != null && !workBudget.tryAcquire(1))) {
+                    continue;
+                }
                 ThreadLocalRandom random = ThreadLocalRandom.current();
                 Location loc = player.getLocation();
                 long time = loc.getWorld().getTime();
-                boolean showParticles = particlesEnabled(player);
+                PlayerPreferences preferences = experience.preferences(player);
+                boolean showParticles = preferences.particlesEnabled();
+                Biome biome = loc.getBlock().getBiome();
+                String biomeName = biome.key().value();
 
                 // Sprint Dust
                 if (current.atmosphereSprintDust() && player.isSprinting() && showParticles) {
@@ -460,7 +495,7 @@ public class AtmosphereService implements Listener, AutoCloseable {
                         player.spawnParticle(
                                 Particle.DUST,
                                 loc,
-                                particleCount(player, 3),
+                                particleCount(preferences, 3),
                                 0.2,
                                 0.0,
                                 0.2,
@@ -470,7 +505,7 @@ public class AtmosphereService implements Listener, AutoCloseable {
                         player.spawnParticle(
                                 Particle.SNOWFLAKE,
                                 loc,
-                                particleCount(player, 3),
+                                particleCount(preferences, 3),
                                 0.2,
                                 0.0,
                                 0.2,
@@ -483,13 +518,12 @@ public class AtmosphereService implements Listener, AutoCloseable {
                 if (current.atmosphereNetherSoulEmbers()
                         && showParticles
                         && loc.getWorld().getEnvironment() == org.bukkit.World.Environment.NETHER) {
-                    String biomeName = loc.getBlock().getBiome().key().value();
                     if (biomeName.contains("soul") || biomeName.contains("wastes")) {
                         player.spawnParticle(Particle.SOUL_FIRE_FLAME, loc.clone().add(
                                 random.nextDouble(-3.0, 3.0),
                                 random.nextDouble(0.0, 2.0),
                                 random.nextDouble(-3.0, 3.0)
-                        ), particleCount(player, 2), 0.05, 0.05, 0.05, 0.01);
+                        ), particleCount(preferences, 2), 0.05, 0.05, 0.05, 0.01);
                     }
                 }
 
@@ -501,7 +535,7 @@ public class AtmosphereService implements Listener, AutoCloseable {
                     player.spawnParticle(
                             Particle.WAX_ON,
                             loc.clone().add(0, 1.0, 0),
-                            particleCount(player, 4),
+                            particleCount(preferences, 4),
                             0.4,
                             0.1,
                             0.4
@@ -511,10 +545,11 @@ public class AtmosphereService implements Listener, AutoCloseable {
                 // Subterranean Cave Echoes
                 if (current.atmosphereCaveEchoes()
                         && (loc.getY() <= 0
-                        || loc.getBlock().getBiome().key().value().contains("dripstone"))) {
+                        || biomeName.contains("dripstone"))) {
                     if (random.nextDouble() < 0.3) {
                         playSound(
                                 player,
+                                preferences,
                                 loc,
                                 Sound.BLOCK_POINTED_DRIPSTONE_DRIP_WATER,
                                 0.4f,
@@ -536,12 +571,12 @@ public class AtmosphereService implements Listener, AutoCloseable {
 
                 // Mountain wind ambient
                 if (loc.getY() > 120) {
-                    playSound(player, loc, Sound.ITEM_ELYTRA_FLYING, 0.1f, 0.5f);
+                    playSound(player, preferences, loc, Sound.ITEM_ELYTRA_FLYING, 0.1f, 0.5f);
                     if (showParticles) {
                         player.spawnParticle(
                                 Particle.CLOUD,
                                 loc.clone().add(0, 2, 0),
-                                particleCount(player, 2),
+                                particleCount(preferences, 2),
                                 3.0,
                                 1.0,
                                 3.0,
@@ -552,13 +587,12 @@ public class AtmosphereService implements Listener, AutoCloseable {
 
                 // Deep Dark Sculk Spores
                 if (current.atmosphereDeepDarkSpores() && showParticles) {
-                    String biomeName = loc.getBlock().getBiome().key().value();
                     if (biomeName.contains("deep_dark")) {
                         player.spawnParticle(Particle.SCULK_SOUL, loc.clone().add(
                                 random.nextDouble(-4.0, 4.0),
                                 random.nextDouble(0.0, 2.5),
                                 random.nextDouble(-4.0, 4.0)
-                        ), particleCount(player, 2), 0.05, 0.05, 0.05, 0.01);
+                        ), particleCount(preferences, 2), 0.05, 0.05, 0.05, 0.01);
                         player.spawnParticle(Particle.SCULK_CHARGE_POP, loc.clone().add(
                                 random.nextDouble(-3.0, 3.0),
                                 random.nextDouble(0.5, 2.0),
@@ -569,8 +603,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
 
                 // Night fireflies in lush biomes
                 if (showParticles && time >= 13000 && time <= 23000) {
-                    Biome biome = loc.getBlock().getBiome();
-                    String biomeName = biome.key().value();
                     if (biomeName.contains("swamp")
                             || biomeName.contains("forest")
                             || biomeName.contains("jungle")) {
@@ -578,11 +610,17 @@ public class AtmosphereService implements Listener, AutoCloseable {
                                 random.nextDouble(-4.0, 4.0),
                                 random.nextDouble(0.0, 2.5),
                                 random.nextDouble(-4.0, 4.0)
-                        ), particleCount(player, 3), 0.1, 0.1, 0.1);
+                        ), particleCount(preferences, 3), 0.1, 0.1, 0.1);
                     }
                 }
             }
-        }, 40L, 40L);
+        };
+        ambientTask = plugin.getServer().getScheduler().runTaskTimer(
+                plugin,
+                failures == null ? ambient : failures.guard("ambient atmosphere", ambient),
+                10L,
+                10L
+        );
     }
 
     private void playSound(
@@ -593,6 +631,17 @@ public class AtmosphereService implements Listener, AutoCloseable {
             float pitch
     ) {
         PlayerPreferences preferences = experience.preferences(player);
+        playSound(player, preferences, location, sound, volume, pitch);
+    }
+
+    private void playSound(
+            Player player,
+            PlayerPreferences preferences,
+            Location location,
+            Sound sound,
+            float volume,
+            float pitch
+    ) {
         if (!preferences.soundsEnabled()) {
             return;
         }
@@ -605,9 +654,15 @@ public class AtmosphereService implements Listener, AutoCloseable {
     }
 
     int particleCount(Player player, int count) {
-        return experience.preferences(player).reducedEffects()
-                ? Math.max(1, (int) Math.ceil(count * 0.3))
-                : count;
+        return particleCount(experience.preferences(player), count);
+    }
+
+    private int particleCount(PlayerPreferences preferences, int count) {
+        double scale = preferences.reducedEffects() ? 0.3 : 1.0;
+        if (governor != null) {
+            scale *= governor.particleScale();
+        }
+        return Math.max(1, (int) Math.ceil(count * scale));
     }
 
     private void scheduleTransientTask(

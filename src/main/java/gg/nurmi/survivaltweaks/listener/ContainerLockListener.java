@@ -232,8 +232,10 @@ public final class ContainerLockListener implements Listener {
         if (locks.lockCount() == 0) {
             return;
         }
-        if (!locks.automationAllowed(resolver.blocksFor(event.getSource()))
-                || !locks.automationAllowed(resolver.blocksFor(event.getDestination()))) {
+        ContainerBlockResolver.BlockPair source = resolver.blockPairFor(event.getSource());
+        ContainerBlockResolver.BlockPair destination = resolver.blockPairFor(event.getDestination());
+        if (!locks.automationAllowed(source.first(), source.second())
+                || !locks.automationAllowed(destination.first(), destination.second())) {
             event.setCancelled(true);
         }
     }
@@ -241,9 +243,11 @@ public final class ContainerLockListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryPickup(InventoryPickupItemEvent event) {
         if (settings.current().blockLockedContainerAutomation()
-                && locks.lockCount() > 0
-                && !locks.automationAllowed(resolver.blocksFor(event.getInventory()))) {
-            event.setCancelled(true);
+                && locks.lockCount() > 0) {
+            ContainerBlockResolver.BlockPair blocks = resolver.blockPairFor(event.getInventory());
+            if (!locks.automationAllowed(blocks.first(), blocks.second())) {
+                event.setCancelled(true);
+            }
         }
     }
 

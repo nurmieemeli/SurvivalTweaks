@@ -20,14 +20,15 @@ class PluginSettingsTest {
         PluginSettings settings = PluginSettings.validate(config);
 
         assertEquals(3, settings.maxHomes());
+        assertTrue(settings.performanceGovernorEnabled());
+        assertEquals(40.0, settings.performanceReducedMspt());
+        assertEquals(47.0, settings.performanceCriticalMspt());
+        assertEquals(256, settings.performanceWorkBudgetPerTick());
         assertEquals(5, settings.lockTargetDistance());
         assertEquals(0, settings.purgeInactiveLocksDays());
-        assertTrue(settings.deathCompassOnRespawn());
         assertTrue(settings.deathFloatingGuideEnabled());
-        assertFalse(settings.deathFloatingGuideAutomaticOnRespawn());
         assertEquals(32.0, settings.deathFloatingGuideNearDistance());
         assertEquals(3.5, settings.deathFloatingGuideOffset());
-        assertEquals(30, settings.deathCompassCooldown().toSeconds());
         assertTrue(settings.customDeathMessagesEnabled());
         assertEquals(5, settings.customDeathMessageRareVariantPercent());
         assertEquals(12, settings.customDeathMessageCauses().size());

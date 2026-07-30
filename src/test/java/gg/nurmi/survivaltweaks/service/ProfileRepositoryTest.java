@@ -94,4 +94,20 @@ class ProfileRepositoryTest {
         assertEquals(1, store.load(uniqueId).homes().size());
         repository.close();
     }
+
+    @Test
+    void periodicEvictionRetainsOnlineProfilesOnly() {
+        Logger logger = Logger.getLogger(ProfileRepositoryTest.class.getName());
+        ProfileRepository repository = new ProfileRepository(new ProfileStore(directory, logger), logger);
+        UUID online = UUID.randomUUID();
+        UUID offline = UUID.randomUUID();
+        repository.load(online);
+        repository.load(offline);
+
+        repository.evictOffline(java.util.Set.of(online));
+
+        assertTrue(repository.flush(Duration.ofSeconds(2)));
+        assertEquals(1, repository.cachedProfileCount());
+        repository.close();
+    }
 }

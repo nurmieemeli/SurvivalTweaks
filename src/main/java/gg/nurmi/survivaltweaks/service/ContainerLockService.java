@@ -113,6 +113,15 @@ public final class ContainerLockService implements AutoCloseable {
         return true;
     }
 
+    public boolean automationAllowed(BlockKey first, BlockKey second) {
+        ContainerLock firstLock = first == null ? null : locksByBlock.get(first);
+        if (firstLock != null && !firstLock.automationAllowed()) {
+            return false;
+        }
+        ContainerLock secondLock = second == null ? null : locksByBlock.get(second);
+        return secondLock == null || secondLock.automationAllowed();
+    }
+
     public boolean addBlocks(ContainerLock lock, Collection<BlockKey> blocks) {
         if (blocks.stream().map(locksByBlock::get).anyMatch(existing -> existing != null && existing != lock)) {
             return false;
@@ -216,6 +225,7 @@ public final class ContainerLockService implements AutoCloseable {
     public void remove(ContainerLock lock) {
         if (locksById.remove(lock.id(), lock)) {
             lock.blocks().forEach(block -> locksByBlock.remove(block, lock));
+            accessHistory.remove(lock.id());
             markDirty();
         }
     }

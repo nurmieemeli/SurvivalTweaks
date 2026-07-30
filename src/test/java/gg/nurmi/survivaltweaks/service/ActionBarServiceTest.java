@@ -44,12 +44,12 @@ class ActionBarServiceTest {
         ActionBarService actionBars = new ActionBarService(new MutableClock());
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(UUID.randomUUID());
-        Component death = Component.text("death");
+        Component hint = Component.text("hint");
 
-        actionBars.show(player, death, ActionBarService.DEATH_MARKER_PRIORITY, Duration.ofSeconds(2));
+        actionBars.show(player, hint, ActionBarService.LOCK_HINT_PRIORITY, Duration.ofSeconds(2));
         actionBars.clearExact(player, ActionBarService.SLEEP_PRIORITY);
 
-        verify(player).sendActionBar(death);
+        verify(player).sendActionBar(hint);
         verify(player, never()).sendActionBar(Component.empty());
     }
 

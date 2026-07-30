@@ -29,7 +29,6 @@ public final class PreferencesMenuController implements Listener {
     private static final int PARTICLES = 11;
     private static final int DIALOGS = 12;
     private static final int ACTION_BAR = 13;
-    private static final int RECOVERY_COMPASS = 14;
     private static final int REDUCED_EFFECTS = 15;
     private static final int PLAYER_LIST = 16;
     private static final int LANGUAGE = 17;
@@ -84,15 +83,6 @@ public final class PreferencesMenuController implements Listener {
         inventory.setItem(
                 ACTION_BAR,
                 toggle(player, Material.EXPERIENCE_BOTTLE, "action-bar", preferences.actionBarEnabled())
-        );
-        inventory.setItem(
-                RECOVERY_COMPASS,
-                toggle(
-                        player,
-                        Material.COMPASS,
-                        "recovery-compass",
-                        preferences.automaticRecoveryCompass()
-                )
         );
         inventory.setItem(
                 REDUCED_EFFECTS,
@@ -196,11 +186,6 @@ public final class PreferencesMenuController implements Listener {
             experience.update(player, value -> value.withDialogs(!current.dialogsEnabled()));
         } else if (slot == ACTION_BAR) {
             experience.update(player, value -> value.withActionBar(!current.actionBarEnabled()));
-        } else if (slot == RECOVERY_COMPASS) {
-            experience.update(
-                    player,
-                    value -> value.withAutomaticRecoveryCompass(!current.automaticRecoveryCompass())
-            );
         } else if (slot == REDUCED_EFFECTS) {
             experience.update(player, value -> value.withReducedEffects(!current.reducedEffects()));
         } else if (slot == PLAYER_LIST) {

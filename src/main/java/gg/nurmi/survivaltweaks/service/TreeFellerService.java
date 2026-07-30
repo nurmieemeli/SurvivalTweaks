@@ -21,25 +21,32 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Map;
 
-public class TreeFellerService implements Listener {
+public class TreeFellerService implements Listener, AutoCloseable {
 
     private final SurvivalTweaks plugin;
     private final SettingsService settings;
     private final CustomEnchantItemService enchantments;
     private final FeedbackService feedback;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation failures;
     private final NamespacedKey PLACED_LOGS_KEY;
     private final Set<UUID> fellingPlayers = new HashSet<>();
+    private final Map<UUID, FellingJob> jobs = new HashMap<>();
+    private boolean closed;
 
     public TreeFellerService(SurvivalTweaks plugin, SettingsService settings) {
-        this(plugin, settings, null, null);
+        this(plugin, settings, null, null, null, null);
     }
 
     public TreeFellerService(
@@ -47,7 +54,7 @@ public class TreeFellerService implements Listener {
             SettingsService settings,
             CustomEnchantItemService enchantments
     ) {
-        this(plugin, settings, enchantments, null);
+        this(plugin, settings, enchantments, null, null, null);
     }
 
     public TreeFellerService(
@@ -56,10 +63,23 @@ public class TreeFellerService implements Listener {
             CustomEnchantItemService enchantments,
             FeedbackService feedback
     ) {
+        this(plugin, settings, enchantments, feedback, null, null);
+    }
+
+    public TreeFellerService(
+            SurvivalTweaks plugin,
+            SettingsService settings,
+            CustomEnchantItemService enchantments,
+            FeedbackService feedback,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures
+    ) {
         this.plugin = plugin;
         this.settings = settings;
         this.enchantments = enchantments;
         this.feedback = feedback;
+        this.workBudget = workBudget;
+        this.failures = failures;
         this.PLACED_LOGS_KEY = new NamespacedKey("survivaltweaks", "placed_logs");
     }
 
@@ -77,6 +97,9 @@ public class TreeFellerService implements Listener {
         
         if (fellingPlayers.contains(player.getUniqueId())) {
             removePlayerPlaced(block);
+            return;
+        }
+        if (jobs.containsKey(player.getUniqueId())) {
             return;
         }
 
@@ -157,25 +180,60 @@ public class TreeFellerService implements Listener {
 
         logsToBreak.sort((b1, b2) -> Integer.compare(b2.getY(), b1.getY()));
 
-        int broken = 0;
-        fellingPlayers.add(player.getUniqueId());
-        try {
-            for (Block log : logsToBreak) {
-                if (log.equals(startBlock)) continue;
-                if (player.breakBlock(log)) {
-                    broken++;
-                }
-            }
-        } finally {
-            fellingPlayers.remove(player.getUniqueId());
+        logsToBreak.remove(startBlock);
+        UUID playerId = player.getUniqueId();
+        jobs.put(playerId, new FellingJob(new ArrayDeque<>(logsToBreak)));
+        processJob(playerId);
+    }
+
+    private void processJob(UUID playerId) {
+        if (closed) {
+            return;
         }
-        if (feedback != null && broken > 0) {
+        FellingJob job = jobs.get(playerId);
+        Player player = plugin.getServer().getPlayer(playerId);
+        if (job == null || player == null || !player.isOnline()) {
+            jobs.remove(playerId);
+            return;
+        }
+        while (!job.logs().isEmpty()
+                && (workBudget == null || workBudget.tryAcquire(1))) {
+            Block log = job.logs().poll();
+            fellingPlayers.add(playerId);
+            try {
+                if (player.breakBlock(log)) {
+                    job.broken++;
+                }
+            } finally {
+                fellingPlayers.remove(playerId);
+            }
+        }
+        if (!job.logs().isEmpty()) {
+            Runnable continuation = () -> processJob(playerId);
+            plugin.getServer().getScheduler().runTaskLater(
+                    plugin,
+                    failures == null
+                            ? continuation
+                            : failures.guard("tree felling", continuation),
+                    1L
+            );
+            return;
+        }
+        jobs.remove(playerId);
+        if (feedback != null && job.broken > 0) {
             feedback.play(
                     player,
                     FeedbackService.ENCHANT_AREA_BREAK,
-                    Math.min(2, broken / 16.0)
+                    Math.min(2, job.broken / 16.0)
             );
         }
+    }
+
+    @Override
+    public void close() {
+        closed = true;
+        jobs.clear();
+        fellingPlayers.clear();
     }
 
     private boolean isLog(Material type) {
@@ -251,5 +309,18 @@ public class TreeFellerService implements Listener {
             }
         }
         pdc.set(PLACED_LOGS_KEY, PersistentDataType.INTEGER_ARRAY, updated);
+    }
+
+    private static final class FellingJob {
+        private final Queue<Block> logs;
+        private int broken;
+
+        private FellingJob(Queue<Block> logs) {
+            this.logs = logs;
+        }
+
+        private Queue<Block> logs() {
+            return logs;
+        }
     }
 }

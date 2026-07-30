@@ -6,6 +6,7 @@ import gg.nurmi.survivaltweaks.storage.ProfileStore;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -76,6 +77,14 @@ public final class ProfileRepository implements AutoCloseable {
         profiles.values().stream()
                 .map(Profile::snapshot)
                 .forEach(this::enqueueIfChanged);
+    }
+
+    public void evictOffline(Collection<UUID> onlinePlayers) {
+        Set<UUID> online = Set.copyOf(onlinePlayers);
+        profiles.keySet().stream()
+                .filter(uniqueId -> !online.contains(uniqueId))
+                .toList()
+                .forEach(this::playerDisconnected);
     }
 
     public void playerDisconnected(UUID uniqueId) {

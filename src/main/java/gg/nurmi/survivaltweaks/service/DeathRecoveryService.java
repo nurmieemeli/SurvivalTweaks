@@ -11,7 +11,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.command.Command;
@@ -22,14 +21,15 @@ import org.bukkit.entity.Display;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.PlayerDeathEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.CompassMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -53,29 +53,31 @@ import java.util.logging.Logger;
 public final class DeathRecoveryService
         implements Listener, CommandExecutor, TabCompleter, AutoCloseable {
 
-    private static final long GUIDE_UPDATE_TICKS = 1L;
+    private static final long GUIDE_UPDATE_TICKS = 2L;
     private static final double REACHED_DISTANCE = 3.0;
+    private static final double GUIDE_POSITION_EPSILON_SQUARED = 0.01;
+    private static final float GUIDE_ROTATION_EPSILON = 2.0f;
 
     private final JavaPlugin plugin;
     private final DeathMarkerStore store;
     private final MessageService messages;
     private final SettingsService settings;
-    private final ActionBarService actionBars;
     private final Clock clock;
     private final FeedbackService feedback;
-    private final PlayerExperienceService experience;
     private final NotificationService notifications;
     private final OnboardingService onboarding;
+    private final PerformanceGovernor governor;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation failures;
     private final CoalescingSnapshotWriter<List<DeathMarker>> writer;
-    private final NamespacedKey compassOwnerKey;
-    private final NamespacedKey compassMarkerKey;
+    private final NamespacedKey legacyCompassOwnerKey;
     private final Map<UUID, DeathMarker> markers = new HashMap<>();
-    private final Map<UUID, Instant> compassCooldowns = new HashMap<>();
     private final Set<UUID> floatingGuidePlayers = new HashSet<>();
+    private final Set<UUID> pendingGuideRefreshes = new HashSet<>();
     private final Map<UUID, TextDisplay> floatingGuides = new HashMap<>();
     private final Map<UUID, GuideTextState> floatingGuideTextStates = new HashMap<>();
     private final Map<UUID, GuidePosition> floatingGuidePositions = new HashMap<>();
-    private BukkitTask statusTask;
+    private BukkitTask expiryTask;
     private BukkitTask guideTask;
     private long guideUpdates;
 
@@ -84,23 +86,50 @@ public final class DeathRecoveryService
             DeathMarkerStore store,
             MessageService messages,
             SettingsService settings,
-            ActionBarService actionBars,
             Clock clock,
             FeedbackService feedback,
-            PlayerExperienceService experience,
             NotificationService notifications,
             OnboardingService onboarding
+    ) {
+        this(
+                plugin,
+                store,
+                messages,
+                settings,
+                clock,
+                feedback,
+                notifications,
+                onboarding,
+                null,
+                null,
+                null
+        );
+    }
+
+    public DeathRecoveryService(
+            JavaPlugin plugin,
+            DeathMarkerStore store,
+            MessageService messages,
+            SettingsService settings,
+            Clock clock,
+            FeedbackService feedback,
+            NotificationService notifications,
+            OnboardingService onboarding,
+            PerformanceGovernor governor,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures
     ) {
         this.plugin = plugin;
         this.store = store;
         this.messages = messages;
         this.settings = settings;
-        this.actionBars = actionBars;
         this.clock = clock;
         this.feedback = feedback;
-        this.experience = experience;
         this.notifications = notifications;
         this.onboarding = onboarding;
+        this.governor = governor;
+        this.workBudget = workBudget;
+        this.failures = failures;
         this.writer = new CoalescingSnapshotWriter<>(
                 "SurvivalTweaks-death-marker-writer",
                 "death markers",
@@ -109,14 +138,21 @@ public final class DeathRecoveryService
                         ? Logger.getLogger(DeathRecoveryService.class.getName())
                         : plugin.getLogger()
         );
-        this.compassOwnerKey = new NamespacedKey(plugin, "death-compass-owner");
-        this.compassMarkerKey = new NamespacedKey(plugin, "death-compass-marker");
+        this.legacyCompassOwnerKey = new NamespacedKey(plugin, "death-compass-owner");
         store.load().forEach(marker -> {
             if (!marker.expired(clock.instant())) {
                 markers.put(marker.playerId(), marker);
             }
         });
-        ensureStatusTask();
+        ensureExpiryTask();
+        if (!markers.isEmpty()) {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    plugin.getServer().getOnlinePlayers().forEach(player -> {
+                        removeLegacyRecoveryCompasses(player);
+                        enableFloatingGuide(player, false);
+                    })
+            );
+        }
     }
 
     @EventHandler
@@ -136,15 +172,11 @@ public final class DeathRecoveryService
                 now.plus(settings.current().deathMarkerLifetime()),
                 cause
         );
-        DeathMarker previous = markers.get(player.getUniqueId());
-        if (previous != null) {
-            event.getDrops().removeIf(item ->
-                    isOwnedRecoveryCompass(item, player.getUniqueId()) && matchesMarker(item, previous));
-            removeRecoveryCompasses(player, previous);
-        }
+        event.getDrops().removeIf(item -> isLegacyRecoveryCompass(item, player.getUniqueId()));
+        removeLegacyRecoveryCompasses(player);
         removeFloatingGuideDisplay(player.getUniqueId());
         markers.put(player.getUniqueId(), marker);
-        ensureStatusTask();
+        ensureExpiryTask();
         persist();
         sendLocation(player, marker, "death-recovery.recorded");
         onboarding.show(player, OnboardingHint.DEATH_RECOVERY);
@@ -162,13 +194,8 @@ public final class DeathRecoveryService
                     if (!player.isOnline()) {
                         return;
                     }
-                    if (settings.current().deathCompassOnRespawn()
-                            && experience.preferences(player).automaticRecoveryCompass()) {
-                        giveCompass(player, false);
-                    }
-                    if (settings.current().deathFloatingGuideEnabled()
-                            && (settings.current().deathFloatingGuideAutomaticOnRespawn()
-                            || floatingGuidePlayers.contains(player.getUniqueId()))) {
+                    removeLegacyRecoveryCompasses(player);
+                    if (settings.current().deathFloatingGuideEnabled()) {
                         enableFloatingGuide(player, false);
                     }
                 },
@@ -177,21 +204,54 @@ public final class DeathRecoveryService
     }
 
     @EventHandler
-    public void onCompassUse(PlayerInteractEvent event) {
-        if (!settings.current().deathRecoveryEnabled()
-                || event.getAction() != Action.RIGHT_CLICK_AIR) {
+    public void onJoin(PlayerJoinEvent event) {
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            Player player = event.getPlayer();
+            if (!player.isOnline()) {
+                return;
+            }
+            removeLegacyRecoveryCompasses(player);
+            if (settings.current().deathRecoveryEnabled()
+                    && settings.current().deathFloatingGuideEnabled()) {
+                enableFloatingGuide(player, false);
+            }
+        }, 1L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onGuideChunkTransition(PlayerMoveEvent event) {
+        if (sameChunk(event.getFrom(), event.getTo())) {
             return;
         }
-        ItemStack item = event.getItem();
-        Player player = event.getPlayer();
-        Optional<DeathMarker> marker = activeMarker(player.getUniqueId());
-        if (!isOwnedRecoveryCompass(item, player.getUniqueId())
-                || marker.isEmpty()
-                || !matchesMarker(item, marker.orElseThrow())) {
+        scheduleGuideRefresh(event.getPlayer(), false);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onGuideWorldTransition(PlayerChangedWorldEvent event) {
+        scheduleGuideRefresh(event.getPlayer(), true);
+    }
+
+    private void scheduleGuideRefresh(Player source, boolean transitionedWorld) {
+        UUID playerId = source.getUniqueId();
+        if (!floatingGuidePlayers.contains(playerId)
+                || !pendingGuideRefreshes.add(playerId)) {
             return;
         }
-        event.setCancelled(true);
-        toggleFloatingGuide(player);
+        Runnable refresh = () -> {
+            pendingGuideRefreshes.remove(playerId);
+            Player player = plugin.getServer().getPlayer(playerId);
+            if (player == null || !player.isOnline() || player.isDead()) {
+                return;
+            }
+            if (transitionedWorld) {
+                feedback.play(player, FeedbackService.GUIDE_HINT);
+            }
+            activeMarker(playerId).ifPresent(marker -> updateFloatingGuide(player, marker));
+        };
+        plugin.getServer().getScheduler().runTask(
+                plugin,
+                failures == null ? refresh : failures.guard("death guide transition", refresh)
+        );
     }
 
     @EventHandler
@@ -255,14 +315,9 @@ public final class DeathRecoveryService
             return false;
         }
         sendLocation(player, marker.orElseThrow(), "death-recovery.location");
-        giveCompass(player, true);
         if (settings.current().deathFloatingGuideEnabled()) {
-            messages.send(
-                    player,
-                    floatingGuidePlayers.contains(player.getUniqueId())
-                            ? "death-recovery.guide-prompt-enabled"
-                            : "death-recovery.guide-prompt-disabled"
-            );
+            enableFloatingGuide(player, false);
+            messages.send(player, "death-recovery.guide-prompt-enabled");
         }
         return true;
     }
@@ -346,9 +401,9 @@ public final class DeathRecoveryService
 
     @Override
     public void close() {
-        if (statusTask != null) {
-            statusTask.cancel();
-            statusTask = null;
+        if (expiryTask != null) {
+            expiryTask.cancel();
+            expiryTask = null;
         }
         if (guideTask != null) {
             guideTask.cancel();
@@ -358,183 +413,6 @@ public final class DeathRecoveryService
         persist();
         writer.close();
         markers.clear();
-        compassCooldowns.clear();
-    }
-
-    private void giveCompass(Player player, boolean enforceCooldown) {
-        Optional<DeathMarker> selected = activeMarker(player.getUniqueId());
-        if (selected.isEmpty()) {
-            return;
-        }
-        if (hasCompass(player)) {
-            if (enforceCooldown) {
-                messages.send(player, "death-recovery.compass-present");
-            }
-            return;
-        }
-        Instant now = clock.instant();
-        Instant available = compassCooldowns.get(player.getUniqueId());
-        if (enforceCooldown && available != null && available.isAfter(now)) {
-            long seconds = secondsUntil(now, available);
-            messages.send(
-                    player,
-                    MessageService.plural("death-recovery.compass-cooldown", seconds),
-                    Placeholder.unparsed("seconds", Long.toString(seconds))
-            );
-            return;
-        }
-        DeathMarker marker = selected.orElseThrow();
-        ItemStack compass = compass(player, marker);
-        player.getInventory().addItem(compass).values().forEach(leftover ->
-                player.getWorld().dropItemNaturally(player.getLocation(), leftover)
-        );
-        compassCooldowns.put(
-                player.getUniqueId(),
-                now.plus(settings.current().deathCompassCooldown())
-        );
-        messages.send(player, "death-recovery.compass-given");
-    }
-
-    private ItemStack compass(Player player, DeathMarker marker) {
-        ItemStack item = new ItemStack(Material.COMPASS);
-        CompassMeta meta = (CompassMeta) item.getItemMeta();
-        marker.resolve(plugin.getServer()).ifPresent(location -> {
-            meta.setLodestone(location);
-            meta.setLodestoneTracked(false);
-        });
-        meta.displayName(messages.component(player, "death-recovery.compass-name"));
-        Component locationLore = messages.component(
-                player,
-                "death-recovery.compass-lore",
-                Placeholder.unparsed("world", marker.worldName()),
-                Placeholder.unparsed("x", Long.toString(Math.round(marker.x()))),
-                Placeholder.unparsed("y", Long.toString(Math.round(marker.y()))),
-                Placeholder.unparsed("z", Long.toString(Math.round(marker.z())))
-        );
-        if (settings.current().deathFloatingGuideEnabled()) {
-            meta.lore(List.of(
-                    locationLore,
-                    messages.component(player, "death-recovery.compass-guide-lore")
-            ));
-        } else {
-            meta.lore(List.of(locationLore));
-        }
-        meta.getPersistentDataContainer().set(
-                compassOwnerKey,
-                PersistentDataType.STRING,
-                player.getUniqueId().toString()
-        );
-        meta.getPersistentDataContainer().set(
-                compassMarkerKey,
-                PersistentDataType.STRING,
-                marker.createdAt().toString()
-        );
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private void updateHeldCompasses() {
-        if (!settings.current().deathRecoveryEnabled()) {
-            return;
-        }
-        removeExpired();
-        if (!settings.current().actionBarEnabled()) {
-            return;
-        }
-        for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (!experience.actionBars(player)) {
-                continue;
-            }
-            ItemStack held = recoveryCompassInHands(player);
-            if (held == null) {
-                continue;
-            }
-            Optional<DeathMarker> selected = activeMarker(player.getUniqueId());
-            if (selected.isEmpty() || !matchesMarker(held, selected.orElseThrow())) {
-                actionBars.show(
-                        player,
-                        messages.component(player, "death-recovery.actionbar-expired"),
-                        ActionBarService.DEATH_MARKER_PRIORITY,
-                        Duration.ofMillis(1_250)
-                );
-                continue;
-            }
-            DeathMarker marker = selected.orElseThrow();
-            Optional<Location> resolved = marker.resolve(plugin.getServer());
-            if (resolved.isPresent()
-                    && resolved.orElseThrow().getWorld().getUID().equals(player.getWorld().getUID())) {
-                if (player.isDead()) {
-                    continue;
-                }
-                Location playerLocation = player.getLocation();
-                long distance = Math.round(playerLocation.distance(resolved.orElseThrow()));
-                if (distance <= 3L) {
-                    reached(player, marker);
-                    continue;
-                }
-                String arrow = directionArrow(playerLocation, resolved.orElseThrow());
-                NamedTextColor color = distance <= 20L
-                        ? NamedTextColor.GREEN
-                        : distance <= 100L ? NamedTextColor.YELLOW : NamedTextColor.WHITE;
-                actionBars.show(
-                        player,
-                        messages.component(
-                                player,
-                                "death-recovery.actionbar-navigation",
-                                Placeholder.unparsed("arrow", arrow),
-                                Placeholder.component("distance", Component.text(distance, color))
-                        ),
-                        ActionBarService.DEATH_MARKER_PRIORITY,
-                        Duration.ofMillis(1_250)
-                );
-                if (distance <= 20L) {
-                    feedback.play(player, "death-nearby", Math.max(0.4, (21.0 - distance) / 10.0));
-                }
-            } else if (resolved.isPresent()) {
-                Optional<PortalHint> portal = portalHint(player, resolved.orElseThrow());
-                if (portal.isEmpty()) {
-                    actionBars.show(
-                            player,
-                            messages.component(
-                                    player,
-                                    "death-recovery.actionbar-world",
-                                    Placeholder.unparsed("world", marker.worldName()),
-                                    Placeholder.unparsed("x", Long.toString(Math.round(marker.x()))),
-                                    Placeholder.unparsed("z", Long.toString(Math.round(marker.z())))
-                            ),
-                            ActionBarService.DEATH_MARKER_PRIORITY,
-                            Duration.ofMillis(1_250)
-                    );
-                    continue;
-                }
-                PortalHint hint = portal.orElseThrow();
-                actionBars.show(
-                        player,
-                        messages.component(
-                                player,
-                                "death-recovery.actionbar-portal",
-                                Placeholder.unparsed("world", marker.worldName()),
-                                Placeholder.unparsed("x", Long.toString(hint.x())),
-                                Placeholder.unparsed("z", Long.toString(hint.z()))
-                        ),
-                        ActionBarService.DEATH_MARKER_PRIORITY,
-                        Duration.ofMillis(1_250)
-                );
-            } else {
-                actionBars.show(
-                        player,
-                        messages.component(
-                                player,
-                                "death-recovery.actionbar-world",
-                                Placeholder.unparsed("world", marker.worldName()),
-                                Placeholder.unparsed("x", Long.toString(Math.round(marker.x()))),
-                                Placeholder.unparsed("z", Long.toString(Math.round(marker.z())))
-                        ),
-                        ActionBarService.DEATH_MARKER_PRIORITY,
-                        Duration.ofMillis(1_250)
-                );
-            }
-        }
     }
 
     private void updateFloatingGuides() {
@@ -544,7 +422,14 @@ public final class DeathRecoveryService
             clearFloatingGuides();
             return;
         }
+        int divisor = governor == null ? 1 : governor.cosmeticDivisor();
+        if (guideUpdates % divisor != 0L) {
+            return;
+        }
         for (UUID playerId : List.copyOf(floatingGuidePlayers)) {
+            if (workBudget != null && !workBudget.tryAcquire(1)) {
+                break;
+            }
             Player player = plugin.getServer().getPlayer(playerId);
             if (player == null || !player.isOnline() || player.isDead()) {
                 removeFloatingGuideDisplay(playerId);
@@ -555,7 +440,12 @@ public final class DeathRecoveryService
                 stopFloatingGuide(playerId);
                 continue;
             }
-            updateFloatingGuide(player, selected.orElseThrow());
+            Runnable update = () -> updateFloatingGuide(player, selected.orElseThrow());
+            if (failures == null) {
+                update.run();
+            } else {
+                failures.run("death guide player", update);
+            }
         }
     }
 
@@ -595,7 +485,13 @@ public final class DeathRecoveryService
                             portalTarget,
                             settings.current().deathFloatingGuideOffset()
                     ),
-                    new GuideTextState("death-recovery.guide-portal", "", distance)
+                    new GuideTextState(
+                            "death-recovery.guide-portal",
+                            "",
+                            distance,
+                            portal.orElseThrow().x(),
+                            portal.orElseThrow().z()
+                    )
             );
             return;
         }
@@ -631,8 +527,7 @@ public final class DeathRecoveryService
                 )
         );
         if (distance <= 20L
-                && guideUpdates % (20L / GUIDE_UPDATE_TICKS) == 0
-                && recoveryCompassInHands(player) == null) {
+                && guideUpdates % (20L / GUIDE_UPDATE_TICKS) == 0) {
             feedback.playAt(
                     player,
                     "death-nearby",
@@ -644,13 +539,14 @@ public final class DeathRecoveryService
 
     private void showGuide(Player player, Location location, GuideTextState textState) {
         UUID playerId = player.getUniqueId();
+        Location safeLocation = loadedGuideLocation(player, location);
         TextDisplay display = floatingGuides.get(playerId);
         if (display == null
                 || !display.isValid()
-                || !display.getWorld().getUID().equals(location.getWorld().getUID())) {
+                || !display.getWorld().getUID().equals(safeLocation.getWorld().getUID())) {
             removeFloatingGuideDisplay(playerId);
             Component text = guideText(player, textState);
-            display = location.getWorld().spawn(location, TextDisplay.class, entity -> {
+            display = safeLocation.getWorld().spawn(safeLocation, TextDisplay.class, entity -> {
                 entity.setPersistent(false);
                 entity.setVisibleByDefault(false);
                 entity.setGravity(false);
@@ -665,12 +561,12 @@ public final class DeathRecoveryService
                 entity.setViewRange(4.0f);
                 entity.setDisplayWidth(2.5f);
                 entity.setDisplayHeight(0.75f);
-                entity.setTeleportDuration(1);
+                entity.setTeleportDuration(Math.toIntExact(GUIDE_UPDATE_TICKS));
                 entity.text(text);
             });
             floatingGuides.put(playerId, display);
             floatingGuideTextStates.put(playerId, textState);
-            floatingGuidePositions.put(playerId, GuidePosition.at(location));
+            floatingGuidePositions.put(playerId, GuidePosition.at(safeLocation));
             player.showEntity(plugin, display);
             return;
         }
@@ -678,10 +574,46 @@ public final class DeathRecoveryService
         if (!textState.equals(previousText)) {
             display.text(guideText(player, textState));
         }
-        GuidePosition position = GuidePosition.at(location);
-        if (!position.equals(floatingGuidePositions.put(playerId, position))) {
-            display.teleport(location);
+        GuidePosition position = GuidePosition.at(safeLocation);
+        GuidePosition previousPosition = floatingGuidePositions.get(playerId);
+        if (previousPosition == null || !position.near(previousPosition)) {
+            floatingGuidePositions.put(playerId, position);
+            display.teleport(safeLocation);
         }
+    }
+
+    private Location loadedGuideLocation(Player player, Location desired) {
+        World world = desired.getWorld();
+        if (world.isChunkLoaded(desired.getBlockX() >> 4, desired.getBlockZ() >> 4)) {
+            return desired;
+        }
+
+        Location playerLocation = player.getLocation();
+        if (!playerLocation.getWorld().getUID().equals(world.getUID())) {
+            return desired;
+        }
+        int chunkX = playerLocation.getBlockX() >> 4;
+        int chunkZ = playerLocation.getBlockZ() >> 4;
+        return new Location(
+                world,
+                clampToChunk(desired.getX(), chunkX),
+                desired.getY(),
+                clampToChunk(desired.getZ(), chunkZ),
+                desired.getYaw(),
+                desired.getPitch()
+        );
+    }
+
+    static boolean sameChunk(Location first, Location second) {
+        return first.getWorld().getUID().equals(second.getWorld().getUID())
+                && (first.getBlockX() >> 4) == (second.getBlockX() >> 4)
+                && (first.getBlockZ() >> 4) == (second.getBlockZ() >> 4);
+    }
+
+    static double clampToChunk(double coordinate, int chunkCoordinate) {
+        double minimum = chunkCoordinate * 16.0 + 0.25;
+        double maximum = minimum + 15.5;
+        return Math.max(minimum, Math.min(maximum, coordinate));
     }
 
     private Component guideText(Player player, GuideTextState state) {
@@ -692,14 +624,20 @@ public final class DeathRecoveryService
                     Placeholder.unparsed("world", state.detail())
             );
         }
-        return messages.component(
-                player,
-                state.key(),
-                Placeholder.component(
-                        "distance",
-                        Component.text(state.distance(), distanceColor(state.distance()))
-                )
+        TagResolver distance = Placeholder.component(
+                "distance",
+                Component.text(state.distance(), distanceColor(state.distance()))
         );
+        if ("death-recovery.guide-portal".equals(state.key())) {
+            return messages.component(
+                    player,
+                    state.key(),
+                    distance,
+                    Placeholder.unparsed("x", Long.toString(state.x())),
+                    Placeholder.unparsed("z", Long.toString(state.z()))
+            );
+        }
+        return messages.component(player, state.key(), distance);
     }
 
     private void toggleFloatingGuide(Player player) {
@@ -749,6 +687,7 @@ public final class DeathRecoveryService
 
     private void stopFloatingGuide(UUID playerId) {
         floatingGuidePlayers.remove(playerId);
+        pendingGuideRefreshes.remove(playerId);
         removeFloatingGuideDisplay(playerId);
         stopGuideTaskIfIdle();
     }
@@ -768,6 +707,7 @@ public final class DeathRecoveryService
         floatingGuideTextStates.clear();
         floatingGuidePositions.clear();
         floatingGuidePlayers.clear();
+        pendingGuideRefreshes.clear();
         stopGuideTaskIfIdle();
     }
 
@@ -812,59 +752,31 @@ public final class DeathRecoveryService
                     "",
                     marker.worldName()
             );
-            Player online = plugin.getServer().getPlayer(playerId);
-            if (online != null) {
-                removeRecoveryCompasses(online, marker);
-            }
             stopFloatingGuide(playerId);
             persist();
             marker = null;
-            stopStatusTaskIfIdle();
+            stopExpiryTaskIfIdle();
         }
         return Optional.ofNullable(marker);
     }
 
-    private boolean hasCompass(Player player) {
-        Optional<DeathMarker> marker = activeMarker(player.getUniqueId());
-        if (marker.isEmpty()) {
+    private boolean isLegacyRecoveryCompass(ItemStack item, UUID playerId) {
+        if (item == null || !item.hasItemMeta()) {
             return false;
         }
-        for (ItemStack item : player.getInventory().getContents()) {
-            if (isOwnedRecoveryCompass(item, player.getUniqueId())
-                    && matchesMarker(item, marker.orElseThrow())) {
-                return true;
+        return playerId.toString().equals(item.getItemMeta().getPersistentDataContainer().get(
+                legacyCompassOwnerKey,
+                PersistentDataType.STRING
+        ));
+    }
+
+    private void removeLegacyRecoveryCompasses(Player player) {
+        for (int slot = 0; slot < player.getInventory().getSize(); slot++) {
+            ItemStack item = player.getInventory().getItem(slot);
+            if (isLegacyRecoveryCompass(item, player.getUniqueId())) {
+                player.getInventory().setItem(slot, null);
             }
         }
-        return false;
-    }
-
-    private boolean isOwnedRecoveryCompass(ItemStack item, UUID playerId) {
-        if (item == null || !(item.getItemMeta() instanceof CompassMeta meta)) {
-            return false;
-        }
-        return playerId.toString().equals(meta.getPersistentDataContainer().get(
-                compassOwnerKey,
-                PersistentDataType.STRING
-        ));
-    }
-
-    private ItemStack recoveryCompassInHands(Player player) {
-        ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (isOwnedRecoveryCompass(mainHand, player.getUniqueId())) {
-            return mainHand;
-        }
-        ItemStack offHand = player.getInventory().getItemInOffHand();
-        return isOwnedRecoveryCompass(offHand, player.getUniqueId()) ? offHand : null;
-    }
-
-    private boolean matchesMarker(ItemStack item, DeathMarker marker) {
-        if (!(item.getItemMeta() instanceof CompassMeta meta)) {
-            return false;
-        }
-        return marker.createdAt().toString().equals(meta.getPersistentDataContainer().get(
-                compassMarkerKey,
-                PersistentDataType.STRING
-        ));
     }
 
     private void sendLocation(Player player, DeathMarker marker, String key) {
@@ -897,14 +809,10 @@ public final class DeathRecoveryService
                         "",
                         marker.worldName()
                 );
-                Player online = plugin.getServer().getPlayer(marker.playerId());
-                if (online != null) {
-                    removeRecoveryCompasses(online, marker);
-                }
                 stopFloatingGuide(marker.playerId());
             });
             persist();
-            stopStatusTaskIfIdle();
+            stopExpiryTaskIfIdle();
         }
     }
 
@@ -913,12 +821,10 @@ public final class DeathRecoveryService
             return;
         }
         persist();
-        removeRecoveryCompasses(player, marker);
         stopFloatingGuide(player.getUniqueId());
-        actionBars.clear(player, ActionBarService.DEATH_MARKER_PRIORITY);
         messages.send(player, "death-recovery.reached");
         feedback.play(player, "death-reached");
-        stopStatusTaskIfIdle();
+        stopExpiryTaskIfIdle();
     }
 
     private void dismiss(Player player) {
@@ -928,24 +834,9 @@ public final class DeathRecoveryService
             return;
         }
         persist();
-        removeRecoveryCompasses(player, marker);
         stopFloatingGuide(player.getUniqueId());
-        actionBars.clear(player, ActionBarService.DEATH_MARKER_PRIORITY);
         messages.send(player, "death-recovery.dismissed");
-        stopStatusTaskIfIdle();
-    }
-
-    private void removeRecoveryCompasses(Player player, DeathMarker marker) {
-        for (int slot = 0; slot < player.getInventory().getSize(); slot++) {
-            ItemStack item = player.getInventory().getItem(slot);
-            if (isOwnedRecoveryCompass(item, player.getUniqueId()) && matchesMarker(item, marker)) {
-                player.getInventory().setItem(slot, null);
-            }
-        }
-        ItemStack offHand = player.getInventory().getItemInOffHand();
-        if (isOwnedRecoveryCompass(offHand, player.getUniqueId()) && matchesMarker(offHand, marker)) {
-            player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
-        }
+        stopExpiryTaskIfIdle();
     }
 
     static String causeKey(String cause) {
@@ -1009,29 +900,27 @@ public final class DeathRecoveryService
         return Optional.empty();
     }
 
-    private long secondsUntil(Instant now, Instant future) {
-        return Math.max(1L, (Duration.between(now, future).toMillis() + 999L) / 1_000L);
-    }
-
     private void persist() {
         writer.submit(List.copyOf(markers.values()));
     }
 
-    private void ensureStatusTask() {
-        if (statusTask == null && !markers.isEmpty()) {
-            statusTask = plugin.getServer().getScheduler().runTaskTimer(
+    private void ensureExpiryTask() {
+        if (expiryTask == null && !markers.isEmpty()) {
+            expiryTask = plugin.getServer().getScheduler().runTaskTimer(
                     plugin,
-                    this::updateHeldCompasses,
+                    failures == null
+                            ? this::removeExpired
+                            : failures.guard("death marker expiry", this::removeExpired),
                     20L,
                     20L
             );
         }
     }
 
-    private void stopStatusTaskIfIdle() {
-        if (markers.isEmpty() && statusTask != null) {
-            statusTask.cancel();
-            statusTask = null;
+    private void stopExpiryTaskIfIdle() {
+        if (markers.isEmpty() && expiryTask != null) {
+            expiryTask.cancel();
+            expiryTask = null;
         }
     }
 
@@ -1039,7 +928,9 @@ public final class DeathRecoveryService
         if (guideTask == null && !floatingGuidePlayers.isEmpty()) {
             guideTask = plugin.getServer().getScheduler().runTaskTimer(
                     plugin,
-                    this::updateFloatingGuides,
+                    failures == null
+                            ? this::updateFloatingGuides
+                            : failures.guard("death guide refresh", this::updateFloatingGuides),
                     GUIDE_UPDATE_TICKS,
                     GUIDE_UPDATE_TICKS
             );
@@ -1056,7 +947,11 @@ public final class DeathRecoveryService
     private record PortalHint(long x, long z) {
     }
 
-    private record GuideTextState(String key, String detail, long distance) {
+    private record GuideTextState(String key, String detail, long distance, long x, long z) {
+
+        private GuideTextState(String key, String detail, long distance) {
+            this(key, detail, distance, 0L, 0L);
+        }
     }
 
     private record GuidePosition(UUID worldId, double x, double y, double z, float yaw, float pitch) {
@@ -1070,6 +965,23 @@ public final class DeathRecoveryService
                     location.getYaw(),
                     location.getPitch()
             );
+        }
+
+        private boolean near(GuidePosition other) {
+            if (!worldId.equals(other.worldId)) {
+                return false;
+            }
+            double deltaX = x - other.x;
+            double deltaY = y - other.y;
+            double deltaZ = z - other.z;
+            return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ
+                    < GUIDE_POSITION_EPSILON_SQUARED
+                    && angleDifference(yaw, other.yaw) < GUIDE_ROTATION_EPSILON
+                    && Math.abs(pitch - other.pitch) < GUIDE_ROTATION_EPSILON;
+        }
+
+        private static float angleDifference(float first, float second) {
+            return Math.abs(((first - second + 540.0f) % 360.0f) - 180.0f);
         }
     }
 }

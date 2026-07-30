@@ -132,6 +132,12 @@ try {
     if ($doctorResponse -notmatch "started") {
         throw "SurvivalTweaks diagnostics did not start: $doctorResponse"
     }
+    Start-Sleep -Seconds 5
+    $doctorCompletionProbe = Invoke-Rcon "survivaltweaks doctor"
+    if ($doctorCompletionProbe -notmatch "started") {
+        throw "SurvivalTweaks diagnostics did not complete within five seconds: $doctorCompletionProbe"
+    }
+    Start-Sleep -Seconds 5
     $null = Invoke-Rcon "stop"
 
     if (!$process.WaitForExit(60000)) {

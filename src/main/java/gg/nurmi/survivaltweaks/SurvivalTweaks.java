@@ -40,6 +40,7 @@ import gg.nurmi.survivaltweaks.service.JourneyService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import gg.nurmi.survivaltweaks.service.PlayerListService;
 import gg.nurmi.survivaltweaks.service.PlayerStatisticsService;
+import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
 import gg.nurmi.survivaltweaks.service.ServerListService;
 import gg.nurmi.survivaltweaks.service.SleepVoteService;
 import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
@@ -53,6 +54,8 @@ import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
 import gg.nurmi.survivaltweaks.service.PetProtectionService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
+import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
+import gg.nurmi.survivaltweaks.service.TickWorkBudget;
 import gg.nurmi.survivaltweaks.service.VanillaGuideService;
 import gg.nurmi.survivaltweaks.storage.ProfileStore;
 import gg.nurmi.survivaltweaks.storage.ContainerLockStore;
@@ -109,6 +112,10 @@ public final class SurvivalTweaks extends JavaPlugin {
     private WelcomeBackController welcomeBack;
     private FastLeafDecayService fastLeafDecay;
     private AtmosphereService atmosphere;
+    private TreeFellerService treeFeller;
+    private PerformanceGovernor performanceGovernor;
+    private TaskFailureIsolation taskFailures;
+    private TickWorkBudget workBudget;
     private BukkitTask autosaveTask;
     private BukkitTask purgeTask;
 
@@ -134,6 +141,14 @@ public final class SurvivalTweaks extends JavaPlugin {
 
         PluginSettings initialSettings = PluginSettings.load(getConfig(), getLogger());
         settings = new SettingsService(initialSettings);
+        taskFailures = new TaskFailureIsolation(getLogger(), clock);
+        performanceGovernor = new PerformanceGovernor(this, settings, taskFailures);
+        workBudget = new TickWorkBudget(
+                settings,
+                performanceGovernor,
+                () -> getServer().getCurrentTick()
+        );
+        performanceGovernor.start();
         messages = new MessageService(this, getConfig(), getLogger());
         if (messages.migratedLegacyMessages()) {
             saveConfig();
@@ -160,7 +175,9 @@ public final class SurvivalTweaks extends JavaPlugin {
                 ),
                 messages,
                 feedback,
-                settings
+                settings,
+                workBudget,
+                taskFailures
         );
         NotificationService notifications = new NotificationService(profiles, clock);
         MailService mail = new MailService(
@@ -178,9 +195,10 @@ public final class SurvivalTweaks extends JavaPlugin {
                 settings,
                 notifications,
                 experience,
-                clock
+                clock,
+                taskFailures
         );
-        diagnostics = new DiagnosticService(this, clock);
+        diagnostics = new DiagnosticService(this, clock, performanceGovernor, taskFailures);
         OnboardingService onboarding = new OnboardingService(profiles, messages);
         onboarding.guidancePreference(playerId ->
                 experience.preferences(playerId).journeyGuidanceEnabled());
@@ -275,7 +293,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 settings,
                 actionBars,
                 safeTeleports,
-                experience
+                experience,
+                taskFailures
         );
         ReloadService reloads = new ReloadService(
                 this,
@@ -290,12 +309,13 @@ public final class SurvivalTweaks extends JavaPlugin {
                 new DeathMarkerStore(getDataFolder().toPath().resolve("death-markers.yml"), getLogger()),
                 messages,
                 settings,
-                actionBars,
                 clock,
                 feedback,
-                experience,
                 notifications,
-                onboarding
+                onboarding,
+                performanceGovernor,
+                workBudget,
+                taskFailures
         );
 
         TeleportAcceptCommand teleportAccept = new TeleportAcceptCommand(
@@ -497,6 +517,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             fastLeafDecay.close();
             fastLeafDecay = null;
         }
+        if (treeFeller != null) {
+            treeFeller.close();
+            treeFeller = null;
+        }
         if (diagnostics != null) {
             diagnostics.close();
             diagnostics = null;
@@ -541,12 +565,18 @@ public final class SurvivalTweaks extends JavaPlugin {
             profiles.close();
             profiles = null;
         }
+        if (performanceGovernor != null) {
+            performanceGovernor.close();
+            performanceGovernor = null;
+        }
         teleportRequests = null;
         settings = null;
         messages = null;
         feedback = null;
         backups = null;
         serverList = null;
+        workBudget = null;
+        taskFailures = null;
     }
 
     private void registerListeners(
@@ -640,16 +670,30 @@ public final class SurvivalTweaks extends JavaPlugin {
                 new CustomEnchantEffectService(this, customEnchantments, feedback),
                 this
         );
-        pluginManager.registerEvents(
-                new TreeFellerService(this, settings, customEnchantments, feedback),
-                this
+        treeFeller = new TreeFellerService(
+                this,
+                settings,
+                customEnchantments,
+                feedback,
+                workBudget,
+                taskFailures
         );
-        fastLeafDecay = new FastLeafDecayService(this, settings);
+        pluginManager.registerEvents(treeFeller, this);
+        fastLeafDecay = new FastLeafDecayService(this, settings, workBudget, taskFailures);
         pluginManager.registerEvents(fastLeafDecay, this);
         pluginManager.registerEvents(new PetProtectionService(settings), this);
         pluginManager.registerEvents(new BlockRefillService(this, settings), this);
         pluginManager.registerEvents(new DecorationProtectionService(settings), this);
-        atmosphere = new AtmosphereService(this, settings, messages, actionBars, experience);
+        atmosphere = new AtmosphereService(
+                this,
+                settings,
+                messages,
+                actionBars,
+                experience,
+                performanceGovernor,
+                workBudget,
+                taskFailures
+        );
         pluginManager.registerEvents(atmosphere, this);
     }
 
@@ -758,7 +802,12 @@ public final class SurvivalTweaks extends JavaPlugin {
         long autosaveTicks = settings.autosaveInterval().toSeconds() * 20L;
         autosaveTask = getServer().getScheduler().runTaskTimer(
                 this,
-                profiles::saveAll,
+                () -> {
+                    profiles.saveAll();
+                    profiles.evictOffline(getServer().getOnlinePlayers().stream()
+                            .map(org.bukkit.entity.Player::getUniqueId)
+                            .toList());
+                },
                 autosaveTicks,
                 autosaveTicks
         );

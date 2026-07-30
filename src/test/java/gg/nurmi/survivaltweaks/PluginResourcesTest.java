@@ -112,9 +112,7 @@ class PluginResourcesTest {
         assertNotNull(english.getString("admin.spawnpool.validate-result"));
         assertNotNull(english.getString("admin.backup.restore-staged"));
         assertNotNull(english.getString("lock.actionbar.owner"));
-        assertNotNull(english.getString("death-recovery.compass-name"));
         assertNotNull(english.getString("death-recovery.guide-navigation"));
-        assertNotNull(english.getString("death-recovery.guide-prompt-disabled"));
         assertNotNull(english.getString("death-messages.fall.1"));
         assertNotNull(english.getString("death-messages.world-border.rare"));
         assertNotNull(english.getString("ui.lock-panel.title"));
@@ -125,7 +123,6 @@ class PluginResourcesTest {
         assertNotNull(english.getString("ui.preferences.language.auto"));
         assertNotNull(english.getString("ui.notifications.type.lock-access-denied"));
         assertNotNull(english.getString("ui.lock-panel.mode.deposit_only"));
-        assertNotNull(english.getString("death-recovery.actionbar-navigation"));
         assertNotNull(finnish.getString("ui.unlock-dialog.title"));
         assertNotNull(config.getString("feedback.cues.teleport-complete.sound"));
         assertNotNull(config.getString("feedback.cues.lock-created.particle"));
@@ -214,8 +211,7 @@ class PluginResourcesTest {
                 "shout.usage",
                 "command.usage.teleport",
                 "command.usage.shout",
-                "death-recovery.guide-prompt-enabled",
-                "death-recovery.guide-prompt-disabled"
+                "death-recovery.guide-prompt-enabled"
         );
         for (String key : orderedMessageKeys(english)) {
             if (translatable.contains(key)) {
@@ -270,7 +266,6 @@ class PluginResourcesTest {
                 "teleport.safety.cooldown",
                 "death-recovery.recorded",
                 "death-recovery.location",
-                "death-recovery.compass-cooldown",
                 "death-recovery.distance.same-world",
                 "admin.restart.scheduled",
                 "admin.doctor.truncated",

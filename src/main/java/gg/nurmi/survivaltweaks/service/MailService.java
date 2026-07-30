@@ -25,6 +25,7 @@ public final class MailService {
     private final Clock clock;
     private final Map<UUID, Instant> cooldowns = new HashMap<>();
     private final Map<UUID, ArrayDeque<Instant>> hourlySends = new HashMap<>();
+    private int sendsSinceCleanup;
 
     public MailService(
             Server server,
@@ -80,6 +81,10 @@ public final class MailService {
         }
 
         Instant now = clock.instant();
+        if (++sendsSinceCleanup >= 64) {
+            cleanupRateLimits(now);
+            sendsSinceCleanup = 0;
+        }
         Instant allowedAt = cooldowns.get(sender.getUniqueId());
         if (allowedAt != null && allowedAt.isAfter(now)) {
             return SendResult.COOLDOWN;
@@ -114,6 +119,17 @@ public final class MailService {
             feedback.play(online, FeedbackService.MAIL);
         }
         return SendResult.SENT;
+    }
+
+    private void cleanupRateLimits(Instant now) {
+        cooldowns.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+        Instant cutoff = now.minusSeconds(3600);
+        hourlySends.values().forEach(recent -> {
+            while (!recent.isEmpty() && recent.peekFirst().isBefore(cutoff)) {
+                recent.removeFirst();
+            }
+        });
+        hourlySends.entrySet().removeIf(entry -> entry.getValue().isEmpty());
     }
 
     public void sendWithFeedback(Player sender, OfflinePlayer recipient, String rawMessage) {

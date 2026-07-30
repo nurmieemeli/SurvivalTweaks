@@ -12,7 +12,9 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
@@ -45,6 +47,13 @@ public final class ConnectionListener implements Listener {
         this.newPlayerSpawns = newPlayerSpawns;
         this.welcomeBack = welcomeBack;
         this.experience = experience;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() == AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+            profiles.load(event.getUniqueId());
+        }
     }
 
     @EventHandler

@@ -35,13 +35,26 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
 
     private final SurvivalTweaks plugin;
     private final SettingsService settings;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation failures;
     private final Queue<Block> decayQueue = new ArrayDeque<>();
     private final Set<Block> queuedLeaves = new HashSet<>();
     private BukkitTask batchTask;
 
     public FastLeafDecayService(SurvivalTweaks plugin, SettingsService settings) {
+        this(plugin, settings, null, null);
+    }
+
+    public FastLeafDecayService(
+            SurvivalTweaks plugin,
+            SettingsService settings,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures
+    ) {
         this.plugin = plugin;
         this.settings = settings;
+        this.workBudget = workBudget;
+        this.failures = failures;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -109,9 +122,10 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
         if (batchTask != null || decayQueue.isEmpty()) {
             return;
         }
+        Runnable batch = () -> processBatch(delayTicks);
         batchTask = plugin.getServer().getScheduler().runTaskLater(
                 plugin,
-                () -> processBatch(delayTicks),
+                failures == null ? batch : failures.guard("fast leaf decay", batch),
                 delayTicks
         );
     }
@@ -125,7 +139,12 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
         }
 
         int processed = 0;
+        boolean budgetExhausted = false;
         while (processed < LEAVES_PER_BATCH && !decayQueue.isEmpty()) {
+            if (workBudget != null && !workBudget.tryAcquire(1)) {
+                budgetExhausted = true;
+                break;
+            }
             Block leaf = decayQueue.poll();
             queuedLeaves.remove(leaf);
             if (isNaturalLeaf(leaf) && !hasSupportingLog(leaf)) {
@@ -136,7 +155,7 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
         }
 
         if (!decayQueue.isEmpty()) {
-            scheduleBatch(delayTicks);
+            scheduleBatch(budgetExhausted ? 1 : delayTicks);
         }
     }
 
@@ -151,6 +170,12 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
     }
 
     private boolean hasSupportingLog(Block leaf) {
+        BlockData data = leaf.getBlockData();
+        if (data instanceof Leaves leaves
+                && leaves.getDistance() >= leaves.getMaximumDistance()) {
+            return false;
+        }
+
         Queue<SearchNode> search = new ArrayDeque<>();
         Set<Block> visited = new HashSet<>();
         search.add(new SearchNode(leaf, 0));

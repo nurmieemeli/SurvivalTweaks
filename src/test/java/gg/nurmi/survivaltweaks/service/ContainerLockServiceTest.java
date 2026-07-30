@@ -111,6 +111,28 @@ class ContainerLockServiceTest {
         service.close();
     }
 
+    @Test
+    void allocationFreeAutomationCheckCoversBothBlocksAndRemovalClearsHistory() {
+        Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
+        ContainerLockService service = new ContainerLockService(
+                new ContainerLockStore(directory.resolve("automation.yml"), logger),
+                logger
+        );
+        BlockKey first = block(60);
+        BlockKey second = block(61);
+        ContainerLock lock = service.create(UUID.randomUUID(), Set.of(first, second)).orElseThrow();
+        service.recordAccess(lock, UUID.randomUUID(), false, Instant.EPOCH);
+
+        assertFalse(service.automationAllowed(first, null));
+        assertFalse(service.automationAllowed(null, second));
+        assertTrue(service.toggleAutomation(lock));
+        assertTrue(service.automationAllowed(first, second));
+
+        service.remove(lock);
+        assertTrue(service.recentAccess(lock).isEmpty());
+        service.close();
+    }
+
     private BlockKey block(int x) {
         return new BlockKey(UUID.randomUUID(), x, 64, 20);
     }

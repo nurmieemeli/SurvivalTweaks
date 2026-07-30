@@ -57,9 +57,11 @@ public final class PlayerListService implements Listener, AutoCloseable {
     private final NotificationService notifications;
     private final PlayerExperienceService experience;
     private final AfkTracker afk;
+    private final TaskFailureIsolation failures;
     private final Map<UUID, RowState> rowStates = new HashMap<>();
     private final Map<UUID, ViewState> viewStates = new HashMap<>();
     private BukkitTask refreshTask;
+    private boolean rowsDirty = true;
 
     public PlayerListService(
             JavaPlugin plugin,
@@ -69,6 +71,18 @@ public final class PlayerListService implements Listener, AutoCloseable {
             PlayerExperienceService experience,
             Clock clock
     ) {
+        this(plugin, messages, settings, notifications, experience, clock, null);
+    }
+
+    public PlayerListService(
+            JavaPlugin plugin,
+            MessageService messages,
+            SettingsService settings,
+            NotificationService notifications,
+            PlayerExperienceService experience,
+            Clock clock,
+            TaskFailureIsolation failures
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.server = plugin.getServer();
         this.messages = Objects.requireNonNull(messages, "messages");
@@ -76,6 +90,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         this.notifications = Objects.requireNonNull(notifications, "notifications");
         this.experience = Objects.requireNonNull(experience, "experience");
         this.afk = new AfkTracker(Objects.requireNonNull(clock, "clock"));
+        this.failures = failures;
     }
 
     public void start() {
@@ -87,13 +102,20 @@ public final class PlayerListService implements Listener, AutoCloseable {
         cancelRefreshTask();
         rowStates.clear();
         viewStates.clear();
+        rowsDirty = true;
         if (!settings.current().playerListEnabled()) {
             clearPresentation();
             return;
         }
         refresh();
         long interval = settings.current().playerListRefreshSeconds() * 20L;
-        refreshTask = server.getScheduler().runTaskTimer(plugin, this::refresh, interval, interval);
+        Runnable refresh = this::refresh;
+        refreshTask = server.getScheduler().runTaskTimer(
+                plugin,
+                failures == null ? refresh : failures.guard("player list refresh", refresh),
+                interval,
+                interval
+        );
     }
 
     public AfkTracker.State toggleAfk(Player player) {
@@ -102,6 +124,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             return null;
         }
         AfkTracker.State state = afk.toggle(player.getUniqueId());
+        rowsDirty = true;
         refresh();
         return state;
     }
@@ -121,6 +144,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         afk.joined(event.getPlayer().getUniqueId());
+        rowsDirty = true;
         server.getScheduler().runTask(plugin, this::refresh);
     }
 
@@ -129,6 +153,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         afk.left(event.getPlayer().getUniqueId());
         rowStates.remove(event.getPlayer().getUniqueId());
         viewStates.remove(event.getPlayer().getUniqueId());
+        rowsDirty = true;
         server.getScheduler().runTask(plugin, this::refresh);
     }
 
@@ -136,6 +161,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
     public void onMove(PlayerMoveEvent event) {
         if (event.hasExplicitlyChangedPosition() || event.hasChangedOrientation()) {
             if (afk.movementActivity(event.getPlayer().getUniqueId())) {
+                rowsDirty = true;
                 refresh();
             }
         }
@@ -197,7 +223,10 @@ public final class PlayerListService implements Listener, AutoCloseable {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onChat(AsyncChatEvent event) {
         if (afk.activity(event.getPlayer().getUniqueId())) {
-            server.getScheduler().runTask(plugin, this::refresh);
+            server.getScheduler().runTask(plugin, () -> {
+                rowsDirty = true;
+                refresh();
+            });
         }
     }
 
@@ -230,12 +259,18 @@ public final class PlayerListService implements Listener, AutoCloseable {
         ArrayList<Player> players = new ArrayList<>(server.getOnlinePlayers());
         ArrayList<UUID> online = new ArrayList<>(players.size());
         players.forEach(player -> online.add(player.getUniqueId()));
-        if (current.afkIndicatorsEnabled()) {
-            afk.updateAutomatic(online, current.afkTimeout());
+        if (current.afkIndicatorsEnabled()
+                && afk.updateAutomatic(online, current.afkTimeout())) {
+            rowsDirty = true;
         }
-        int away = current.afkIndicatorsEnabled()
-                ? (int) online.stream().filter(afk::isAfk).count()
-                : 0;
+        int away = 0;
+        if (current.afkIndicatorsEnabled()) {
+            for (UUID playerId : online) {
+                if (afk.isAfk(playerId)) {
+                    away++;
+                }
+            }
+        }
         RefreshContext context = new RefreshContext(
                 current,
                 players,
@@ -247,12 +282,16 @@ public final class PlayerListService implements Listener, AutoCloseable {
                 quantizeTenths(oneMinuteTps()),
                 quantizeTenths(finiteNonNegative(server.getAverageTickTime()))
         );
-        refreshRows(context);
+        if (rowsDirty) {
+            refreshRows(context);
+            rowsDirty = false;
+        }
         players.forEach(player -> refreshPlayer(player, context));
     }
 
     private void activity(Player player) {
         if (afk.activity(player.getUniqueId())) {
+            rowsDirty = true;
             refresh();
         }
     }

@@ -192,7 +192,6 @@ public final class ProfileStore {
                 yaml.getBoolean("preferences.particles", true),
                 yaml.getBoolean("preferences.dialogs", true),
                 yaml.getBoolean("preferences.action-bar", true),
-                yaml.getBoolean("preferences.automatic-recovery-compass", true),
                 yaml.getBoolean("preferences.reduced-effects", false),
                 yaml.getBoolean("preferences.player-list", true),
                 yaml.getBoolean("preferences.mention-notifications", true),
@@ -264,7 +263,6 @@ public final class ProfileStore {
         values.put("particles", preferences.particlesEnabled());
         values.put("dialogs", preferences.dialogsEnabled());
         values.put("action-bar", preferences.actionBarEnabled());
-        values.put("automatic-recovery-compass", preferences.automaticRecoveryCompass());
         values.put("reduced-effects", preferences.reducedEffects());
         values.put("player-list", preferences.playerListEnabled());
         values.put("mention-notifications", preferences.mentionNotificationsEnabled());

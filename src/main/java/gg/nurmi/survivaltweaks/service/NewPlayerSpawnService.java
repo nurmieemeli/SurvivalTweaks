@@ -64,6 +64,8 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     private final MessageService messages;
     private final FeedbackService feedback;
     private final SettingsService settings;
+    private final TickWorkBudget workBudget;
+    private final TaskFailureIsolation failures;
     private final CoalescingSnapshotWriter<NewPlayerSpawnState> writer;
     private final List<NewPlayerSpawnLocation> available = new ArrayList<>();
     private final Map<UUID, NewPlayerSpawnAssignment> assignments = new LinkedHashMap<>();
@@ -93,11 +95,25 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             FeedbackService feedback,
             SettingsService settings
     ) {
+        this(plugin, store, messages, feedback, settings, null, null);
+    }
+
+    public NewPlayerSpawnService(
+            JavaPlugin plugin,
+            NewPlayerSpawnStore store,
+            MessageService messages,
+            FeedbackService feedback,
+            SettingsService settings,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.store = Objects.requireNonNull(store, "store");
         this.messages = Objects.requireNonNull(messages, "messages");
         this.feedback = Objects.requireNonNull(feedback, "feedback");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.workBudget = workBudget;
+        this.failures = failures;
         this.writer = new CoalescingSnapshotWriter<>(
                 "SurvivalTweaks-new-player-spawn-writer",
                 "new-player spawn state",
@@ -640,6 +656,10 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 || available.size() >= current.newPlayerSpawnPreloadLocations()) {
             return;
         }
+        if (workBudget != null && !workBudget.tryAcquire(8)) {
+            scheduleRefill(1L);
+            return;
+        }
         if (currentTps() < current.newPlayerSpawnMinimumTps()) {
             tpsPauses++;
             scheduleRefill(Math.max(
@@ -977,12 +997,15 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         if (closed || (scheduledRefill != null && !scheduledRefill.isCancelled())) {
             return;
         }
+        Runnable refill = () -> {
+            scheduledRefill = null;
+            refill();
+        };
         scheduledRefill = plugin.getServer().getScheduler().runTaskLater(
                 plugin,
-                () -> {
-                    scheduledRefill = null;
-                    refill();
-                },
+                failures == null
+                        ? refill
+                        : failures.guard("new-player spawn preparation", refill),
                 Math.max(1L, delayTicks)
         );
     }

@@ -60,7 +60,7 @@ defaults are introduced.
 | --- | --- |
 | Homes and teleports | Named homes, a paginated home menu, teleport requests, warm-ups, cooldowns, visual feedback, and safe landing searches |
 | Container locks | Double-chest-aware locks with trusted, deposit-only, and public access; owner menus; access history; transfer; and per-lock hopper policy |
-| Death recovery | Persistent death markers, a bound recovery compass, Nether/Overworld distance scaling, and a private floating guide—without a `/back` teleport |
+| Death recovery | Persistent death markers, Nether/Overworld distance scaling, and an automatically restored private floating guide—without a `/back` teleport |
 | Player hub | `/survival` brings homes, requests, locks, recovery, notifications, mail, profiles, statistics, guidance, and preferences into one interface |
 | Player list | Localized TAB dashboard with status-aware ordering, active/AFK counts, capacity, ping, TPS, MSPT, dimension, Overworld time/weather, and unread notifications |
 | Social tools | Privacy-aware profiles and statistics, highlighted mentions, welcome-back summaries, and rate-limited text-only offline mail |
@@ -154,6 +154,7 @@ feature:
 
 | Sections | Controls |
 | --- | --- |
+| `performance` | Adaptive MSPT thresholds, recovery hysteresis, and the shared per-tick budget for batchable work |
 | `home`, `storage` | Home limits and profile persistence |
 | `teleport` | Requests, warm-up, cooldown, cancellation, and safe landing |
 | `new-player-spawn` | World, coordinate bounds, pool size, spacing, pacing, TPS floor, landing checks, and blocked biomes |
@@ -162,7 +163,7 @@ feature:
 | `pet-protection`, `hotbar-refill`, `decoration-protection` | Small interaction safeguards and conveniences |
 | `atmosphere`, `feedback` | Ambient, interaction, warning, sound, particle, and trail effects |
 | `ui` | Chest interfaces, native dialogs, action bars, and lock hints |
-| `death-recovery`, `custom-death-messages` | Markers, compass, floating guide, expiry, cooldowns, and environmental death variants |
+| `death-recovery`, `custom-death-messages` | Markers, an automatic floating guide, expiry, and environmental death variants |
 | `chat`, `connection-messages`, `mentions` | Formatting and social notifications |
 | `player-list`, `sleep`, `server-list` | Live metrics, AFK behavior, night voting, and multiplayer-list presentation |
 | `journey`, `welcome-back` | First-session progress, vanilla guidance, and return summaries |
@@ -174,6 +175,13 @@ Startup replaces unsafe numeric values with logged safe defaults.
 configuration, both language catalogs, MiniMessage templates, particles, and
 sound keys before applying anything. A rejected reload leaves the active
 configuration unchanged.
+
+The adaptive performance governor observes Paper's MSPT once per second. At the
+configured reduced and critical thresholds it lowers cosmetic cadence and
+particle density and spreads tree felling, leaf decay, spawn preparation, and
+guide/atmosphere work over additional ticks. It recovers gradually after a
+sustained healthy period. Persistence, lock enforcement, and teleport safety
+are never throttled.
 
 ## Languages
 
@@ -225,7 +233,9 @@ and other local state are intentionally excluded from version control.
 
 Every push and pull request runs the complete Maven test suite and a
 checksum-pinned Paper 26.2 smoke test covering startup, configuration reload,
-diagnostics, and clean shutdown. CI retains the verified JAR and SHA-256 as
+completed diagnostics, and clean shutdown. Recurring runtime subsystems isolate
+and report failures so one cosmetic task cannot silently disable its later runs.
+CI retains the verified JAR and SHA-256 as
 workflow artifacts. A `v*` tag publishes those same files as the latest GitHub
 release.
 

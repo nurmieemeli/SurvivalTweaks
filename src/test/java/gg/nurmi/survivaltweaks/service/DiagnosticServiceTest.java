@@ -56,7 +56,6 @@ class DiagnosticServiceTest {
         DiagnosticService.Report report = service.inspect(new DiagnosticService.Snapshot(
                 Set.of(),
                 Set.of(),
-                List.of(),
                 NOW
         ));
 
@@ -66,7 +65,7 @@ class DiagnosticServiceTest {
     }
 
     @Test
-    void reportsMigrationsOverlappingLocksExpiredMarkersAndStaleCompasses() throws IOException {
+    void reportsMigrationsOverlappingLocksAndExpiredMarkers() throws IOException {
         copyResource("config.yml");
         copyResource("messages_en.yml");
         copyResource("messages_fi.yml");
@@ -143,18 +142,16 @@ class DiagnosticServiceTest {
         DiagnosticService.Report report = service.inspect(new DiagnosticService.Snapshot(
                 Set.of(),
                 Set.of(),
-                List.of(new DiagnosticService.CompassReference(playerId, playerId.toString(), marker)),
                 NOW
         ));
 
         assertFalse(report.healthy());
         assertTrue(report.errors() >= 1);
-        assertTrue(report.warnings() >= 5);
+        assertTrue(report.warnings() >= 4);
         assertEquals(1, report.profiles());
         assertEquals(2, report.locks());
         assertEquals(1, report.deathMarkers());
         assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("overlap")));
-        assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("stale")));
         assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("duplicates location")));
     }
 

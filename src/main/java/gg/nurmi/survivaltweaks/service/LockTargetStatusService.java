@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.command.lock.LockCommand;
+import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.ContainerLock;
 import net.kyori.adventure.text.Component;
@@ -44,6 +45,30 @@ public final class LockTargetStatusService implements AutoCloseable {
             SafeTeleportService teleports,
             PlayerExperienceService experience
     ) {
+        this(
+                plugin,
+                resolver,
+                locks,
+                messages,
+                settings,
+                actionBars,
+                teleports,
+                experience,
+                null
+        );
+    }
+
+    public LockTargetStatusService(
+            JavaPlugin plugin,
+            ContainerBlockResolver resolver,
+            ContainerLockService locks,
+            MessageService messages,
+            SettingsService settings,
+            ActionBarService actionBars,
+            SafeTeleportService teleports,
+            PlayerExperienceService experience,
+            TaskFailureIsolation failures
+    ) {
         this.server = plugin.getServer();
         this.resolver = resolver;
         this.locks = locks;
@@ -52,7 +77,13 @@ public final class LockTargetStatusService implements AutoCloseable {
         this.actionBars = actionBars;
         this.teleports = teleports;
         this.experience = experience;
-        this.task = server.getScheduler().runTaskTimer(plugin, this::update, 10L, 10L);
+        Runnable update = this::update;
+        this.task = server.getScheduler().runTaskTimer(
+                plugin,
+                failures == null ? update : failures.guard("lock target hints", update),
+                20L,
+                20L
+        );
     }
 
     @Override
@@ -67,10 +98,17 @@ public final class LockTargetStatusService implements AutoCloseable {
     }
 
     private void update() {
-        if (!settings.current().actionBarEnabled()
-                || !settings.current().lockTargetHintsEnabled()
+        hinted.removeIf(playerId -> server.getPlayer(playerId) == null);
+        hintStates.keySet().removeIf(playerId -> server.getPlayer(playerId) == null);
+
+        PluginSettings current = settings.current();
+        if (!current.actionBarEnabled()
+                || !current.lockTargetHintsEnabled()
                 || locks.lockCount() == 0) {
             server.getOnlinePlayers().forEach(this::clear);
+            if (locks.lockCount() == 0) {
+                ownerNames.clear();
+            }
             return;
         }
 
@@ -84,7 +122,7 @@ public final class LockTargetStatusService implements AutoCloseable {
             }
             Optional<ContainerLock> lock = resolver.target(
                             player,
-                            settings.current().lockTargetDistance()
+                            current.lockTargetDistance()
                     )
                     .flatMap(target -> locks.singleLockFor(target.blocks()));
             if (lock.isEmpty()) {
@@ -123,7 +161,7 @@ public final class LockTargetStatusService implements AutoCloseable {
                     player,
                     component,
                     ActionBarService.LOCK_HINT_PRIORITY,
-                    Duration.ofMillis(750)
+                    Duration.ofMillis(1_250)
             );
             hinted.add(playerId);
         }

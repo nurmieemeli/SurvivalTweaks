@@ -30,6 +30,25 @@ sent only when visible state changes. Profile, death-marker, spawn-pool,
 reload, and backup disk work runs off the server thread, with immutable
 snapshots and shutdown drains preserving durability.
 
+## Adaptive performance
+
+The `performance` section controls a three-level governor driven by Paper's
+average MSPT. Crossing `reduced-mspt` or `critical-mspt` immediately reduces
+ambient/death-guide update frequency, particle density, and the amount of
+batchable work admitted per tick. Recovery requires MSPT to remain below
+`recovery-mspt` for `recovery-seconds`, stepping down one level at a time to
+avoid oscillation.
+
+`work-budget-per-tick` is shared by tree felling, fast leaf decay, first-join
+spawn preparation, atmosphere, and death-guide work. Exhausted jobs resume on a
+later tick; they are not discarded. Teleport safety, lock enforcement, data
+persistence, and other correctness-sensitive work bypass this budget.
+
+`/survivaltweaks doctor` reports an active governor reduction and any recurring
+subsystem failure seen within the previous ten minutes. Repeating cosmetic and
+status tasks catch, rate-limit, and record their own exceptions, allowing the
+next scheduled run to proceed.
+
 ## Backups
 
 Before startup loads or migrates data, and before every configuration reload,
@@ -59,8 +78,8 @@ Restoration is deliberately staged and cannot be completed in one step:
 ## Diagnostics
 
 `/survivaltweaks doctor` verifies every archive and scans the remaining data
-asynchronously for invalid schemas, unresolved worlds, overlapping locks, stale
-online recovery compasses, and other operational problems. Its worker is
+asynchronously for invalid schemas, unresolved worlds, overlapping locks, and
+other operational problems. Its worker is
 cancelled and joined during shutdown so a late report cannot outlive the plugin
 classloader.
 
