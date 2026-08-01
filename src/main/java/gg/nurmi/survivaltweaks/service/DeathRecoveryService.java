@@ -119,6 +119,26 @@ public final class DeathRecoveryService
             TickWorkBudget workBudget,
             TaskFailureIsolation failures
     ) {
+        this(
+                plugin, store, messages, settings, clock, feedback, notifications,
+                onboarding, governor, workBudget, failures, new PersistenceMonitor()
+        );
+    }
+
+    public DeathRecoveryService(
+            JavaPlugin plugin,
+            DeathMarkerDataStore store,
+            MessageService messages,
+            SettingsService settings,
+            Clock clock,
+            FeedbackService feedback,
+            NotificationService notifications,
+            OnboardingService onboarding,
+            PerformanceGovernor governor,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures,
+            PersistenceMonitor monitor
+    ) {
         this.plugin = plugin;
         this.store = store;
         this.messages = messages;
@@ -136,7 +156,9 @@ public final class DeathRecoveryService
                 store::saveDeathMarkers,
                 plugin.getLogger() == null
                         ? Logger.getLogger(DeathRecoveryService.class.getName())
-                        : plugin.getLogger()
+                        : plugin.getLogger(),
+                monitor,
+                "death-markers"
         );
         this.legacyCompassOwnerKey = new NamespacedKey(
                 "survivaltweaks",

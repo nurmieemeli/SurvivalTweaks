@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -32,6 +33,11 @@ public final class PortableExportService implements AutoCloseable {
     private ScheduledFuture<?> scheduled;
     private volatile Settings settings = Settings.DISABLED;
     private volatile boolean closing;
+    private final Instant startedAt = Instant.now();
+    private volatile Instant lastSuccess;
+    private volatile Instant lastFailure;
+    private volatile String lastFailureReason = "";
+    private volatile Path lastFile;
 
     public PortableExportService(StorageManager storage, Logger logger) {
         this.storage = Objects.requireNonNull(storage, "storage");
@@ -91,10 +97,40 @@ public final class PortableExportService implements AutoCloseable {
         try {
             StorageManager.ExportResult result = storage.exportPortable(COLLECTION);
             rotate(settings.retention());
+            lastSuccess = Instant.now();
+            lastFile = result.file();
+            lastFailureReason = "";
             return result;
+        } catch (IOException | RuntimeException exception) {
+            lastFailure = Instant.now();
+            lastFailureReason = Objects.requireNonNullElse(
+                    exception.getMessage(),
+                    exception.getClass().getSimpleName()
+            );
+            throw exception;
         } finally {
             exporting.set(false);
         }
+    }
+
+    public synchronized Status status() {
+        Instant nextRun = null;
+        if (scheduled != null && !scheduled.isCancelled()) {
+            long delay = Math.max(0, scheduled.getDelay(TimeUnit.MILLISECONDS));
+            nextRun = Instant.now().plusMillis(delay);
+        }
+        return new Status(
+                settings.enabled() && storage.backend() != StorageBackend.SQLITE,
+                exporting.get(),
+                settings.interval(),
+                settings.retention(),
+                startedAt,
+                nextRun,
+                lastSuccess,
+                lastFailure,
+                lastFailureReason,
+                lastFile
+        );
     }
 
     @Override
@@ -192,6 +228,27 @@ public final class PortableExportService implements AutoCloseable {
                     || retention < 1 || retention > 100) {
                 throw new IllegalArgumentException("Portable export settings are invalid");
             }
+        }
+    }
+
+    public record Status(
+            boolean enabled,
+            boolean running,
+            Duration interval,
+            int retention,
+            Instant startedAt,
+            Instant nextRun,
+            Instant lastSuccess,
+            Instant lastFailure,
+            String lastFailureReason,
+            Path lastFile
+    ) {
+        public boolean overdue(Instant now) {
+            if (!enabled || running) {
+                return false;
+            }
+            Instant reference = lastSuccess == null ? startedAt : lastSuccess;
+            return now.isAfter(reference.plus(interval).plus(Duration.ofMinutes(15)));
         }
     }
 }

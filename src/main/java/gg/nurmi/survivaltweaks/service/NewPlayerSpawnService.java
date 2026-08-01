@@ -107,6 +107,22 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             TickWorkBudget workBudget,
             TaskFailureIsolation failures
     ) {
+        this(
+                plugin, store, messages, feedback, settings, workBudget, failures,
+                new PersistenceMonitor()
+        );
+    }
+
+    public NewPlayerSpawnService(
+            JavaPlugin plugin,
+            NewPlayerSpawnDataStore store,
+            MessageService messages,
+            FeedbackService feedback,
+            SettingsService settings,
+            TickWorkBudget workBudget,
+            TaskFailureIsolation failures,
+            PersistenceMonitor monitor
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.store = Objects.requireNonNull(store, "store");
         this.messages = Objects.requireNonNull(messages, "messages");
@@ -120,7 +136,9 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 store::saveSpawnState,
                 plugin.getLogger() == null
                         ? Logger.getLogger(NewPlayerSpawnService.class.getName())
-                        : plugin.getLogger()
+                        : plugin.getLogger(),
+                monitor,
+                "new-player-spawns"
         );
         NewPlayerSpawnState state = store.loadSpawnState();
         available.addAll(state.available());

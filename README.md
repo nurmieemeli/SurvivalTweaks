@@ -142,9 +142,11 @@ activation condition, acquisition routes, and relevant incompatibilities.
 | `/survivaltweaks performance` | Inspect governor state, fair work lanes, queues, and recent task failures | Operator |
 | `/survivaltweaks backup list\|create\|verify` | Inspect and create safety backups | Operator |
 | `/survivaltweaks backup restore <file> [confirm]` | Stage a maintenance-only restore | Console |
-| `/survivaltweaks storage status\|verify\|export` | Inspect, verify, or export the active database | Operator |
+| `/survivaltweaks storage status\|verify\|export` | Inspect storage, write queues, automatic exports, verify integrity, or create an export | Operator |
 | `/survivaltweaks storage test <sqlite\|postgresql\|mysql>` | Test a configured destination without switching | Operator |
 | `/survivaltweaks storage migrate <sqlite\|postgresql\|mysql>` | Stage a verified database migration for restart | Operator |
+| `/survivaltweaks storage maintenance preview` | Preview expired or structurally invalid rows without changing data | Operator |
+| `/survivaltweaks storage maintenance run confirm` | Create a safety export and transactionally clean the database while maintenance mode is active and the server is empty | Console |
 | `/survivaltweaks spawnpool <status\|refill\|validate\|clear-prepared>` | Manage the first-join spawn pool | Operator |
 | `/survivaltweaks maintenance on\|off\|status` | Control join-blocking maintenance mode | Operator |
 | `/survivaltweaks restart <10s\|5m\|1h\|cancel\|status>` | Schedule, inspect, or cancel a safe restart | Operator |

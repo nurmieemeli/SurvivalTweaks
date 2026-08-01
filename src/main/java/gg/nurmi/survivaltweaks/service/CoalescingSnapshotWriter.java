@@ -20,6 +20,8 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
     private final ThrowingConsumer<T> saver;
     private final Logger logger;
     private final String description;
+    private final PersistenceMonitor monitor;
+    private final String lane;
     private final AtomicReference<T> pending = new AtomicReference<>();
     private final AtomicReference<T> latestRequested = new AtomicReference<>();
     private final AtomicBoolean scheduled = new AtomicBoolean();
@@ -32,9 +34,22 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
             ThrowingConsumer<T> saver,
             Logger logger
     ) {
+        this(threadName, description, saver, logger, new PersistenceMonitor(), description);
+    }
+
+    CoalescingSnapshotWriter(
+            String threadName,
+            String description,
+            ThrowingConsumer<T> saver,
+            Logger logger,
+            PersistenceMonitor monitor,
+            String lane
+    ) {
         this.saver = Objects.requireNonNull(saver, "saver");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.description = Objects.requireNonNull(description, "description");
+        this.monitor = Objects.requireNonNull(monitor, "monitor");
+        this.lane = Objects.requireNonNull(lane, "lane");
         this.executor = Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task, threadName);
             thread.setDaemon(false);
@@ -52,6 +67,7 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
             return;
         }
         pending.set(snapshot);
+        monitor.queued(lane, 1);
         if (scheduled.compareAndSet(false, true)) {
             executor.execute(this::drain);
         }
@@ -81,20 +97,24 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
         while (true) {
             T snapshot;
             while ((snapshot = pending.getAndSet(null)) != null) {
+                monitor.started(lane, pending.get() == null ? 0 : 1);
                 try {
                     saver.accept(snapshot);
                     failures = 0;
+                    monitor.succeeded(lane, pending.get() == null ? 0 : 1);
                 } catch (IOException exception) {
                     logger.log(Level.SEVERE, "Could not save " + description, exception);
                     if (latestRequested.get() == snapshot) {
                         pending.compareAndSet(null, snapshot);
                     }
+                    monitor.failed(lane, pending.get() == null ? 0 : 1, exception);
                     if (!pauseBeforeRetry(++failures)) {
                         return;
                     }
                 }
             }
             scheduled.set(false);
+            monitor.queued(lane, pending.get() == null ? 0 : 1);
             if (pending.get() == null || !scheduled.compareAndSet(false, true)) {
                 return;
             }

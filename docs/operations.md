@@ -193,6 +193,31 @@ and other operational problems. Its worker is
 cancelled and joined during shutdown so a late report cannot outlive the plugin
 classloader.
 
+`/survivaltweaks storage status` also reports the combined depth, active
+workers, and oldest age of the plugin's coalesced persistence queues, plus the
+last and next automatic portable-export times. Operators with
+`survivaltweaks.health-notify` receive a compact warning after joining when the
+database is unavailable or slow, its connection pool has waiters, writes are
+stalled or failing, an automatic export has failed or become overdue, or no
+recent safety backup is available. Healthy joins remain silent.
+
+### Database maintenance
+
+Run `/survivaltweaks storage maintenance preview` at any time for a read-only
+count of expired death markers and structurally invalid rows. Cleanup requires
+maintenance mode and an empty server, and its final confirmation should be
+issued from the console:
+
+1. Enable maintenance mode and let all players disconnect.
+2. Run `/survivaltweaks storage maintenance run confirm`.
+3. Preserve the reported safety-export filename and SHA-256.
+4. Restart Paper before reopening the server.
+
+The command creates and verifies a portable SQLite safety export before any
+deletion. Cleanup then runs under the database snapshot write lock in one SQL
+transaction, checks that no targeted rows remain before committing, and runs a
+full schema, integrity, relationship, and snapshot verification afterwards.
+
 ## Configuration migrations and release notices
 
 `config-version` identifies the configuration schema. Startup first creates its

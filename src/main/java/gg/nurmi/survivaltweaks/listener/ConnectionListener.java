@@ -5,6 +5,7 @@ import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
+import gg.nurmi.survivaltweaks.service.OperationalHealthService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
 import gg.nurmi.survivaltweaks.service.SessionSummaryService;
@@ -33,6 +34,7 @@ public final class ConnectionListener implements Listener {
     private final PlayerExperienceService experience;
     private final ReleaseUpdateService releaseUpdates;
     private final SessionSummaryService sessionSummaries;
+    private final OperationalHealthService operationalHealth;
 
     public ConnectionListener(
             ProfileRepository profiles,
@@ -45,6 +47,24 @@ public final class ConnectionListener implements Listener {
             ReleaseUpdateService releaseUpdates,
             SessionSummaryService sessionSummaries
     ) {
+        this(
+                profiles, requests, messages, settings, newPlayerSpawns, welcomeBack,
+                experience, releaseUpdates, sessionSummaries, null
+        );
+    }
+
+    public ConnectionListener(
+            ProfileRepository profiles,
+            TeleportRequestService requests,
+            MessageService messages,
+            SettingsService settings,
+            NewPlayerSpawnService newPlayerSpawns,
+            WelcomeBackController welcomeBack,
+            PlayerExperienceService experience,
+            ReleaseUpdateService releaseUpdates,
+            SessionSummaryService sessionSummaries,
+            OperationalHealthService operationalHealth
+    ) {
         this.profiles = profiles;
         this.requests = requests;
         this.messages = messages;
@@ -54,6 +74,7 @@ public final class ConnectionListener implements Listener {
         this.experience = experience;
         this.releaseUpdates = releaseUpdates;
         this.sessionSummaries = sessionSummaries;
+        this.operationalHealth = operationalHealth;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -85,6 +106,9 @@ public final class ConnectionListener implements Listener {
         newPlayerSpawns.playerJoined(event.getPlayer());
         releaseUpdates.playerJoined(event.getPlayer());
         sessionSummaries.playerJoined(event.getPlayer());
+        if (operationalHealth != null) {
+            operationalHealth.playerJoined(event.getPlayer());
+        }
         if (settings.current().connectionMessagesEnabled()) {
             event.joinMessage(null);
             Server server = event.getPlayer().getServer();

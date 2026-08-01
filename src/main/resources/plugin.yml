@@ -115,6 +115,9 @@ permissions:
   survivaltweaks.update-notify:
     description: Shows an administrator when a newer SurvivalTweaks release is available.
     default: op
+  survivaltweaks.health-notify:
+    description: Shows storage, export, and backup health warnings to administrators on join.
+    default: op
   survivaltweaks.command.home:
     description: Allows using /home.
     default: true

@@ -155,6 +155,24 @@ public final class StorageManager implements AutoCloseable {
         return storage.verify();
     }
 
+    public SqlStorage.MaintenancePreview previewMaintenance() throws IOException {
+        return storage.maintenancePreview(Instant.now());
+    }
+
+    public synchronized MaintenanceResult maintain() throws IOException {
+        Instant now = Instant.now();
+        ExportResult safetyExport = exportPortable("maintenance");
+        SqlStorage.MaintenanceResult result = storage.maintain(now);
+        SqlStorage.Verification verification = storage.verify();
+        if (!verification.healthy()) {
+            throw new IOException(
+                    "Post-maintenance verification failed: "
+                            + String.join("; ", verification.problems())
+            );
+        }
+        return new MaintenanceResult(result.preview(), result.removed(), safetyExport, now);
+    }
+
     public StorageSnapshot exportSnapshot() throws IOException {
         return storage.exportSnapshot();
     }
@@ -557,6 +575,14 @@ public final class StorageManager implements AutoCloseable {
             UUID id,
             StorageBackend source,
             StorageBackend target
+    ) {
+    }
+
+    public record MaintenanceResult(
+            SqlStorage.MaintenancePreview preview,
+            SqlStorage.MaintenancePreview removed,
+            ExportResult safetyExport,
+            Instant completedAt
     ) {
     }
 }

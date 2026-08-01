@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.22.0 - 2026-08-01
+
+### Added
+
+- Live persistence telemetry for profile, container-lock, death-marker, and
+  first-join spawn writes, including queue depth, active workers, queue age,
+  and the latest failure.
+- Join-time operator warnings for unavailable or slow storage, exhausted
+  connection pools, stalled writes, failed or overdue portable exports, and
+  missing or stale safety backups.
+- Previewable database maintenance that creates a verified portable safety
+  export, removes expired or structurally invalid rows transactionally, and
+  verifies the active database afterwards.
+- A representative large-data round-trip test covering 2,000 profiles, 1,000
+  container locks, and 1,000 death markers.
+
+### Changed
+
+- Storage status now includes persistence queue and automatic portable-export
+  state.
+- Production deployment guidance now includes explicit preflight, backup,
+  verification, and rollback checkpoints for remote storage releases.
+
 ## 2.21.0 - 2026-08-01
 
 ### Added

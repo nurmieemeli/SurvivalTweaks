@@ -12,7 +12,7 @@ body:
     attributes:
       label: SurvivalTweaks version
       description: Use the exact version shown by the server or JAR filename.
-      placeholder: 2.21.0
+      placeholder: 2.22.0
     validations:
       required: true
   - type: input

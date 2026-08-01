@@ -28,6 +28,7 @@ public final class ProfileRepository implements AutoCloseable {
 
     private final ProfileDataStore store;
     private final Logger logger;
+    private final PersistenceMonitor monitor;
     private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> latestRequested = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> pending = new ConcurrentHashMap<>();
@@ -37,8 +38,17 @@ public final class ProfileRepository implements AutoCloseable {
     private boolean closing;
 
     public ProfileRepository(ProfileDataStore store, Logger logger) {
+        this(store, logger, new PersistenceMonitor());
+    }
+
+    public ProfileRepository(
+            ProfileDataStore store,
+            Logger logger,
+            PersistenceMonitor monitor
+    ) {
         this.store = Objects.requireNonNull(store, "store");
         this.logger = Objects.requireNonNull(logger, "logger");
+        this.monitor = Objects.requireNonNull(monitor, "monitor");
         this.writer = Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task, "SurvivalTweaks-profile-writer");
             thread.setDaemon(false);
@@ -160,6 +170,7 @@ public final class ProfileRepository implements AutoCloseable {
         }
 
         pending.put(snapshot.uniqueId(), snapshot);
+        monitor.queued("profiles", pending.size());
         if (scheduled.add(snapshot.uniqueId())) {
             writer.execute(() -> drain(snapshot.uniqueId()));
         }
@@ -171,14 +182,17 @@ public final class ProfileRepository implements AutoCloseable {
         while (true) {
             ProfileSnapshot snapshot;
             while ((snapshot = pending.remove(uniqueId)) != null) {
+                monitor.started("profiles", pending.size());
                 try {
                     store.save(snapshot);
                     failures = 0;
+                    monitor.succeeded("profiles", pending.size());
                 } catch (IOException exception) {
                     logger.log(Level.SEVERE, "Could not save profile " + uniqueId, exception);
                     if (latestRequested.get(uniqueId) == snapshot) {
                         pending.putIfAbsent(uniqueId, snapshot);
                     }
+                    monitor.failed("profiles", pending.size(), exception);
                     if (!pauseBeforeRetry(++failures)) {
                         scheduled.remove(uniqueId);
                         return;
@@ -187,6 +201,7 @@ public final class ProfileRepository implements AutoCloseable {
             }
 
             scheduled.remove(uniqueId);
+            monitor.queued("profiles", pending.size());
             if (pending.containsKey(uniqueId)) {
                 if (scheduled.add(uniqueId)) {
                     continue;

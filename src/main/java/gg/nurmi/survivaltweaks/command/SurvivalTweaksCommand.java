@@ -10,12 +10,15 @@ import gg.nurmi.survivaltweaks.service.MaintenanceService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
 import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
+import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
+import gg.nurmi.survivaltweaks.service.PortableExportService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
 import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
 import gg.nurmi.survivaltweaks.service.TickWorkBudget;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.storage.StorageBackend;
 import gg.nurmi.survivaltweaks.storage.StorageManager;
+import gg.nurmi.survivaltweaks.storage.SqlStorage;
 import gg.nurmi.survivaltweaks.ui.PlayerHubController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -156,6 +159,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final TreeFellerService treeFeller;
     private final FastLeafDecayService leafDecay;
     private final StorageManager storage;
+    private final PortableExportService portableExports;
+    private final PersistenceMonitor persistenceMonitor;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
     private final AtomicBoolean storageOperation = new AtomicBoolean();
 
@@ -174,6 +179,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             TreeFellerService treeFeller,
             FastLeafDecayService leafDecay,
             StorageManager storage,
+            PortableExportService portableExports,
+            PersistenceMonitor persistenceMonitor,
             JavaPlugin plugin
     ) {
         this.messages = messages;
@@ -190,6 +197,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.treeFeller = treeFeller;
         this.leafDecay = leafDecay;
         this.storage = storage;
+        this.portableExports = portableExports;
+        this.persistenceMonitor = persistenceMonitor;
         this.plugin = plugin;
     }
 
@@ -371,7 +380,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 && arguments[0].equalsIgnoreCase("storage")) {
             if (arguments.length == 2) {
                 String prefix = arguments[1].toLowerCase(Locale.ROOT);
-                return List.of("status", "verify", "export", "test", "migrate").stream()
+                return List.of("status", "verify", "export", "test", "migrate", "maintenance").stream()
                         .filter(option -> option.startsWith(prefix))
                         .toList();
             }
@@ -382,6 +391,19 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 return List.of("sqlite", "postgresql", "mysql").stream()
                         .filter(option -> option.startsWith(prefix))
                         .toList();
+            }
+            if (arguments.length == 3
+                    && arguments[1].equalsIgnoreCase("maintenance")) {
+                String prefix = arguments[2].toLowerCase(Locale.ROOT);
+                return List.of("preview", "run").stream()
+                        .filter(option -> option.startsWith(prefix))
+                        .toList();
+            }
+            if (arguments.length == 4
+                    && arguments[1].equalsIgnoreCase("maintenance")
+                    && arguments[2].equalsIgnoreCase("run")
+                    && "confirm".startsWith(arguments[3].toLowerCase(Locale.ROOT))) {
+                return List.of("confirm");
             }
             return List.of();
         }
@@ -588,6 +610,34 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                         Placeholder.unparsed("waiting", Integer.toString(status.waitingThreads())),
                         Placeholder.unparsed("reason", status.problem())
                 );
+                PersistenceMonitor.Snapshot writes = persistenceMonitor.snapshot();
+                messages.send(
+                        sender,
+                        "admin.storage.write-status",
+                        Placeholder.unparsed("pending", Integer.toString(writes.pending())),
+                        Placeholder.unparsed("active", Integer.toString(writes.active())),
+                        Placeholder.unparsed(
+                                "oldest",
+                                Long.toString(writes.oldestQueueMillis() / 1_000L)
+                        )
+                );
+                PortableExportService.Status export = portableExports.status();
+                messages.send(
+                        sender,
+                        export.enabled()
+                                ? "admin.storage.export-status"
+                                : "admin.storage.export-status-disabled",
+                        Placeholder.unparsed(
+                                "last",
+                                export.lastSuccess() == null
+                                        ? "-"
+                                        : export.lastSuccess().toString()
+                        ),
+                        Placeholder.unparsed(
+                                "next",
+                                export.nextRun() == null ? "-" : export.nextRun().toString()
+                        )
+                );
             });
             return true;
         }
@@ -621,6 +671,51 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                             Placeholder.unparsed("sha", exported.checksum())
                     )
             );
+            return true;
+        }
+        if (arguments.length == 3
+                && arguments[1].equalsIgnoreCase("maintenance")
+                && arguments[2].equalsIgnoreCase("preview")) {
+            runStorageOperation(sender, storage::previewMaintenance, preview ->
+                    showMaintenancePreview(sender, preview)
+            );
+            return true;
+        }
+        if (arguments.length >= 3
+                && arguments[1].equalsIgnoreCase("maintenance")
+                && arguments[2].equalsIgnoreCase("run")) {
+            if (!maintenance.status().maintenanceMode()) {
+                messages.send(sender, "admin.storage.maintenance-mode-required");
+                return true;
+            }
+            int online = plugin.getServer().getOnlinePlayers().size();
+            if (online > 0) {
+                messages.send(
+                        sender,
+                        "admin.storage.maintenance-players-online",
+                        Placeholder.unparsed("count", Integer.toString(online))
+                );
+                return true;
+            }
+            if (arguments.length != 4 || !arguments[3].equalsIgnoreCase("confirm")) {
+                messages.send(sender, "admin.storage.maintenance-confirm");
+                return true;
+            }
+            runStorageOperation(sender, storage::maintain, result -> {
+                messages.send(
+                        sender,
+                        "admin.storage.maintenance-complete",
+                        Placeholder.unparsed(
+                                "removed",
+                                Integer.toString(result.removed().total())
+                        ),
+                        Placeholder.unparsed(
+                                "file",
+                                result.safetyExport().file().getFileName().toString()
+                        ),
+                        Placeholder.unparsed("sha", result.safetyExport().checksum())
+                );
+            });
             return true;
         }
         if (arguments.length == 3
@@ -679,6 +774,27 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         }
         messages.send(sender, "admin.storage.usage");
         return true;
+    }
+
+    private void showMaintenancePreview(
+            CommandSender sender,
+            SqlStorage.MaintenancePreview preview
+    ) {
+        messages.send(
+                sender,
+                preview.total() == 0
+                        ? "admin.storage.maintenance-clean"
+                        : "admin.storage.maintenance-preview",
+                Placeholder.unparsed("total", Integer.toString(preview.total())),
+                Placeholder.unparsed(
+                        "expired",
+                        Integer.toString(preview.expiredDeathMarkers())
+                ),
+                Placeholder.unparsed(
+                        "orphans",
+                        Integer.toString(preview.total() - preview.expiredDeathMarkers())
+                )
+        );
     }
 
     private <T> void runStorageOperation(

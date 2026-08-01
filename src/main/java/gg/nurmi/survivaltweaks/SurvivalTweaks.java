@@ -48,6 +48,8 @@ import gg.nurmi.survivaltweaks.service.SleepVoteService;
 import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.PortableExportService;
+import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
+import gg.nurmi.survivaltweaks.service.OperationalHealthService;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.AtmosphereService;
@@ -104,6 +106,8 @@ public final class SurvivalTweaks extends JavaPlugin {
     private FeedbackService feedback;
     private BackupService backups;
     private PortableExportService portableExports;
+    private PersistenceMonitor persistenceMonitor;
+    private OperationalHealthService operationalHealth;
     private StorageManager storageManager;
     private DiagnosticService diagnostics;
     private DeathRecoveryService deathRecovery;
@@ -191,7 +195,16 @@ public final class SurvivalTweaks extends JavaPlugin {
         portableExports = new PortableExportService(storageManager, getLogger());
         portableExports.reconfigure(getConfig());
 
-        profiles = new ProfileRepository(storageManager.store(), getLogger());
+        persistenceMonitor = new PersistenceMonitor();
+        operationalHealth = new OperationalHealthService(
+                this,
+                storageManager,
+                portableExports,
+                persistenceMonitor,
+                backups,
+                messages
+        );
+        profiles = new ProfileRepository(storageManager.store(), getLogger(), persistenceMonitor);
         PlayerExperienceService experience = new PlayerExperienceService(profiles);
         messages.languagePreference(playerId -> experience.preferences(playerId).language());
         feedback.preferenceProvider(experience::preferences);
@@ -202,7 +215,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback,
                 settings,
                 workBudget,
-                taskFailures
+                taskFailures,
+                persistenceMonitor
         );
         NotificationService notifications = new NotificationService(profiles, clock);
         MailService mail = new MailService(
@@ -265,7 +279,8 @@ public final class SurvivalTweaks extends JavaPlugin {
         teleportRequests = new TeleportRequestService();
         containerLocks = new ContainerLockService(
                 storageManager.store(),
-                getLogger()
+                getLogger(),
+                persistenceMonitor
         );
         purgeInactiveLocks(initialSettings);
         ContainerBlockResolver containerResolver = new ContainerBlockResolver();
@@ -347,7 +362,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 onboarding,
                 performanceGovernor,
                 workBudget,
-                taskFailures
+                taskFailures,
+                persistenceMonitor
         );
 
         TeleportAcceptCommand teleportAccept = new TeleportAcceptCommand(
@@ -597,6 +613,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             portableExports.close();
             portableExports = null;
         }
+        operationalHealth = null;
+        persistenceMonitor = null;
         if (profiles != null) {
             profiles.close();
             profiles = null;
@@ -667,7 +685,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                                 deathRecovery,
                                 maintenance,
                                 clock
-                        )
+                        ),
+                        operationalHealth
                 ),
                 this
         );
@@ -829,6 +848,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                         treeFeller,
                         fastLeafDecay,
                         storageManager,
+                        portableExports,
+                        persistenceMonitor,
                         this
                 )
         );

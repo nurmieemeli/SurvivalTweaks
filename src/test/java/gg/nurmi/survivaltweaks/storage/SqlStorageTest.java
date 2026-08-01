@@ -195,6 +195,32 @@ class SqlStorageTest {
         }
     }
 
+    @Test
+    void maintenancePreviewsAndTransactionallyRemovesExpiredDeathMarkers() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        UUID worldId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-01T12:00:00Z");
+        DeathMarker expired = new DeathMarker(
+                playerId, worldId, "world", 1, 64, 1,
+                now.minusSeconds(600), now.minusSeconds(1), "FALL"
+        );
+        DeathMarker active = new DeathMarker(
+                UUID.randomUUID(), worldId, "world", 2, 64, 2,
+                now, now.plusSeconds(600), "FALL"
+        );
+        try (SqlStorage storage = sqlite("maintenance.db")) {
+            storage.saveDeathMarkers(List.of(expired, active));
+
+            assertEquals(1, storage.maintenancePreview(now).expiredDeathMarkers());
+            SqlStorage.MaintenanceResult result = storage.maintain(now);
+
+            assertEquals(1, result.removed().expiredDeathMarkers());
+            assertEquals(List.of(active), storage.loadDeathMarkers());
+            assertEquals(0, storage.maintenancePreview(now).total());
+            assertTrue(storage.verifyUninitialized().healthy());
+        }
+    }
+
     private SqlStorage sqlite(String filename) {
         return new SqlStorage(
                 new StorageConfiguration(

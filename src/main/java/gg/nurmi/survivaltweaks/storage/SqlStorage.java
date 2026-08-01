@@ -404,6 +404,54 @@ public final class SqlStorage implements
         return verify(false);
     }
 
+    public MaintenancePreview maintenancePreview(Instant now) throws IOException {
+        Objects.requireNonNull(now, "now");
+        try (Connection connection = connection()) {
+            return maintenancePreview(connection, now);
+        } catch (SQLException | RuntimeException exception) {
+            throw io("Could not preview storage maintenance", exception);
+        }
+    }
+
+    public MaintenanceResult maintain(Instant now) throws IOException {
+        Objects.requireNonNull(now, "now");
+        snapshotGate.writeLock().lock();
+        try (Connection connection = connection()) {
+            connection.setAutoCommit(false);
+            try {
+                MaintenancePreview before = maintenancePreview(connection, now);
+                MaintenancePreview removed = new MaintenancePreview(
+                        delete(connection, "DELETE FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
+                        delete(connection, "DELETE FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
+                        delete(connection, "DELETE FROM st_homes WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_homes.player_id)"),
+                        delete(connection, "DELETE FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
+                        delete(connection, "DELETE FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
+                        delete(connection, "DELETE FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
+                        delete(connection, "DELETE FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
+                        delete(connection, "DELETE FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
+                        delete(connection, "DELETE FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
+                        delete(connection, "DELETE FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)")
+                );
+                MaintenancePreview remaining = maintenancePreview(connection, now);
+                if (remaining.total() != 0) {
+                    throw new SQLException(
+                            "Maintenance cleanup left " + remaining.total()
+                                    + " invalid or expired row(s)"
+                    );
+                }
+                connection.commit();
+                return new MaintenanceResult(before, removed, now);
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            }
+        } catch (Exception exception) {
+            throw io("Could not perform storage maintenance", exception);
+        } finally {
+            snapshotGate.writeLock().unlock();
+        }
+    }
+
     Verification verifyUninitialized() {
         return verify(true);
     }
@@ -519,6 +567,53 @@ public final class SqlStorage implements
                         + "x, y, z, yaw FROM st_spawn_locations WHERE 1 = 0",
                 "SELECT player_id FROM st_spawn_replacements WHERE 1 = 0"
         );
+    }
+
+    private MaintenancePreview maintenancePreview(Connection connection, Instant now)
+            throws SQLException {
+        return new MaintenancePreview(
+                queryCount(connection, "SELECT COUNT(*) FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
+                queryCount(connection, "SELECT COUNT(*) FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_homes WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_homes.player_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)")
+        );
+    }
+
+    private int queryCount(Connection connection, String sql, long parameter) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, parameter);
+            try (ResultSet result = statement.executeQuery()) {
+                result.next();
+                return Math.toIntExact(result.getLong(1));
+            }
+        }
+    }
+
+    private int queryCount(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery(sql)) {
+            result.next();
+            return Math.toIntExact(result.getLong(1));
+        }
+    }
+
+    private int delete(Connection connection, String sql, long parameter) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, parameter);
+            return statement.executeUpdate();
+        }
+    }
+
+    private int delete(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            return statement.executeUpdate(sql);
+        }
     }
 
     public void checkpoint() throws IOException {
@@ -2053,6 +2148,32 @@ public final class SqlStorage implements
     }
 
     public record Verification(boolean healthy, List<String> problems) {
+    }
+
+    public record MaintenancePreview(
+            int expiredDeathMarkers,
+            int orphanHomeShares,
+            int orphanHomes,
+            int orphanHints,
+            int orphanNotifications,
+            int orphanMailBlocks,
+            int orphanLockBlocks,
+            int orphanLockTrust,
+            int emptyLocks,
+            int invalidSpawnLocations
+    ) {
+        public int total() {
+            return expiredDeathMarkers + orphanHomeShares + orphanHomes + orphanHints
+                    + orphanNotifications + orphanMailBlocks + orphanLockBlocks
+                    + orphanLockTrust + emptyLocks + invalidSpawnLocations;
+        }
+    }
+
+    public record MaintenanceResult(
+            MaintenancePreview preview,
+            MaintenancePreview removed,
+            Instant completedAt
+    ) {
     }
 
     @FunctionalInterface

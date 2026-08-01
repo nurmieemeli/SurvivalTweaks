@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -32,6 +33,7 @@ public final class ContainerLockService implements AutoCloseable {
 
     private final ContainerLockDataStore store;
     private final Logger logger;
+    private final PersistenceMonitor monitor;
     private final Map<UUID, ContainerLock> locksById = new HashMap<>();
     private final Map<BlockKey, ContainerLock> locksByBlock = new HashMap<>();
     private final Map<UUID, java.util.ArrayDeque<AccessAttempt>> accessHistory = new HashMap<>();
@@ -42,8 +44,17 @@ public final class ContainerLockService implements AutoCloseable {
     private boolean closing;
 
     public ContainerLockService(ContainerLockDataStore store, Logger logger) {
+        this(store, logger, new PersistenceMonitor());
+    }
+
+    public ContainerLockService(
+            ContainerLockDataStore store,
+            Logger logger,
+            PersistenceMonitor monitor
+    ) {
         this.store = store;
         this.logger = logger;
+        this.monitor = Objects.requireNonNull(monitor, "monitor");
         this.writer = Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task, "SurvivalTweaks-container-lock-writer");
             thread.setDaemon(false);
@@ -318,6 +329,7 @@ public final class ContainerLockService implements AutoCloseable {
         }
 
         pending.set(current);
+        monitor.queued("container-locks", 1);
         if (scheduled.compareAndSet(false, true)) {
             writer.execute(this::drain);
         }
@@ -328,14 +340,21 @@ public final class ContainerLockService implements AutoCloseable {
         while (true) {
             List<ContainerLockSnapshot> locks;
             while ((locks = pending.getAndSet(null)) != null) {
+                monitor.started("container-locks", pending.get() == null ? 0 : 1);
                 try {
                     store.saveLocks(locks);
                     failures = 0;
+                    monitor.succeeded("container-locks", pending.get() == null ? 0 : 1);
                 } catch (IOException exception) {
                     logger.log(Level.SEVERE, "Could not save container locks", exception);
                     if (latestRequested.get() == locks) {
                         pending.compareAndSet(null, locks);
                     }
+                    monitor.failed(
+                            "container-locks",
+                            pending.get() == null ? 0 : 1,
+                            exception
+                    );
                     if (!pauseBeforeRetry(++failures)) {
                         return;
                     }
@@ -343,6 +362,7 @@ public final class ContainerLockService implements AutoCloseable {
             }
 
             scheduled.set(false);
+            monitor.queued("container-locks", pending.get() == null ? 0 : 1);
             if (pending.get() == null || !scheduled.compareAndSet(false, true)) {
                 return;
             }
