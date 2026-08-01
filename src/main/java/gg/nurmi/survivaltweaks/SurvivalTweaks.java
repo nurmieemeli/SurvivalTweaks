@@ -47,6 +47,7 @@ import gg.nurmi.survivaltweaks.service.SessionSummaryService;
 import gg.nurmi.survivaltweaks.service.SleepVoteService;
 import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
+import gg.nurmi.survivaltweaks.service.PortableExportService;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.AtmosphereService;
@@ -102,6 +103,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private MessageService messages;
     private FeedbackService feedback;
     private BackupService backups;
+    private PortableExportService portableExports;
     private StorageManager storageManager;
     private DiagnosticService diagnostics;
     private DeathRecoveryService deathRecovery;
@@ -186,6 +188,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             var lease = storageManager.acquireSnapshotLease();
             return lease::close;
         });
+        portableExports = new PortableExportService(storageManager, getLogger());
+        portableExports.reconfigure(getConfig());
 
         profiles = new ProfileRepository(storageManager.store(), getLogger());
         PlayerExperienceService experience = new PlayerExperienceService(profiles);
@@ -589,6 +593,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             getServer().getOnlinePlayers().forEach(welcomeBack::playerLeaving);
             welcomeBack = null;
         }
+        if (portableExports != null) {
+            portableExports.close();
+            portableExports = null;
+        }
         if (profiles != null) {
             profiles.close();
             profiles = null;
@@ -886,6 +894,9 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         if (releaseUpdates != null) {
             releaseUpdates.reconfigure(getConfig());
+        }
+        if (portableExports != null) {
+            portableExports.reconfigure(getConfig());
         }
     }
 

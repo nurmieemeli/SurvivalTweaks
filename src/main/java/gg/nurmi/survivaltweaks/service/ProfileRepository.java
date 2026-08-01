@@ -23,6 +23,8 @@ import java.util.logging.Logger;
 public final class ProfileRepository implements AutoCloseable {
 
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
+    private static final long INITIAL_RETRY_MILLIS = 100;
+    private static final long MAX_RETRY_MILLIS = 2_000;
 
     private final ProfileDataStore store;
     private final Logger logger;
@@ -165,16 +167,22 @@ public final class ProfileRepository implements AutoCloseable {
     }
 
     private void drain(UUID uniqueId) {
-        boolean writeFailed = false;
+        int failures = 0;
         while (true) {
             ProfileSnapshot snapshot;
             while ((snapshot = pending.remove(uniqueId)) != null) {
                 try {
                     store.save(snapshot);
+                    failures = 0;
                 } catch (IOException exception) {
-                    writeFailed = true;
-                    latestRequested.remove(uniqueId, snapshot);
                     logger.log(Level.SEVERE, "Could not save profile " + uniqueId, exception);
+                    if (latestRequested.get(uniqueId) == snapshot) {
+                        pending.putIfAbsent(uniqueId, snapshot);
+                    }
+                    if (!pauseBeforeRetry(++failures)) {
+                        scheduled.remove(uniqueId);
+                        return;
+                    }
                 }
             }
 
@@ -186,12 +194,24 @@ public final class ProfileRepository implements AutoCloseable {
                 return;
             }
             EvictionCandidate candidate = evictionCandidates.get(uniqueId);
-            if (!writeFailed && candidate != null) {
+            if (candidate != null) {
                 evict(uniqueId, candidate);
-            } else if (writeFailed) {
-                evictionCandidates.remove(uniqueId);
             }
             return;
+        }
+    }
+
+    private boolean pauseBeforeRetry(int failures) {
+        long delay = Math.min(
+                MAX_RETRY_MILLIS,
+                INITIAL_RETRY_MILLIS << Math.min(4, failures - 1)
+        );
+        try {
+            Thread.sleep(delay);
+            return true;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

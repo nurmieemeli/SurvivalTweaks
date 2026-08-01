@@ -19,7 +19,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -186,7 +185,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
         return item;
     }
 
-    private static final class Inbox implements InventoryHolder {
+    private static final class Inbox implements SurvivalTweaksMenu {
 
         private final UUID ownerId;
         private final List<TeleportRequest> requests;

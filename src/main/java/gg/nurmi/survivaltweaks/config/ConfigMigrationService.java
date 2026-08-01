@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 
 public final class ConfigMigrationService {
 
-    public static final int CURRENT_VERSION = 2;
+    public static final int CURRENT_VERSION = 4;
     private static final List<String> VERSION_ONE_OBSOLETE_PATHS = List.of(
             "disabled-commands",
             "commands.disabled",
@@ -78,6 +78,29 @@ public final class ConfigMigrationService {
             );
             version = 2;
             changes.add("Recorded configuration schema version 2.");
+        }
+        if (version == 2) {
+            // Preserve version 2's implicit PostgreSQL public schema and TLS
+            // semantics so upgrading cannot make existing data disappear.
+            setIfMissing(config, "storage.remote.postgresql-schema", "public", changes);
+            setIfMissing(
+                    config,
+                    "storage.remote.postgresql-ssl-mode",
+                    config.getBoolean("storage.remote.ssl", true) ? "require" : "disable",
+                    changes
+            );
+            setIfMissing(config, "storage.remote.socket-timeout-seconds", 30, changes);
+            setIfMissing(config, "storage.remote.query-timeout-seconds", 30, changes);
+            version = 3;
+            changes.add("Recorded configuration schema version 3.");
+        }
+        if (version == 3) {
+            setIfMissing(config, "storage.portable-exports.enabled", true, changes);
+            setIfMissing(config, "storage.portable-exports.interval-hours", 24, changes);
+            setIfMissing(config, "storage.portable-exports.initial-delay-minutes", 5, changes);
+            setIfMissing(config, "storage.portable-exports.retention", 7, changes);
+            version = 4;
+            changes.add("Recorded configuration schema version 4.");
         }
         config.set("config-version", version);
 

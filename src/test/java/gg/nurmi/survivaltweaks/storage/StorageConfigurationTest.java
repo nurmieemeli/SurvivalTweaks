@@ -37,6 +37,27 @@ class StorageConfigurationTest {
     }
 
     @Test
+    void postgresqlSchemaParticipatesInEndpointIdentity() {
+        YamlConfiguration first = base();
+        first.set("storage.backend", "postgresql");
+        first.set("storage.remote.type", "postgresql");
+        first.set("storage.remote.postgresql-schema", "survivaltweaks_a");
+        YamlConfiguration second = base();
+        second.set("storage.backend", "postgresql");
+        second.set("storage.remote.type", "postgresql");
+        second.set("storage.remote.postgresql-schema", "survivaltweaks_b");
+
+        StorageConfiguration left = StorageConfiguration.load(first, directory);
+        StorageConfiguration right = StorageConfiguration.load(second, directory);
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+                left.endpointFingerprint(),
+                right.endpointFingerprint()
+        );
+        assertEquals(left.legacyEndpointFingerprint(), right.legacyEndpointFingerprint());
+    }
+
+    @Test
     void rejectsEndpointDriftAndUnsafeSqlitePathsAtConfigurationBoundary() {
         YamlConfiguration disagreement = base();
         disagreement.set("storage.backend", "mysql");
@@ -65,8 +86,12 @@ class StorageConfigurationTest {
         config.set("storage.remote.username", "survivaltweaks");
         config.set("storage.remote.password", "");
         config.set("storage.remote.ssl", false);
+        config.set("storage.remote.postgresql-schema", "survivaltweaks");
+        config.set("storage.remote.postgresql-ssl-mode", "disable");
         config.set("storage.remote.pool-size", 4);
         config.set("storage.remote.connection-timeout-millis", 5_000);
+        config.set("storage.remote.socket-timeout-seconds", 30);
+        config.set("storage.remote.query-timeout-seconds", 30);
         return config;
     }
 }

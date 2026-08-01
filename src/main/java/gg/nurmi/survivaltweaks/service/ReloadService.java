@@ -97,6 +97,7 @@ public final class ReloadService {
         YamlConfiguration candidateConfig = loadCandidateConfig();
         ConfigMigrationService.requireCurrent(candidateConfig);
         StorageConfiguration.load(candidateConfig, plugin.getDataFolder().toPath());
+        PortableExportService.validate(candidateConfig);
         return new Prepared(
                 PluginSettings.validate(candidateConfig),
                 messages.prepareReload(),

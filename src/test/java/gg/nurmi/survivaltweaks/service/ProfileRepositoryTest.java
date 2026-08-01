@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.object.Home;
 import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.storage.ProfileStore;
+import gg.nurmi.survivaltweaks.storage.ProfileDataStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.util.UUID;
 import java.util.logging.Logger;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +22,38 @@ class ProfileRepositoryTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void transientSaveFailureRetriesWithoutAnotherMutation() {
+        UUID uniqueId = UUID.randomUUID();
+        AtomicInteger attempts = new AtomicInteger();
+        ProfileDataStore store = new ProfileDataStore() {
+            @Override
+            public Profile load(UUID ignored) {
+                return new Profile(uniqueId);
+            }
+
+            @Override
+            public void save(gg.nurmi.survivaltweaks.object.ProfileSnapshot snapshot)
+                    throws IOException {
+                if (attempts.incrementAndGet() == 1) {
+                    throw new IOException("temporary outage");
+                }
+            }
+        };
+        ProfileRepository repository = new ProfileRepository(
+                store,
+                Logger.getLogger(ProfileRepositoryTest.class.getName())
+        );
+        Profile profile = repository.load(uniqueId);
+        profile.addHome(new Home("home", UUID.randomUUID(), "world", 1, 2, 3, 4, 5));
+
+        repository.save(profile);
+
+        assertTrue(repository.flush(Duration.ofSeconds(3)));
+        repository.close();
+        assertEquals(2, attempts.get());
+    }
 
     @Test
     void shutdownFlushesTheLatestSnapshotInOrder() {

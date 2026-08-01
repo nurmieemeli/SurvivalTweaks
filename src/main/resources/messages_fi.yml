@@ -253,6 +253,8 @@ teleport:
     cooldown-one: "<red>Voit teleportata uudelleen <seconds> sekunnin kuluttua.</red>"
     cancelled-move: "<red>Teleporttaus peruttiin, koska liikuit.</red>"
     cancelled-damage: "<red>Teleporttaus peruttiin, koska vahingoituit.</red>"
+    cancelled-inventory: "<red>Teleporttaus peruttiin, koska avasit säilytyspaikan.</red>"
+    container-open: "<red>Sulje säilytyspaikka ennen teleporttausta.</red>"
     unsafe: "<red>Turvallista teleporttaussijaintia ei löytynyt.</red>"
     unavailable: "<red>Teleporttauksen kohde ei ole enää saatavilla.</red>"
     failed: "<red>Teleporttaus epäonnistui.</red>"

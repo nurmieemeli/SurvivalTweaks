@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 
 final class LegacyYamlImporter {
@@ -46,22 +49,51 @@ final class LegacyYamlImporter {
     }
 
     StorageSnapshot read() throws IOException {
-        List<ProfileSnapshot> profiles = readProfiles();
+        List<String> rejected = new ArrayList<>();
+        Logger importLogger = Logger.getAnonymousLogger();
+        importLogger.setUseParentHandlers(false);
+        importLogger.setLevel(Level.ALL);
+        importLogger.addHandler(new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logger.log(record);
+                if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    rejected.add(record.getMessage());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        });
+        List<ProfileSnapshot> profiles = readProfiles(importLogger);
         Path locks = dataFolder.resolve("locked-containers.yml");
         Path deaths = dataFolder.resolve("death-markers.yml");
         Path spawns = dataFolder.resolve("new-player-spawns.yml");
         validateIfPresent(locks);
         validateIfPresent(deaths);
         validateIfPresent(spawns);
-        return new StorageSnapshot(
+        StorageSnapshot snapshot = new StorageSnapshot(
                 profiles,
-                new ContainerLockStore(locks, logger).loadLocks(),
-                new DeathMarkerStore(deaths, logger).loadDeathMarkers(),
-                new NewPlayerSpawnStore(spawns, logger).loadSpawnState()
+                new ContainerLockStore(locks, importLogger).loadLocks(),
+                new DeathMarkerStore(deaths, importLogger).loadDeathMarkers(),
+                new NewPlayerSpawnStore(spawns, importLogger).loadSpawnState()
         );
+        if (!rejected.isEmpty()) {
+            throw new IOException(
+                    "Legacy YAML import rejected " + rejected.size()
+                            + " malformed value(s); original files were preserved. First problem: "
+                            + rejected.getFirst()
+            );
+        }
+        return snapshot;
     }
 
-    private List<ProfileSnapshot> readProfiles() throws IOException {
+    private List<ProfileSnapshot> readProfiles(Logger importLogger) throws IOException {
         Path directory = dataFolder.resolve("userdata");
         if (Files.notExists(directory)) {
             return List.of();
@@ -72,7 +104,7 @@ final class LegacyYamlImporter {
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .toList();
         }
-        ProfileStore store = new ProfileStore(directory, logger, worldResolver);
+        ProfileStore store = new ProfileStore(directory, importLogger, worldResolver);
         List<ProfileSnapshot> profiles = new ArrayList<>();
         for (Path file : files) {
             validateIfPresent(file);

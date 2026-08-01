@@ -1,4 +1,4 @@
-config-version: 2
+config-version: 4
 
 home:
   max-amount: 3
@@ -19,6 +19,11 @@ teleport:
   cooldown-seconds: 30
   cancel-on-move: true
   cancel-on-damage: true
+  # Teleporting with a container open lets a modified client desynchronise its
+  # contents from the server, which duplicates items. Refuse to start or finish
+  # a teleport while one is open. SurvivalTweaks' own menus are exempt because
+  # they hold nothing a player can take.
+  cancel-on-inventory-open: true
   safe-search-radius: 4
 
 # First-time players receive a unique, safe Overworld starting location.
@@ -55,6 +60,13 @@ new-player-spawn:
 
 storage:
   autosave-seconds: 300
+  # Remote databases are also exported to verified, portable SQLite snapshots.
+  # SQLite already lives in the regular safety backup and does not need this job.
+  portable-exports:
+    enabled: true
+    interval-hours: 24
+    initial-delay-minutes: 5
+    retention: 7
   # auto uses SQLite unless a remote type is configured. Once initialized,
   # the selected endpoint is pinned and can only change through a migration.
   backend: auto
@@ -67,11 +79,21 @@ storage:
     # 0 selects the engine default: PostgreSQL 5432 or MySQL 3306.
     port: 0
     database: "survivaltweaks"
+    # PostgreSQL only. Existing schema-v2 configs migrate to public so current
+    # data stays visible; fresh installations use this dedicated schema.
+    postgresql-schema: "survivaltweaks"
     username: "survivaltweaks"
     password: ""
+    # MySQL TLS toggle. PostgreSQL uses the explicit mode below.
     ssl: true
+    # verify-full validates both the certificate chain and server hostname.
+    # Other pgjdbc modes: disable, allow, prefer, require, verify-ca.
+    postgresql-ssl-mode: "verify-full"
     pool-size: 4
     connection-timeout-millis: 5000
+    # Bound stalled network operations and statements so shutdown cannot hang forever.
+    socket-timeout-seconds: 30
+    query-timeout-seconds: 30
 
 locked-containers:
   target-distance: 5

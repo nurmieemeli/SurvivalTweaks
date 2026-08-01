@@ -30,6 +30,7 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,6 +40,19 @@ class SqlStorageTest {
     Path directory;
 
     private final Logger logger = Logger.getLogger(SqlStorageTest.class.getName());
+
+    @Test
+    void replacementOnlySpawnStateIsNotEmptyAndIsCounted() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        try (SqlStorage storage = sqlite("replacement-only.db")) {
+            storage.saveSpawnState(new NewPlayerSpawnState(
+                    List.of(), Map.of(), List.of(), Set.of(playerId)
+            ));
+
+            assertFalse(storage.isEmpty());
+            assertEquals(1, storage.exportSnapshot().counts().replacementSpawns());
+        }
+    }
 
     @Test
     void roundTripsEveryAggregateAndProducesAStablePortableSnapshot() throws IOException {
@@ -78,7 +92,62 @@ class SqlStorageTest {
                     () -> storage.saveLocks(List.of(original, conflicting))
             );
             assertEquals(List.of(original), storage.loadLocks());
-            assertTrue(storage.verify().healthy());
+            assertTrue(storage.verifyUninitialized().healthy());
+        }
+    }
+
+    @Test
+    void aggregateUpdatesPreserveUnchangedRowsAndApplyKeyLevelDeltas() throws IOException {
+        UUID worldId = UUID.randomUUID();
+        UUID playerId = UUID.randomUUID();
+        ContainerLockSnapshot retained = lock(
+                UUID.randomUUID(),
+                new BlockKey(worldId, 1, 64, 1)
+        );
+        ContainerLockSnapshot removed = lock(
+                UUID.randomUUID(),
+                new BlockKey(worldId, 2, 64, 2)
+        );
+        ContainerLockSnapshot added = lock(
+                UUID.randomUUID(),
+                new BlockKey(worldId, 3, 64, 3)
+        );
+        Instant now = Instant.parse("2026-07-30T12:00:00Z");
+        DeathMarker originalDeath = new DeathMarker(
+                playerId, worldId, "world", 1, 64, 1, now,
+                now.plusSeconds(600), "FALL"
+        );
+        DeathMarker changedDeath = new DeathMarker(
+                playerId, worldId, "world", 5, 70, 5, now.plusSeconds(1),
+                now.plusSeconds(1_200), "SKELETON"
+        );
+        NewPlayerSpawnLocation first =
+                new NewPlayerSpawnLocation(worldId, "world", 100, 70, 100, 0);
+        NewPlayerSpawnLocation second =
+                new NewPlayerSpawnLocation(worldId, "world", 200, 75, 200, 90);
+
+        try (SqlStorage storage = sqlite("delta.db")) {
+            storage.saveLocks(List.of(retained, removed));
+            storage.saveDeathMarkers(List.of(originalDeath));
+            storage.saveSpawnState(new NewPlayerSpawnState(
+                    List.of(first), Map.of(), List.of(), Set.of(playerId)
+            ));
+
+            storage.saveLocks(List.of(retained, added));
+            storage.saveDeathMarkers(List.of(changedDeath));
+            storage.saveSpawnState(new NewPlayerSpawnState(
+                    List.of(second), Map.of(), List.of(first), Set.of()
+            ));
+
+            assertEquals(Set.of(retained, added), Set.copyOf(storage.loadLocks()));
+            assertEquals(List.of(changedDeath), storage.loadDeathMarkers());
+            assertEquals(
+                    new NewPlayerSpawnState(
+                            List.of(second), Map.of(), List.of(first), Set.of()
+                    ),
+                    storage.loadSpawnState()
+            );
+            assertTrue(storage.verifyUninitialized().healthy());
         }
     }
 
@@ -134,11 +203,15 @@ class SqlStorageTest {
                         "",
                         5432,
                         "",
+                        "survivaltweaks",
                         "",
                         "",
                         false,
+                        "disable",
                         1,
-                        5_000
+                        5_000,
+                        30,
+                        30
                 ),
                 logger
         );

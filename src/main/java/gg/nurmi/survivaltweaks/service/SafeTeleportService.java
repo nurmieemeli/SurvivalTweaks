@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.ui.SurvivalTweaksMenu;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -11,7 +12,10 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -20,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,6 +64,7 @@ public final class SafeTeleportService implements AutoCloseable {
     private final Map<UUID, PendingTeleport> pending = new HashMap<>();
     private final Map<UUID, Instant> cooldowns = new HashMap<>();
     private final Map<UUID, Long> cooldownActionBarSeconds = new HashMap<>();
+    private final Set<UUID> openContainers = new HashSet<>();
 
     public SafeTeleportService(
             JavaPlugin plugin,
@@ -91,9 +97,24 @@ public final class SafeTeleportService implements AutoCloseable {
         Objects.requireNonNull(BlockPosition.class.getName());
     }
 
+    /**
+     * A container held open across a teleport lets a modified client desynchronise its contents
+     * from the server and duplicate the items inside it. Containers are tracked by event rather
+     * than polled: {@code InventoryOpenEvent} never fires for a player's own default view, so
+     * anything reported here is a real container the player could take items from.
+     */
+    public boolean hasContainerOpen(UUID uniqueId) {
+        return openContainers.contains(uniqueId);
+    }
+
     public boolean ensureAvailable(Player player) {
         if (pending.containsKey(player.getUniqueId())) {
             messages.send(player, "teleport.safety.pending");
+            return false;
+        }
+
+        if (guardsContainers() && hasRealContainerOpen(player)) {
+            messages.send(player, "teleport.safety.container-open");
             return false;
         }
 
@@ -220,6 +241,18 @@ public final class SafeTeleportService implements AutoCloseable {
         }
     }
 
+    public void containerOpened(Player player) {
+        openContainers.add(player.getUniqueId());
+        PendingTeleport teleport = pending.get(player.getUniqueId());
+        if (guardsContainers() && teleport != null && !teleport.teleporting()) {
+            cancel(player, "teleport.safety.cancelled-inventory");
+        }
+    }
+
+    public void containerClosed(UUID uniqueId) {
+        openContainers.remove(uniqueId);
+    }
+
     public void playerDisconnected(UUID uniqueId) {
         PendingTeleport teleport = pending.remove(uniqueId);
         if (teleport != null) {
@@ -227,8 +260,40 @@ public final class SafeTeleportService implements AutoCloseable {
         }
         cooldowns.remove(uniqueId);
         cooldownActionBarSeconds.remove(uniqueId);
+        openContainers.remove(uniqueId);
         actionBars.forget(uniqueId);
         stopStatusTaskIfIdle();
+    }
+
+    private boolean guardsContainers() {
+        return settings.current().cancelTeleportOnInventoryOpen();
+    }
+
+    /**
+     * Checks the current view as well as event-derived state. Reading the live view closes the
+     * small reload window where an inventory opened before plugin enable has no corresponding
+     * {@code InventoryOpenEvent} in this service instance.
+     */
+    private boolean hasRealContainerOpen(Player player) {
+        if (hasContainerOpen(player.getUniqueId())) {
+            return true;
+        }
+
+        InventoryView view = player.getOpenInventory();
+        if (view == null) {
+            return false;
+        }
+
+        Inventory top = view.getTopInventory();
+        if (top == null) {
+            return false;
+        }
+
+        InventoryType type = top.getType();
+        if (type != null && ("CRAFTING".equals(type.name()) || "CREATIVE".equals(type.name()))) {
+            return false;
+        }
+        return !(top.getHolder(false) instanceof SurvivalTweaksMenu);
     }
 
     public boolean isPending(UUID uniqueId) {
@@ -250,6 +315,7 @@ public final class SafeTeleportService implements AutoCloseable {
         pending.clear();
         cooldowns.clear();
         cooldownActionBarSeconds.clear();
+        openContainers.clear();
         if (statusTask != null) {
             statusTask.cancel();
             statusTask = null;
@@ -332,6 +398,11 @@ public final class SafeTeleportService implements AutoCloseable {
                 finish(player, pendingTeleport);
                 messages.send(player, "teleport.safety.unsafe");
                 feedback.play(player, FeedbackService.TELEPORT_CANCELLED);
+                return;
+            }
+
+            if (guardsContainers() && hasRealContainerOpen(player)) {
+                cancel(player, "teleport.safety.cancelled-inventory");
                 return;
             }
 

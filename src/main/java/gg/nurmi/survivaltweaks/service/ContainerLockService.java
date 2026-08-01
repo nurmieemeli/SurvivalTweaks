@@ -27,6 +27,8 @@ import java.util.logging.Logger;
 public final class ContainerLockService implements AutoCloseable {
 
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
+    private static final long INITIAL_RETRY_MILLIS = 100;
+    private static final long MAX_RETRY_MILLIS = 2_000;
 
     private final ContainerLockDataStore store;
     private final Logger logger;
@@ -322,14 +324,21 @@ public final class ContainerLockService implements AutoCloseable {
     }
 
     private void drain() {
+        int failures = 0;
         while (true) {
             List<ContainerLockSnapshot> locks;
             while ((locks = pending.getAndSet(null)) != null) {
                 try {
                     store.saveLocks(locks);
+                    failures = 0;
                 } catch (IOException exception) {
-                    latestRequested.compareAndSet(locks, null);
                     logger.log(Level.SEVERE, "Could not save container locks", exception);
+                    if (latestRequested.get() == locks) {
+                        pending.compareAndSet(null, locks);
+                    }
+                    if (!pauseBeforeRetry(++failures)) {
+                        return;
+                    }
                 }
             }
 
@@ -337,6 +346,20 @@ public final class ContainerLockService implements AutoCloseable {
             if (pending.get() == null || !scheduled.compareAndSet(false, true)) {
                 return;
             }
+        }
+    }
+
+    private boolean pauseBeforeRetry(int failures) {
+        long delay = Math.min(
+                MAX_RETRY_MILLIS,
+                INITIAL_RETRY_MILLIS << Math.min(4, failures - 1)
+        );
+        try {
+            Thread.sleep(delay);
+            return true;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

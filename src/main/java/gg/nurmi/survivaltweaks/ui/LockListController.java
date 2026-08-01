@@ -16,7 +16,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
@@ -171,7 +170,7 @@ public final class LockListController implements Listener {
         return item;
     }
 
-    private static final class LockListHolder implements InventoryHolder {
+    private static final class LockListHolder implements SurvivalTweaksMenu {
 
         private final UUID ownerId;
         private final List<UUID> lockIds;

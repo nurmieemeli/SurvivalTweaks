@@ -59,6 +59,9 @@ public final class SqlStorage implements
     private final Logger logger;
     private final HikariDataSource dataSource;
     private final ReentrantReadWriteLock snapshotGate = new ReentrantReadWriteLock();
+    private Connection instanceLeaseConnection;
+    private long postgresLeaseKey;
+    private String mysqlLeaseName;
 
     public SqlStorage(StorageConfiguration configuration, Logger logger) {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
@@ -70,7 +73,7 @@ public final class SqlStorage implements
         hikari.setMaximumPoolSize(
                 configuration.backend() == StorageBackend.SQLITE
                         ? 1
-                        : configuration.poolSize()
+                        : configuration.poolSize() + 1
         );
         hikari.setMinimumIdle(1);
         hikari.setConnectionTimeout(configuration.connectionTimeoutMillis());
@@ -81,11 +84,12 @@ public final class SqlStorage implements
             hikari.setUsername(configuration.username());
             hikari.setPassword(configuration.password());
         }
+        configureDriver(hikari);
         dataSource = new HikariDataSource(hikari);
         try (Connection connection = dataSource.getConnection()) {
             configureConnection(connection);
             initializeSchema(connection);
-        } catch (SQLException exception) {
+        } catch (SQLException | RuntimeException exception) {
             dataSource.close();
             throw new IllegalStateException(
                     "Could not initialize " + configuration.backend().key() + " storage",
@@ -129,6 +133,71 @@ public final class SqlStorage implements
             return UUID.fromString(value);
         } catch (SQLException | IllegalArgumentException exception) {
             throw io("Could not read storage instance identity", exception);
+        }
+    }
+
+    /**
+     * Holds a database-session lock for this endpoint until the storage closes.
+     * This prevents two copied server directories from concurrently mutating the
+     * same remote database even when their stored instance UUIDs are identical.
+     */
+    public synchronized void acquireInstanceLease() throws IOException {
+        if (configuration.backend() == StorageBackend.SQLITE || instanceLeaseConnection != null) {
+            return;
+        }
+        Connection lease = null;
+        try {
+            lease = connection();
+            boolean acquired;
+            if (configuration.backend() == StorageBackend.POSTGRESQL) {
+                postgresLeaseKey = Long.parseUnsignedLong(
+                        configuration.endpointFingerprint().substring(0, 16),
+                        16
+                );
+                try (PreparedStatement statement = lease.prepareStatement(
+                        "SELECT pg_try_advisory_lock(?)"
+                )) {
+                    statement.setLong(1, postgresLeaseKey);
+                    try (ResultSet result = statement.executeQuery()) {
+                        acquired = result.next() && result.getBoolean(1);
+                    }
+                }
+            } else {
+                mysqlLeaseName = "survivaltweaks:"
+                        + configuration.endpointFingerprint().substring(0, 40);
+                try (PreparedStatement statement = lease.prepareStatement(
+                        "SELECT GET_LOCK(?, 0)"
+                )) {
+                    statement.setString(1, mysqlLeaseName);
+                    try (ResultSet result = statement.executeQuery()) {
+                        acquired = result.next() && result.getInt(1) == 1;
+                    }
+                }
+            }
+            if (!acquired) {
+                throw new IOException(
+                        "Another SurvivalTweaks server is already using this database endpoint"
+                );
+            }
+            instanceLeaseConnection = lease;
+        } catch (SQLException | RuntimeException exception) {
+            if (lease != null) {
+                try {
+                    lease.close();
+                } catch (SQLException closeFailure) {
+                    exception.addSuppressed(closeFailure);
+                }
+            }
+            throw io("Could not acquire the database instance lease", exception);
+        } catch (IOException exception) {
+            if (lease != null) {
+                try {
+                    lease.close();
+                } catch (SQLException closeFailure) {
+                    exception.addSuppressed(closeFailure);
+                }
+            }
+            throw exception;
         }
     }
 
@@ -194,37 +263,8 @@ public final class SqlStorage implements
 
     @Override
     public List<ContainerLockSnapshot> loadLocks() {
-        try (Connection connection = connection();
-             PreparedStatement statement = connection.prepareStatement(
-                     """
-                     SELECT lock_id, owner_id, lock_name, access_mode, automation_allowed
-                     FROM st_locks ORDER BY lock_id
-                     """
-             );
-             ResultSet results = statement.executeQuery()) {
-            List<ContainerLockSnapshot> locks = new ArrayList<>();
-            while (results.next()) {
-                UUID lockId = UUID.fromString(results.getString("lock_id"));
-                Set<BlockKey> blocks = loadLockBlocks(connection, lockId);
-                if (blocks.isEmpty()) {
-                    logger.warning("Skipped SQL container lock without blocks: " + lockId);
-                    continue;
-                }
-                locks.add(new ContainerLockSnapshot(
-                        lockId,
-                        UUID.fromString(results.getString("owner_id")),
-                        blocks,
-                        loadTrustedPlayers(connection, lockId),
-                        results.getString("lock_name"),
-                        enumValue(
-                                LockAccessMode.class,
-                                results.getString("access_mode"),
-                                LockAccessMode.TRUSTED
-                        ),
-                        bool(results, "automation_allowed")
-                ));
-            }
-            return List.copyOf(locks);
+        try (Connection connection = connection()) {
+            return loadLocks(connection);
         } catch (SQLException | RuntimeException exception) {
             throw new IllegalStateException("Could not load container locks", exception);
         }
@@ -238,30 +278,8 @@ public final class SqlStorage implements
 
     @Override
     public List<DeathMarker> loadDeathMarkers() {
-        try (Connection connection = connection();
-             PreparedStatement statement = connection.prepareStatement(
-                     """
-                     SELECT player_id, world_id, world_name, x, y, z,
-                            created_at, expires_at, cause
-                     FROM st_death_markers ORDER BY player_id
-                     """
-             );
-             ResultSet results = statement.executeQuery()) {
-            List<DeathMarker> markers = new ArrayList<>();
-            while (results.next()) {
-                markers.add(new DeathMarker(
-                        UUID.fromString(results.getString("player_id")),
-                        UUID.fromString(results.getString("world_id")),
-                        results.getString("world_name"),
-                        results.getDouble("x"),
-                        results.getDouble("y"),
-                        results.getDouble("z"),
-                        Instant.ofEpochMilli(results.getLong("created_at")),
-                        Instant.ofEpochMilli(results.getLong("expires_at")),
-                        results.getString("cause")
-                ));
-            }
-            return List.copyOf(markers);
+        try (Connection connection = connection()) {
+            return loadDeathMarkers(connection);
         } catch (SQLException | RuntimeException exception) {
             throw new IllegalStateException("Could not load death markers", exception);
         }
@@ -276,56 +294,7 @@ public final class SqlStorage implements
     @Override
     public NewPlayerSpawnState loadSpawnState() {
         try (Connection connection = connection()) {
-            List<NewPlayerSpawnLocation> available = new ArrayList<>();
-            List<NewPlayerSpawnLocation> retired = new ArrayList<>();
-            Map<UUID, NewPlayerSpawnAssignment> assignments = new LinkedHashMap<>();
-            try (PreparedStatement statement = connection.prepareStatement(
-                    """
-                    SELECT location_kind, position, player_id, completed,
-                           world_id, world_name, x, y, z, yaw
-                    FROM st_spawn_locations
-                    ORDER BY location_kind, position
-                    """
-            ); ResultSet results = statement.executeQuery()) {
-                while (results.next()) {
-                    NewPlayerSpawnLocation location = new NewPlayerSpawnLocation(
-                            UUID.fromString(results.getString("world_id")),
-                            results.getString("world_name"),
-                            results.getInt("x"),
-                            results.getInt("y"),
-                            results.getInt("z"),
-                            results.getFloat("yaw")
-                    );
-                    switch (results.getString("location_kind")) {
-                        case "available" -> available.add(location);
-                        case "retired" -> retired.add(location);
-                        case "assignment" -> {
-                            UUID playerId = UUID.fromString(results.getString("player_id"));
-                            assignments.put(
-                                    playerId,
-                                    new NewPlayerSpawnAssignment(
-                                            playerId,
-                                            location,
-                                            bool(results, "completed")
-                                    )
-                            );
-                        }
-                        default -> logger.warning(
-                                "Skipped unknown SQL spawn location kind "
-                                        + results.getString("location_kind")
-                        );
-                    }
-                }
-            }
-            Set<UUID> awaiting = new LinkedHashSet<>();
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "SELECT player_id FROM st_spawn_replacements ORDER BY player_id"
-            ); ResultSet results = statement.executeQuery()) {
-                while (results.next()) {
-                    awaiting.add(UUID.fromString(results.getString(1)));
-                }
-            }
-            return new NewPlayerSpawnState(available, assignments, retired, awaiting);
+            return loadSpawnState(connection);
         } catch (SQLException | RuntimeException exception) {
             throw new IllegalStateException("Could not load new-player spawn state", exception);
         }
@@ -339,29 +308,27 @@ public final class SqlStorage implements
 
     public StorageSnapshot exportSnapshot() throws IOException {
         snapshotGate.writeLock().lock();
-        try {
-            List<UUID> profileIds = new ArrayList<>();
-            try (Connection connection = connection()) {
-                try (PreparedStatement statement = connection.prepareStatement(
-                        "SELECT player_id FROM st_profiles ORDER BY player_id"
-                ); ResultSet results = statement.executeQuery()) {
-                    while (results.next()) {
-                        profileIds.add(UUID.fromString(results.getString(1)));
-                    }
-                }
-            } catch (SQLException | RuntimeException exception) {
-                throw io("Could not export storage snapshot", exception);
+        try (Connection connection = connection()) {
+            connection.setAutoCommit(false);
+            if (configuration.backend() != StorageBackend.SQLITE) {
+                connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+                connection.setReadOnly(true);
             }
-            List<ProfileSnapshot> profiles = profileIds.stream()
-                    .map(this::load)
-                    .map(Profile::snapshot)
-                    .toList();
-            return new StorageSnapshot(
-                    profiles,
-                    loadLocks(),
-                    loadDeathMarkers(),
-                    loadSpawnState()
-            );
+            try {
+                StorageSnapshot snapshot = new StorageSnapshot(
+                        loadAllProfiles(connection),
+                        loadLocks(connection),
+                        loadDeathMarkers(connection),
+                        loadSpawnState(connection)
+                );
+                connection.commit();
+                return snapshot;
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            }
+        } catch (Exception exception) {
+            throw io("Could not export storage snapshot", exception);
         } finally {
             snapshotGate.writeLock().unlock();
         }
@@ -394,7 +361,8 @@ public final class SqlStorage implements
             return count(connection, "st_profiles") == 0
                     && count(connection, "st_locks") == 0
                     && count(connection, "st_death_markers") == 0
-                    && count(connection, "st_spawn_locations") == 0;
+                    && count(connection, "st_spawn_locations") == 0
+                    && count(connection, "st_spawn_replacements") == 0;
         } catch (SQLException exception) {
             throw io("Could not inspect storage contents", exception);
         }
@@ -433,8 +401,21 @@ public final class SqlStorage implements
     }
 
     public Verification verify() {
+        return verify(false);
+    }
+
+    Verification verifyUninitialized() {
+        return verify(true);
+    }
+
+    private Verification verify(boolean allowMissingInstanceId) {
         List<String> problems = new ArrayList<>();
         try (Connection connection = connection()) {
+            for (String requiredQuery : requiredSchemaQueries()) {
+                try (Statement statement = connection.createStatement()) {
+                    statement.executeQuery(requiredQuery).close();
+                }
+            }
             if (configuration.backend() == StorageBackend.SQLITE) {
                 try (Statement statement = connection.createStatement();
                      ResultSet result = statement.executeQuery("PRAGMA quick_check")) {
@@ -447,19 +428,97 @@ public final class SqlStorage implements
                 }
             }
             orphanCount(connection, "st_homes", "player_id", "st_profiles", "player_id", problems);
+            orphanCount(connection, "st_hints", "player_id", "st_profiles", "player_id", problems);
             orphanCount(connection, "st_notifications", "player_id", "st_profiles", "player_id", problems);
+            orphanCount(connection, "st_mail_blocks", "player_id", "st_profiles", "player_id", problems);
             orphanCount(connection, "st_lock_blocks", "lock_id", "st_locks", "lock_id", problems);
             orphanCount(connection, "st_lock_trusted", "lock_id", "st_locks", "lock_id", problems);
+            problemCount(
+                    connection,
+                    "SELECT COUNT(*) FROM st_home_shares s LEFT JOIN st_homes h "
+                            + "ON s.player_id = h.player_id AND s.home_key = h.home_key "
+                            + "WHERE h.player_id IS NULL",
+                    "st_home_shares contains %d orphan row(s)",
+                    problems
+            );
+            problemCount(
+                    connection,
+                    "SELECT COUNT(*) FROM st_locks l LEFT JOIN st_lock_blocks b "
+                            + "ON l.lock_id = b.lock_id WHERE b.lock_id IS NULL",
+                    "st_locks contains %d lock(s) without blocks",
+                    problems
+            );
+            problemCount(
+                    connection,
+                    "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN "
+                            + "('available', 'assignment', 'retired') OR "
+                            + "(location_kind = 'assignment' AND player_id IS NULL) OR "
+                            + "(location_kind <> 'assignment' AND player_id IS NOT NULL)",
+                    "st_spawn_locations contains %d invalid row(s)",
+                    problems
+            );
+            invalidEnumCount(connection, "st_profiles", "language", LanguagePreference.class, problems);
+            invalidEnumCount(connection, "st_homes", "category", HomeCategory.class, problems);
+            invalidEnumCount(connection, "st_homes", "arrival_style", HomeArrivalStyle.class, problems);
+            invalidEnumCount(connection, "st_hints", "hint", OnboardingHint.class, problems);
+            invalidEnumCount(
+                    connection,
+                    "st_notifications",
+                    "notification_type",
+                    NotificationType.class,
+                    problems
+            );
+            invalidEnumCount(connection, "st_locks", "access_mode", LockAccessMode.class, problems);
             int schema = Integer.parseInt(meta(connection, META_SCHEMA_VERSION).orElse("0"));
             if (schema != SCHEMA_VERSION) {
                 problems.add("Expected schema " + SCHEMA_VERSION + " but found " + schema);
             }
-            return new Verification(problems.isEmpty(), List.copyOf(problems));
+            Optional<String> instance = meta(connection, META_INSTANCE_ID);
+            if (instance.isEmpty()) {
+                if (!allowMissingInstanceId) {
+                    problems.add("Storage instance identity is missing");
+                }
+            } else {
+                UUID.fromString(instance.get());
+            }
         } catch (Exception exception) {
             problems.add(exception.getClass().getSimpleName() + ": "
                     + Objects.requireNonNullElse(exception.getMessage(), "verification failed"));
-            return new Verification(false, List.copyOf(problems));
         }
+        try {
+            exportSnapshot();
+        } catch (Exception exception) {
+            problems.add("Snapshot read failed: " + exception.getClass().getSimpleName() + ": "
+                    + Objects.requireNonNullElse(exception.getMessage(), "unknown failure"));
+        }
+        return new Verification(problems.isEmpty(), List.copyOf(problems));
+    }
+
+    private List<String> requiredSchemaQueries() {
+        return List.of(
+                "SELECT meta_key, meta_value FROM st_meta WHERE 1 = 0",
+                "SELECT player_id, sounds, particles, dialogs, action_bar, reduced_effects, "
+                        + "player_list, mention_notifications, journey_guidance, public_profile, "
+                        + "mail_enabled, language, last_known_name, last_seen_at, play_time_ticks "
+                        + "FROM st_profiles WHERE 1 = 0",
+                "SELECT player_id, home_key, position, display_name, world_id, world_name, x, y, z, "
+                        + "yaw, pitch, icon, description, favorite, sort_order, category, arrival_style "
+                        + "FROM st_homes WHERE 1 = 0",
+                "SELECT player_id, home_key, shared_player_id FROM st_home_shares WHERE 1 = 0",
+                "SELECT player_id, hint FROM st_hints WHERE 1 = 0",
+                "SELECT player_id, notification_id, position, notification_type, created_at, actor_id, "
+                        + "actor_name, detail, is_read FROM st_notifications WHERE 1 = 0",
+                "SELECT player_id, blocked_player_id FROM st_mail_blocks WHERE 1 = 0",
+                "SELECT lock_id, owner_id, lock_name, access_mode, automation_allowed "
+                        + "FROM st_locks WHERE 1 = 0",
+                "SELECT lock_id, world_id, x, y, z FROM st_lock_blocks WHERE 1 = 0",
+                "SELECT lock_id, player_id FROM st_lock_trusted WHERE 1 = 0",
+                "SELECT player_id, world_id, world_name, x, y, z, created_at, expires_at, cause "
+                        + "FROM st_death_markers WHERE 1 = 0",
+                "SELECT location_kind, position, player_id, completed, world_id, world_name, "
+                        + "x, y, z, yaw FROM st_spawn_locations WHERE 1 = 0",
+                "SELECT player_id FROM st_spawn_replacements WHERE 1 = 0"
+        );
     }
 
     public void checkpoint() throws IOException {
@@ -486,8 +545,69 @@ public final class SqlStorage implements
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        releaseInstanceLease();
         dataSource.close();
+    }
+
+    private void releaseInstanceLease() {
+        Connection lease = instanceLeaseConnection;
+        instanceLeaseConnection = null;
+        if (lease == null) {
+            return;
+        }
+        try {
+            if (!lease.isClosed()) {
+                if (configuration.backend() == StorageBackend.POSTGRESQL) {
+                    try (PreparedStatement statement = lease.prepareStatement(
+                            "SELECT pg_advisory_unlock(?)"
+                    )) {
+                        statement.setLong(1, postgresLeaseKey);
+                        statement.executeQuery();
+                    }
+                } else if (configuration.backend() == StorageBackend.MYSQL) {
+                    try (PreparedStatement statement = lease.prepareStatement(
+                            "SELECT RELEASE_LOCK(?)"
+                    )) {
+                        statement.setString(1, mysqlLeaseName);
+                        statement.executeQuery();
+                    }
+                }
+            }
+        } catch (SQLException exception) {
+            logger.log(Level.WARNING, "Could not release database instance lease", exception);
+        } finally {
+            try {
+                lease.close();
+            } catch (SQLException exception) {
+                logger.log(Level.WARNING, "Could not close database lease connection", exception);
+            }
+        }
+    }
+
+    private void configureDriver(HikariConfig hikari) {
+        int connectSeconds = Math.max(
+                1,
+                (int) Math.ceil(configuration.connectionTimeoutMillis() / 1_000.0)
+        );
+        if (configuration.backend() == StorageBackend.POSTGRESQL) {
+            hikari.addDataSourceProperty("sslmode", configuration.postgresqlSslMode());
+            hikari.addDataSourceProperty("currentSchema", configuration.postgresqlSchema());
+            hikari.addDataSourceProperty("connectTimeout", connectSeconds);
+            hikari.addDataSourceProperty("socketTimeout", configuration.socketTimeoutSeconds());
+            hikari.addDataSourceProperty("queryTimeout", configuration.queryTimeoutSeconds());
+            hikari.addDataSourceProperty("tcpKeepAlive", true);
+            hikari.addDataSourceProperty("ApplicationName", "SurvivalTweaks");
+            hikari.addDataSourceProperty("reWriteBatchedInserts", true);
+        } else if (configuration.backend() == StorageBackend.MYSQL) {
+            hikari.addDataSourceProperty("connectTimeout", configuration.connectionTimeoutMillis());
+            hikari.addDataSourceProperty(
+                    "socketTimeout",
+                    configuration.socketTimeoutSeconds() * 1_000
+            );
+            hikari.addDataSourceProperty("tcpKeepAlive", true);
+            hikari.addDataSourceProperty("rewriteBatchedStatements", true);
+        }
     }
 
     private Connection connection() throws SQLException {
@@ -497,6 +617,12 @@ public final class SqlStorage implements
     }
 
     private void configureConnection(Connection connection) throws SQLException {
+        if (configuration.backend() == StorageBackend.POSTGRESQL) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("SET search_path TO " + configuration.postgresqlSchema());
+            }
+            return;
+        }
         if (configuration.backend() != StorageBackend.SQLITE) {
             return;
         }
@@ -509,11 +635,15 @@ public final class SqlStorage implements
     }
 
     private void initializeSchema(Connection connection) throws SQLException {
+        if (configuration.backend() == StorageBackend.POSTGRESQL) {
+            ensurePostgresqlSchema(connection);
+        }
         for (String ddl : schema()) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(ddl);
             }
         }
+        ensureIndex(connection, "st_lock_blocks", "st_lock_blocks_lock_id_idx", "lock_id");
         Optional<String> stored = meta(connection, META_SCHEMA_VERSION);
         if (stored.isEmpty()) {
             setMeta(connection, META_SCHEMA_VERSION, Integer.toString(SCHEMA_VERSION));
@@ -531,6 +661,61 @@ public final class SqlStorage implements
                     "No migration path from database schema " + version + " to "
                             + SCHEMA_VERSION
             );
+        }
+    }
+
+    private void ensurePostgresqlSchema(Connection connection) throws SQLException {
+        boolean exists;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ?"
+        )) {
+            statement.setString(1, configuration.postgresqlSchema());
+            try (ResultSet result = statement.executeQuery()) {
+                exists = result.next();
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            if (!exists) {
+                statement.execute("CREATE SCHEMA " + configuration.postgresqlSchema());
+            }
+            statement.execute("SET search_path TO " + configuration.postgresqlSchema());
+        }
+    }
+
+    private void ensureIndex(
+            Connection connection,
+            String table,
+            String index,
+            String column
+    ) throws SQLException {
+        if (hasIndex(connection, table, index)) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE INDEX " + index + " ON " + table + " (" + column + ")");
+        } catch (SQLException exception) {
+            if (!hasIndex(connection, table, index)) {
+                throw exception;
+            }
+        }
+    }
+
+    private boolean hasIndex(Connection connection, String table, String index) throws SQLException {
+        try (ResultSet indexes = connection.getMetaData().getIndexInfo(
+                connection.getCatalog(),
+                configuration.backend() == StorageBackend.POSTGRESQL
+                        ? configuration.postgresqlSchema()
+                        : null,
+                table,
+                false,
+                false
+        )) {
+            while (indexes.next()) {
+                if (index.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
@@ -691,14 +876,42 @@ public final class SqlStorage implements
 
     private void replaceProfile(Connection connection, ProfileSnapshot snapshot) throws SQLException {
         String playerId = snapshot.uniqueId().toString();
-        try (PreparedStatement delete = connection.prepareStatement(
-                "DELETE FROM st_profiles WHERE player_id = ?"
-        )) {
-            delete.setString(1, playerId);
-            delete.executeUpdate();
-        }
         PlayerPreferences preferences = snapshot.preferences();
-        try (PreparedStatement insert = connection.prepareStatement(
+        int updated;
+        try (PreparedStatement update = connection.prepareStatement(
+                """
+                UPDATE st_profiles SET
+                    sounds = ?, particles = ?, dialogs = ?, action_bar = ?, reduced_effects = ?,
+                    player_list = ?, mention_notifications = ?, journey_guidance = ?,
+                    public_profile = ?, mail_enabled = ?, language = ?, last_known_name = ?,
+                    last_seen_at = ?, play_time_ticks = ?
+                WHERE player_id = ?
+                """
+        )) {
+            int index = 1;
+            setBool(update, index++, preferences.soundsEnabled());
+            setBool(update, index++, preferences.particlesEnabled());
+            setBool(update, index++, preferences.dialogsEnabled());
+            setBool(update, index++, preferences.actionBarEnabled());
+            setBool(update, index++, preferences.reducedEffects());
+            setBool(update, index++, preferences.playerListEnabled());
+            setBool(update, index++, preferences.mentionNotificationsEnabled());
+            setBool(update, index++, preferences.journeyGuidanceEnabled());
+            setBool(update, index++, preferences.publicProfileEnabled());
+            setBool(update, index++, preferences.mailEnabled());
+            update.setString(index++, preferences.language().name());
+            update.setString(index++, snapshot.lastKnownName());
+            if (snapshot.lastSeenAt() == null) {
+                update.setNull(index++, Types.BIGINT);
+            } else {
+                update.setLong(index++, snapshot.lastSeenAt().toEpochMilli());
+            }
+            update.setLong(index++, snapshot.playTimeTicks());
+            update.setString(index, playerId);
+            updated = update.executeUpdate();
+        }
+        if (updated == 0) {
+            try (PreparedStatement insert = connection.prepareStatement(
                 """
                 INSERT INTO st_profiles (
                     player_id, sounds, particles, dialogs, action_bar, reduced_effects,
@@ -706,33 +919,53 @@ public final class SqlStorage implements
                     mail_enabled, language, last_known_name, last_seen_at, play_time_ticks
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
-        )) {
-            int index = 1;
-            insert.setString(index++, playerId);
-            setBool(insert, index++, preferences.soundsEnabled());
-            setBool(insert, index++, preferences.particlesEnabled());
-            setBool(insert, index++, preferences.dialogsEnabled());
-            setBool(insert, index++, preferences.actionBarEnabled());
-            setBool(insert, index++, preferences.reducedEffects());
-            setBool(insert, index++, preferences.playerListEnabled());
-            setBool(insert, index++, preferences.mentionNotificationsEnabled());
-            setBool(insert, index++, preferences.journeyGuidanceEnabled());
-            setBool(insert, index++, preferences.publicProfileEnabled());
-            setBool(insert, index++, preferences.mailEnabled());
-            insert.setString(index++, preferences.language().name());
-            insert.setString(index++, snapshot.lastKnownName());
-            if (snapshot.lastSeenAt() == null) {
-                insert.setNull(index++, Types.BIGINT);
-            } else {
-                insert.setLong(index++, snapshot.lastSeenAt().toEpochMilli());
+            )) {
+                int index = 1;
+                insert.setString(index++, playerId);
+                setBool(insert, index++, preferences.soundsEnabled());
+                setBool(insert, index++, preferences.particlesEnabled());
+                setBool(insert, index++, preferences.dialogsEnabled());
+                setBool(insert, index++, preferences.actionBarEnabled());
+                setBool(insert, index++, preferences.reducedEffects());
+                setBool(insert, index++, preferences.playerListEnabled());
+                setBool(insert, index++, preferences.mentionNotificationsEnabled());
+                setBool(insert, index++, preferences.journeyGuidanceEnabled());
+                setBool(insert, index++, preferences.publicProfileEnabled());
+                setBool(insert, index++, preferences.mailEnabled());
+                insert.setString(index++, preferences.language().name());
+                insert.setString(index++, snapshot.lastKnownName());
+                if (snapshot.lastSeenAt() == null) {
+                    insert.setNull(index++, Types.BIGINT);
+                } else {
+                    insert.setLong(index++, snapshot.lastSeenAt().toEpochMilli());
+                }
+                insert.setLong(index, snapshot.playTimeTicks());
+                insert.executeUpdate();
             }
-            insert.setLong(index, snapshot.playTimeTicks());
-            insert.executeUpdate();
+        } else {
+            clearProfileChildren(connection, playerId);
         }
         insertHomes(connection, snapshot);
         insertHints(connection, snapshot);
         insertNotifications(connection, snapshot);
         insertMailBlocks(connection, snapshot);
+    }
+
+    private void clearProfileChildren(Connection connection, String playerId) throws SQLException {
+        for (String table : List.of(
+                "st_home_shares",
+                "st_homes",
+                "st_hints",
+                "st_notifications",
+                "st_mail_blocks"
+        )) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "DELETE FROM " + table + " WHERE player_id = ?"
+            )) {
+                statement.setString(1, playerId);
+                statement.executeUpdate();
+            }
+        }
     }
 
     private void insertHomes(Connection connection, ProfileSnapshot snapshot) throws SQLException {
@@ -849,7 +1082,188 @@ public final class SqlStorage implements
         }
     }
 
+    private List<ProfileSnapshot> loadAllProfiles(Connection connection) throws SQLException {
+        Map<UUID, Profile> profiles = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, sounds, particles, dialogs, action_bar, reduced_effects,
+                       player_list, mention_notifications, journey_guidance,
+                       public_profile, mail_enabled, language, last_known_name,
+                       last_seen_at, play_time_ticks
+                FROM st_profiles ORDER BY player_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                UUID playerId = UUID.fromString(results.getString("player_id"));
+                Profile profile = new Profile(playerId);
+                profile.preferences(new PlayerPreferences(
+                        bool(results, "sounds"),
+                        bool(results, "particles"),
+                        bool(results, "dialogs"),
+                        bool(results, "action_bar"),
+                        bool(results, "reduced_effects"),
+                        bool(results, "player_list"),
+                        bool(results, "mention_notifications"),
+                        bool(results, "journey_guidance"),
+                        bool(results, "public_profile"),
+                        bool(results, "mail_enabled"),
+                        enumValue(
+                                LanguagePreference.class,
+                                results.getString("language"),
+                                LanguagePreference.AUTO
+                        )
+                ));
+                profile.lastKnownName(results.getString("last_known_name"));
+                long lastSeen = results.getLong("last_seen_at");
+                if (!results.wasNull()) {
+                    profile.lastSeenAt(Instant.ofEpochMilli(lastSeen));
+                }
+                profile.playTimeTicks(results.getLong("play_time_ticks"));
+                profiles.put(playerId, profile);
+            }
+        }
+
+        Map<HomeShareKey, Set<UUID>> shares = loadAllHomeShares(connection);
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, home_key, display_name, world_id, world_name,
+                       x, y, z, yaw, pitch, icon, description, favorite,
+                       sort_order, category, arrival_style
+                FROM st_homes ORDER BY player_id, position
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                UUID playerId = UUID.fromString(results.getString("player_id"));
+                Profile profile = profiles.get(playerId);
+                if (profile == null) {
+                    continue;
+                }
+                String worldId = results.getString("world_id");
+                Material icon = Material.matchMaterial(results.getString("icon"));
+                profile.addHome(new Home(
+                        results.getString("display_name"),
+                        worldId == null ? null : UUID.fromString(worldId),
+                        results.getString("world_name"),
+                        results.getDouble("x"),
+                        results.getDouble("y"),
+                        results.getDouble("z"),
+                        results.getFloat("yaw"),
+                        results.getFloat("pitch"),
+                        icon == null ? Material.ENDER_PEARL : icon,
+                        results.getString("description"),
+                        bool(results, "favorite"),
+                        results.getInt("sort_order"),
+                        enumValue(HomeCategory.class, results.getString("category"), HomeCategory.OTHER),
+                        enumValue(
+                                HomeArrivalStyle.class,
+                                results.getString("arrival_style"),
+                                HomeArrivalStyle.DEFAULT
+                        ),
+                        shares.getOrDefault(
+                                new HomeShareKey(playerId, results.getString("home_key")),
+                                Set.of()
+                        )
+                ));
+            }
+        }
+
+        Map<UUID, Set<OnboardingHint>> hints = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT player_id, hint FROM st_hints ORDER BY player_id, hint"
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                OnboardingHint hint = enumValue(OnboardingHint.class, results.getString("hint"), null);
+                if (hint != null) {
+                    hints.computeIfAbsent(
+                            UUID.fromString(results.getString("player_id")),
+                            ignored -> new LinkedHashSet<>()
+                    ).add(hint);
+                }
+            }
+        }
+
+        Map<UUID, List<PlayerNotification>> notifications = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, notification_id, notification_type, created_at,
+                       actor_id, actor_name, detail, is_read
+                FROM st_notifications ORDER BY player_id, position
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                NotificationType type = enumValue(
+                        NotificationType.class,
+                        results.getString("notification_type"),
+                        null
+                );
+                if (type == null) {
+                    continue;
+                }
+                String actorId = results.getString("actor_id");
+                UUID playerId = UUID.fromString(results.getString("player_id"));
+                notifications.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(
+                        new PlayerNotification(
+                                UUID.fromString(results.getString("notification_id")),
+                                type,
+                                Instant.ofEpochMilli(results.getLong("created_at")),
+                                actorId == null ? null : UUID.fromString(actorId),
+                                results.getString("actor_name"),
+                                results.getString("detail"),
+                                bool(results, "is_read")
+                        )
+                );
+            }
+        }
+
+        Map<UUID, Set<UUID>> blocked = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, blocked_player_id FROM st_mail_blocks
+                ORDER BY player_id, blocked_player_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                blocked.computeIfAbsent(
+                        UUID.fromString(results.getString("player_id")),
+                        ignored -> new LinkedHashSet<>()
+                ).add(UUID.fromString(results.getString("blocked_player_id")));
+            }
+        }
+
+        for (Map.Entry<UUID, Profile> entry : profiles.entrySet()) {
+            UUID playerId = entry.getKey();
+            Profile profile = entry.getValue();
+            profile.seenHints(hints.getOrDefault(playerId, Set.of()));
+            profile.notifications(notifications.getOrDefault(playerId, List.of()));
+            profile.blockedMailSenders(blocked.getOrDefault(playerId, Set.of()));
+        }
+        return profiles.values().stream().map(Profile::snapshot).toList();
+    }
+
+    private Map<HomeShareKey, Set<UUID>> loadAllHomeShares(Connection connection)
+            throws SQLException {
+        Map<HomeShareKey, Set<UUID>> shares = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, home_key, shared_player_id FROM st_home_shares
+                ORDER BY player_id, home_key, shared_player_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                HomeShareKey key = new HomeShareKey(
+                        UUID.fromString(results.getString("player_id")),
+                        results.getString("home_key")
+                );
+                shares.computeIfAbsent(key, ignored -> new LinkedHashSet<>())
+                        .add(UUID.fromString(results.getString("shared_player_id")));
+            }
+        }
+        shares.replaceAll((ignored, values) -> Set.copyOf(values));
+        return Map.copyOf(shares);
+    }
+
     private void loadHomes(Connection connection, Profile profile) throws SQLException {
+        Map<String, Set<UUID>> shares = loadHomeShares(connection, profile.uniqueId());
         try (PreparedStatement statement = connection.prepareStatement(
                 """
                 SELECT home_key, display_name, world_id, world_name, x, y, z,
@@ -886,35 +1300,32 @@ public final class SqlStorage implements
                                     results.getString("arrival_style"),
                                     HomeArrivalStyle.DEFAULT
                             ),
-                            loadHomeShares(
-                                    connection,
-                                    profile.uniqueId(),
-                                    results.getString("home_key")
-                            )
+                            shares.getOrDefault(results.getString("home_key"), Set.of())
                     ));
                 }
             }
         }
     }
 
-    private Set<UUID> loadHomeShares(Connection connection, UUID playerId, String homeKey)
+    private Map<String, Set<UUID>> loadHomeShares(Connection connection, UUID playerId)
             throws SQLException {
-        Set<UUID> shares = new LinkedHashSet<>();
+        Map<String, Set<UUID>> shares = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(
                 """
-                SELECT shared_player_id FROM st_home_shares
-                WHERE player_id = ? AND home_key = ? ORDER BY shared_player_id
+                SELECT home_key, shared_player_id FROM st_home_shares
+                WHERE player_id = ? ORDER BY home_key, shared_player_id
                 """
         )) {
             statement.setString(1, playerId.toString());
-            statement.setString(2, homeKey);
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
-                    shares.add(UUID.fromString(results.getString(1)));
+                    shares.computeIfAbsent(results.getString(1), ignored -> new LinkedHashSet<>())
+                            .add(UUID.fromString(results.getString(2)));
                 }
             }
         }
-        return Set.copyOf(shares);
+        shares.replaceAll((ignored, values) -> Set.copyOf(values));
+        return Map.copyOf(shares);
     }
 
     private void loadHints(Connection connection, Profile profile) throws SQLException {
@@ -995,9 +1406,32 @@ public final class SqlStorage implements
 
     private void replaceLocks(Connection connection, java.util.Collection<ContainerLockSnapshot> locks)
             throws SQLException {
-        execute(connection, "DELETE FROM st_lock_trusted");
-        execute(connection, "DELETE FROM st_lock_blocks");
-        execute(connection, "DELETE FROM st_locks");
+        Map<UUID, ContainerLockSnapshot> existing = loadLocks(connection).stream()
+                .collect(java.util.stream.Collectors.toMap(ContainerLockSnapshot::id, lock -> lock));
+        Map<UUID, ContainerLockSnapshot> desired = locks.stream()
+                .collect(java.util.stream.Collectors.toMap(ContainerLockSnapshot::id, lock -> lock));
+        Set<UUID> replaced = new LinkedHashSet<>();
+        for (Map.Entry<UUID, ContainerLockSnapshot> entry : existing.entrySet()) {
+            if (!entry.getValue().equals(desired.get(entry.getKey()))) {
+                replaced.add(entry.getKey());
+            }
+        }
+        try (PreparedStatement delete = connection.prepareStatement(
+                "DELETE FROM st_locks WHERE lock_id = ?"
+        )) {
+            for (UUID lockId : replaced) {
+                delete.setString(1, lockId.toString());
+                delete.addBatch();
+            }
+            delete.executeBatch();
+        }
+        List<ContainerLockSnapshot> changed = desired.values().stream()
+                .filter(lock -> !lock.equals(existing.get(lock.id())))
+                .sorted(Comparator.comparing(ContainerLockSnapshot::id))
+                .toList();
+        if (changed.isEmpty()) {
+            return;
+        }
         try (PreparedStatement lockInsert = connection.prepareStatement(
                 """
                 INSERT INTO st_locks (
@@ -1012,9 +1446,7 @@ public final class SqlStorage implements
         ); PreparedStatement trustInsert = connection.prepareStatement(
                 "INSERT INTO st_lock_trusted (lock_id, player_id) VALUES (?, ?)"
         )) {
-            for (ContainerLockSnapshot lock : locks.stream()
-                    .sorted(Comparator.comparing(ContainerLockSnapshot::id))
-                    .toList()) {
+            for (ContainerLockSnapshot lock : changed) {
                 lockInsert.setString(1, lock.id().toString());
                 lockInsert.setString(2, lock.ownerId().toString());
                 lockInsert.setString(3, lock.name());
@@ -1046,18 +1478,18 @@ public final class SqlStorage implements
         }
     }
 
-    private Set<BlockKey> loadLockBlocks(Connection connection, UUID lockId) throws SQLException {
-        Set<BlockKey> blocks = new LinkedHashSet<>();
+    private Map<UUID, Set<BlockKey>> loadAllLockBlocks(Connection connection) throws SQLException {
+        Map<UUID, Set<BlockKey>> blocks = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(
                 """
-                SELECT world_id, x, y, z FROM st_lock_blocks
-                WHERE lock_id = ? ORDER BY world_id, x, y, z
+                SELECT lock_id, world_id, x, y, z FROM st_lock_blocks
+                ORDER BY lock_id, world_id, x, y, z
                 """
         )) {
-            statement.setString(1, lockId.toString());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
-                    blocks.add(new BlockKey(
+                    UUID lockId = UUID.fromString(results.getString("lock_id"));
+                    blocks.computeIfAbsent(lockId, ignored -> new LinkedHashSet<>()).add(new BlockKey(
                             UUID.fromString(results.getString("world_id")),
                             results.getInt("x"),
                             results.getInt("y"),
@@ -1066,30 +1498,168 @@ public final class SqlStorage implements
                 }
             }
         }
-        return Set.copyOf(blocks);
+        blocks.replaceAll((ignored, values) -> Set.copyOf(values));
+        return Map.copyOf(blocks);
     }
 
-    private Set<UUID> loadTrustedPlayers(Connection connection, UUID lockId) throws SQLException {
-        Set<UUID> trusted = new LinkedHashSet<>();
+    private Map<UUID, Set<UUID>> loadAllTrustedPlayers(Connection connection) throws SQLException {
+        Map<UUID, Set<UUID>> trusted = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(
                 """
-                SELECT player_id FROM st_lock_trusted
-                WHERE lock_id = ? ORDER BY player_id
+                SELECT lock_id, player_id FROM st_lock_trusted
+                ORDER BY lock_id, player_id
                 """
         )) {
-            statement.setString(1, lockId.toString());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
-                    trusted.add(UUID.fromString(results.getString(1)));
+                    UUID lockId = UUID.fromString(results.getString(1));
+                    trusted.computeIfAbsent(lockId, ignored -> new LinkedHashSet<>())
+                            .add(UUID.fromString(results.getString(2)));
                 }
             }
         }
-        return Set.copyOf(trusted);
+        trusted.replaceAll((ignored, values) -> Set.copyOf(values));
+        return Map.copyOf(trusted);
+    }
+
+    private List<ContainerLockSnapshot> loadLocks(Connection connection) throws SQLException {
+        Map<UUID, Set<BlockKey>> blocksByLock = loadAllLockBlocks(connection);
+        Map<UUID, Set<UUID>> trustedByLock = loadAllTrustedPlayers(connection);
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT lock_id, owner_id, lock_name, access_mode, automation_allowed
+                FROM st_locks ORDER BY lock_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            List<ContainerLockSnapshot> locks = new ArrayList<>();
+            while (results.next()) {
+                UUID lockId = UUID.fromString(results.getString("lock_id"));
+                Set<BlockKey> blocks = blocksByLock.getOrDefault(lockId, Set.of());
+                if (blocks.isEmpty()) {
+                    logger.warning("Skipped SQL container lock without blocks: " + lockId);
+                    continue;
+                }
+                locks.add(new ContainerLockSnapshot(
+                        lockId,
+                        UUID.fromString(results.getString("owner_id")),
+                        blocks,
+                        trustedByLock.getOrDefault(lockId, Set.of()),
+                        results.getString("lock_name"),
+                        enumValue(
+                                LockAccessMode.class,
+                                results.getString("access_mode"),
+                                LockAccessMode.TRUSTED
+                        ),
+                        bool(results, "automation_allowed")
+                ));
+            }
+            return List.copyOf(locks);
+        }
+    }
+
+    private List<DeathMarker> loadDeathMarkers(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, world_id, world_name, x, y, z,
+                       created_at, expires_at, cause
+                FROM st_death_markers ORDER BY player_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            List<DeathMarker> markers = new ArrayList<>();
+            while (results.next()) {
+                markers.add(new DeathMarker(
+                        UUID.fromString(results.getString("player_id")),
+                        UUID.fromString(results.getString("world_id")),
+                        results.getString("world_name"),
+                        results.getDouble("x"),
+                        results.getDouble("y"),
+                        results.getDouble("z"),
+                        Instant.ofEpochMilli(results.getLong("created_at")),
+                        Instant.ofEpochMilli(results.getLong("expires_at")),
+                        results.getString("cause")
+                ));
+            }
+            return List.copyOf(markers);
+        }
+    }
+
+    private NewPlayerSpawnState loadSpawnState(Connection connection) throws SQLException {
+        List<NewPlayerSpawnLocation> available = new ArrayList<>();
+        List<NewPlayerSpawnLocation> retired = new ArrayList<>();
+        Map<UUID, NewPlayerSpawnAssignment> assignments = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT location_kind, position, player_id, completed,
+                       world_id, world_name, x, y, z, yaw
+                FROM st_spawn_locations
+                ORDER BY location_kind, position
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                NewPlayerSpawnLocation location = new NewPlayerSpawnLocation(
+                        UUID.fromString(results.getString("world_id")),
+                        results.getString("world_name"),
+                        results.getInt("x"),
+                        results.getInt("y"),
+                        results.getInt("z"),
+                        results.getFloat("yaw")
+                );
+                switch (results.getString("location_kind")) {
+                    case "available" -> available.add(location);
+                    case "retired" -> retired.add(location);
+                    case "assignment" -> {
+                        UUID playerId = UUID.fromString(results.getString("player_id"));
+                        assignments.put(
+                                playerId,
+                                new NewPlayerSpawnAssignment(
+                                        playerId,
+                                        location,
+                                        bool(results, "completed")
+                                )
+                        );
+                    }
+                    default -> logger.warning(
+                            "Skipped unknown SQL spawn location kind "
+                                    + results.getString("location_kind")
+                    );
+                }
+            }
+        }
+        Set<UUID> awaiting = new LinkedHashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT player_id FROM st_spawn_replacements ORDER BY player_id"
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                awaiting.add(UUID.fromString(results.getString(1)));
+            }
+        }
+        return new NewPlayerSpawnState(available, assignments, retired, awaiting);
     }
 
     private void replaceDeathMarkers(Connection connection, java.util.Collection<DeathMarker> markers)
             throws SQLException {
-        execute(connection, "DELETE FROM st_death_markers");
+        Map<UUID, DeathMarker> existing = loadDeathMarkers(connection).stream()
+                .collect(java.util.stream.Collectors.toMap(DeathMarker::playerId, marker -> marker));
+        Map<UUID, DeathMarker> desired = markers.stream()
+                .collect(java.util.stream.Collectors.toMap(DeathMarker::playerId, marker -> marker));
+        try (PreparedStatement delete = connection.prepareStatement(
+                "DELETE FROM st_death_markers WHERE player_id = ?"
+        )) {
+            for (Map.Entry<UUID, DeathMarker> entry : existing.entrySet()) {
+                if (!entry.getValue().equals(desired.get(entry.getKey()))) {
+                    delete.setString(1, entry.getKey().toString());
+                    delete.addBatch();
+                }
+            }
+            delete.executeBatch();
+        }
+        List<DeathMarker> changed = desired.values().stream()
+                .filter(marker -> !marker.equals(existing.get(marker.playerId())))
+                .sorted(Comparator.comparing(DeathMarker::playerId))
+                .toList();
+        if (changed.isEmpty()) {
+            return;
+        }
         try (PreparedStatement statement = connection.prepareStatement(
                 """
                 INSERT INTO st_death_markers (
@@ -1097,9 +1667,7 @@ public final class SqlStorage implements
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
         )) {
-            for (DeathMarker marker : markers.stream()
-                    .sorted(Comparator.comparing(DeathMarker::playerId))
-                    .toList()) {
+            for (DeathMarker marker : changed) {
                 statement.setString(1, marker.playerId().toString());
                 statement.setString(2, marker.worldId().toString());
                 statement.setString(3, marker.worldName());
@@ -1117,8 +1685,20 @@ public final class SqlStorage implements
 
     private void replaceSpawnState(Connection connection, NewPlayerSpawnState state)
             throws SQLException {
-        execute(connection, "DELETE FROM st_spawn_locations");
-        execute(connection, "DELETE FROM st_spawn_replacements");
+        Map<SpawnKey, SpawnRow> existing = loadSpawnRows(connection);
+        Map<SpawnKey, SpawnRow> desired = spawnRows(state);
+        try (PreparedStatement delete = connection.prepareStatement(
+                "DELETE FROM st_spawn_locations WHERE location_kind = ? AND position = ?"
+        )) {
+            for (Map.Entry<SpawnKey, SpawnRow> entry : existing.entrySet()) {
+                if (!entry.getValue().equals(desired.get(entry.getKey()))) {
+                    delete.setString(1, entry.getKey().kind());
+                    delete.setInt(2, entry.getKey().position());
+                    delete.addBatch();
+                }
+            }
+            delete.executeBatch();
+        }
         try (PreparedStatement locationInsert = connection.prepareStatement(
                 """
                 INSERT INTO st_spawn_locations (
@@ -1127,38 +1707,118 @@ public final class SqlStorage implements
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
         )) {
-            int position = 0;
-            for (NewPlayerSpawnLocation location : state.available()) {
-                insertLocation(locationInsert, "available", position++, null, false, location);
-            }
-            position = 0;
-            for (NewPlayerSpawnLocation location : state.retired()) {
-                insertLocation(locationInsert, "retired", position++, null, false, location);
-            }
-            position = 0;
-            for (NewPlayerSpawnAssignment assignment : state.assignments().values().stream()
-                    .sorted(Comparator.comparing(NewPlayerSpawnAssignment::playerId))
-                    .toList()) {
+            for (SpawnRow row : desired.values()) {
+                if (row.equals(existing.get(new SpawnKey(row.kind(), row.position())))) {
+                    continue;
+                }
                 insertLocation(
                         locationInsert,
-                        "assignment",
-                        position++,
-                        assignment.playerId(),
-                        assignment.completed(),
-                        assignment.location()
+                        row.kind(),
+                        row.position(),
+                        row.playerId(),
+                        row.completed(),
+                        row.location()
                 );
             }
             locationInsert.executeBatch();
+        }
+        Set<UUID> currentReplacements = loadSpawnReplacements(connection);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "DELETE FROM st_spawn_replacements WHERE player_id = ?"
+        )) {
+            for (UUID playerId : currentReplacements) {
+                if (!state.awaitingReplacement().contains(playerId)) {
+                    statement.setString(1, playerId.toString());
+                    statement.addBatch();
+                }
+            }
+            statement.executeBatch();
         }
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO st_spawn_replacements (player_id) VALUES (?)"
         )) {
             for (UUID playerId : state.awaitingReplacement().stream().sorted().toList()) {
+                if (currentReplacements.contains(playerId)) {
+                    continue;
+                }
                 statement.setString(1, playerId.toString());
                 statement.addBatch();
             }
             statement.executeBatch();
         }
+    }
+
+    private Map<SpawnKey, SpawnRow> spawnRows(NewPlayerSpawnState state) {
+        Map<SpawnKey, SpawnRow> rows = new LinkedHashMap<>();
+        int position = 0;
+        for (NewPlayerSpawnLocation location : state.available()) {
+            SpawnRow row = new SpawnRow("available", position++, null, false, location);
+            rows.put(new SpawnKey(row.kind(), row.position()), row);
+        }
+        position = 0;
+        for (NewPlayerSpawnAssignment assignment : state.assignments().values().stream()
+                .sorted(Comparator.comparing(NewPlayerSpawnAssignment::playerId))
+                .toList()) {
+            SpawnRow row = new SpawnRow(
+                    "assignment",
+                    position++,
+                    assignment.playerId(),
+                    assignment.completed(),
+                    assignment.location()
+            );
+            rows.put(new SpawnKey(row.kind(), row.position()), row);
+        }
+        position = 0;
+        for (NewPlayerSpawnLocation location : state.retired()) {
+            SpawnRow row = new SpawnRow("retired", position++, null, false, location);
+            rows.put(new SpawnKey(row.kind(), row.position()), row);
+        }
+        return Map.copyOf(rows);
+    }
+
+    private Map<SpawnKey, SpawnRow> loadSpawnRows(Connection connection) throws SQLException {
+        Map<SpawnKey, SpawnRow> rows = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT location_kind, position, player_id, completed,
+                       world_id, world_name, x, y, z, yaw
+                FROM st_spawn_locations ORDER BY location_kind, position
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                String kind = results.getString("location_kind");
+                int position = results.getInt("position");
+                String playerId = results.getString("player_id");
+                SpawnRow row = new SpawnRow(
+                        kind,
+                        position,
+                        playerId == null ? null : UUID.fromString(playerId),
+                        bool(results, "completed"),
+                        new NewPlayerSpawnLocation(
+                                UUID.fromString(results.getString("world_id")),
+                                results.getString("world_name"),
+                                results.getInt("x"),
+                                results.getInt("y"),
+                                results.getInt("z"),
+                                results.getFloat("yaw")
+                        )
+                );
+                rows.put(new SpawnKey(kind, position), row);
+            }
+        }
+        return Map.copyOf(rows);
+    }
+
+    private Set<UUID> loadSpawnReplacements(Connection connection) throws SQLException {
+        Set<UUID> replacements = new LinkedHashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT player_id FROM st_spawn_replacements ORDER BY player_id"
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                replacements.add(UUID.fromString(results.getString(1)));
+            }
+        }
+        return Set.copyOf(replacements);
     }
 
     private void insertLocation(
@@ -1288,6 +1948,40 @@ public final class SqlStorage implements
         }
     }
 
+    private void problemCount(
+            Connection connection,
+            String sql,
+            String message,
+            List<String> problems
+    ) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet results = statement.executeQuery(sql)) {
+            results.next();
+            long count = results.getLong(1);
+            if (count > 0) {
+                problems.add(message.formatted(count));
+            }
+        }
+    }
+
+    private <E extends Enum<E>> void invalidEnumCount(
+            Connection connection,
+            String table,
+            String column,
+            Class<E> type,
+            List<String> problems
+    ) throws SQLException {
+        String allowed = java.util.Arrays.stream(type.getEnumConstants())
+                .map(value -> "'" + value.name() + "'")
+                .collect(java.util.stream.Collectors.joining(", "));
+        problemCount(
+                connection,
+                "SELECT COUNT(*) FROM " + table + " WHERE " + column + " NOT IN (" + allowed + ")",
+                table + "." + column + " contains %d invalid value(s)",
+                problems
+        );
+    }
+
     private void execute(Connection connection, String sql) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate(sql);
@@ -1323,6 +2017,21 @@ public final class SqlStorage implements
             return io;
         }
         return new IOException(message, exception);
+    }
+
+    private record HomeShareKey(UUID playerId, String homeKey) {
+    }
+
+    private record SpawnKey(String kind, int position) {
+    }
+
+    private record SpawnRow(
+            String kind,
+            int position,
+            UUID playerId,
+            boolean completed,
+            NewPlayerSpawnLocation location
+    ) {
     }
 
     @FunctionalInterface

@@ -15,6 +15,34 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: survivaltweaks_test
+          POSTGRES_USER: survivaltweaks
+          POSTGRES_PASSWORD: survivaltweaks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U survivaltweaks -d survivaltweaks_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: survivaltweaks_test
+          MYSQL_USER: survivaltweaks
+          MYSQL_PASSWORD: survivaltweaks
+          MYSQL_ROOT_PASSWORD: survivaltweaks-root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -usurvivaltweaks -psurvivaltweaks"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -25,6 +53,17 @@ jobs:
           java-version: '25'
           cache: maven
       - name: Verify
+        env:
+          SURVIVALTWEAKS_POSTGRES_HOST: localhost
+          SURVIVALTWEAKS_POSTGRES_PORT: '5432'
+          SURVIVALTWEAKS_POSTGRES_DATABASE: survivaltweaks_test
+          SURVIVALTWEAKS_POSTGRES_USERNAME: survivaltweaks
+          SURVIVALTWEAKS_POSTGRES_PASSWORD: survivaltweaks
+          SURVIVALTWEAKS_MYSQL_HOST: localhost
+          SURVIVALTWEAKS_MYSQL_PORT: '3306'
+          SURVIVALTWEAKS_MYSQL_DATABASE: survivaltweaks_test
+          SURVIVALTWEAKS_MYSQL_USERNAME: survivaltweaks
+          SURVIVALTWEAKS_MYSQL_PASSWORD: survivaltweaks
         run: mvn --batch-mode --no-transfer-progress verify
       - name: Paper smoke test
         shell: pwsh

@@ -23,6 +23,14 @@ synchronous durability, and serializes writes through a single pooled
 connection. PostgreSQL and MySQL use a small bounded HikariCP pool. All three
 JDBC drivers are included in the release JAR.
 
+Remote connections have finite connect, socket, and statement timeouts plus
+TCP keepalives, so a dead network cannot leave a persistence worker blocked
+forever. Failed asynchronous saves remain queued and retry automatically with
+bounded backoff; a newer aggregate safely supersedes an older pending retry.
+Each remote endpoint also holds a database-session singleton lock for the
+plugin lifetime. Starting a copied server directory against the same endpoint
+is rejected before gameplay services can write.
+
 On the first SQL startup, existing `userdata/*.yml`,
 `locked-containers.yml`, `death-markers.yml`, and
 `new-player-spawns.yml` are parsed and imported only if the SQL database is
@@ -32,7 +40,8 @@ rollback source.
 
 The active engine, endpoint fingerprint, and random server-instance UUID are
 pinned in `storage-state.yml`. Changing `storage.backend`, the SQLite filename,
-or a remote endpoint by hand is rejected after initialization. A remote outage
+or a remote endpoint (including the PostgreSQL schema) by hand is rejected
+after initialization. A remote outage
 also fails startup: SurvivalTweaks never silently falls back to SQLite, because
 doing so could create two divergent copies of player data.
 
@@ -41,6 +50,27 @@ sleep-vote tasks stop themselves, and player-list and action-bar updates are
 sent only when visible state changes. Profile, death-marker, spawn-pool,
 reload, and backup disk work runs off the server thread, with immutable
 snapshots and shutdown drains preserving durability.
+
+## Item duplication
+
+Carrying an open container through a teleport is a known duplication technique:
+a modified client can keep a shulker box or chest view open while running a
+teleport command, leaving its contents recorded in both the container and the
+player inventory. `teleport.cancel-on-inventory-open` closes that route and is
+enabled by default. Every delayed teleport SurvivalTweaks performs — homes and
+player-to-player requests — refuses to start while a container is open, and a
+container opened during a warm-up cancels the teleport rather than completing
+it.
+
+Open containers are tracked from inventory events and confirmed against the
+player's live inventory view at teleport start and cutover. A player's own
+inventory never counts. SurvivalTweaks' own menus are exempt because every one
+of them cancels its clicks and drags and therefore holds nothing a player can
+take.
+
+This addresses the duplication routes a plugin can control. Duplication bugs in
+the server itself are fixed in Paper, so running a current Paper build remains
+the primary defence.
 
 ## Database administration
 
@@ -58,7 +88,11 @@ snapshots and shutdown drains preserving durability.
    read, update, and delete its tables.
 2. Keep `storage.backend: sqlite`, then set `storage.remote.type` to either
    `postgresql` or `mysql` and fill in the host, port, database, username,
-   password, and TLS setting.
+   password, schema, and TLS setting. PostgreSQL defaults to the dedicated
+   `survivaltweaks` schema and `postgresql-ssl-mode: verify-full`, which validates
+   the certificate chain and hostname. Existing schema-v2 installations migrate
+   to the `public` schema and retain their old `require`/`disable` behavior so
+   current tables remain visible.
 3. Reload is only a validator; it does not switch the live store. Run
    `/survivaltweaks storage test <backend>`.
 4. Run `/survivaltweaks storage migrate <backend>`. This records a migration
@@ -120,10 +154,17 @@ the plugin writes an atomic ZIP snapshot into `plugins/SurvivalTweaks/backups/`.
 Archives contain configuration, both language catalogs, the pinned storage
 identity, the default SQLite database, and preserved legacy YAML files. SQLite
 writes are paused briefly and its WAL is checkpointed while the database enters
-the ZIP, so the archived file is self-contained. Remote database contents must
-also be backed up using the database provider's native backup tooling; use
-`storage export` when a portable SQLite copy is useful. The newest ten archives
-are retained.
+the ZIP, so the archived file is self-contained. Remote database contents should
+also be backed up using the database provider's native backup tooling. In
+addition, when PostgreSQL or MySQL is active, SurvivalTweaks automatically
+writes a portable SQLite copy to `storage-exports/automatic/`. The default
+schedule starts five minutes after startup, repeats every 24 hours, and retains
+the newest seven exports. Every copy is reopened and compared with the source
+record counts and deterministic checksum before it is accepted. The schedule
+and retention can be changed under `storage.portable-exports` and applied with
+a validated reload. Manual `storage export` files remain separate and are not
+removed by automatic retention. The newest ten ZIP safety archives are
+retained.
 
 | Command | Effect |
 | --- | --- |
@@ -162,6 +203,11 @@ unrelated server customizations are preserved. A successful migration writes
 range. A configuration created by a newer unsupported plugin build is rejected
 to prevent a destructive downgrade. Reloads require the current schema, so an
 outdated file is migrated by restarting once.
+
+The schema-v3 migration adds PostgreSQL schema, TLS-mode, socket-timeout, and
+query-timeout settings without changing an existing database location.
+The schema-v4 migration enables scheduled, verified portable exports for remote
+databases with conservative schedule and retention defaults.
 
 The `updates` section controls the administrator release notice. Players need
 `survivaltweaks.update-notify` (operator by default). The GitHub repository is

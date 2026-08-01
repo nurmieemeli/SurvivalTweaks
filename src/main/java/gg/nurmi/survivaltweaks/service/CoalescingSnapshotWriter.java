@@ -14,6 +14,8 @@ import java.util.logging.Logger;
 final class CoalescingSnapshotWriter<T> implements AutoCloseable {
 
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
+    private static final long INITIAL_RETRY_MILLIS = 100;
+    private static final long MAX_RETRY_MILLIS = 2_000;
 
     private final ThrowingConsumer<T> saver;
     private final Logger logger;
@@ -75,20 +77,41 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
     }
 
     private void drain() {
+        int failures = 0;
         while (true) {
             T snapshot;
             while ((snapshot = pending.getAndSet(null)) != null) {
                 try {
                     saver.accept(snapshot);
+                    failures = 0;
                 } catch (IOException exception) {
-                    latestRequested.compareAndSet(snapshot, null);
                     logger.log(Level.SEVERE, "Could not save " + description, exception);
+                    if (latestRequested.get() == snapshot) {
+                        pending.compareAndSet(null, snapshot);
+                    }
+                    if (!pauseBeforeRetry(++failures)) {
+                        return;
+                    }
                 }
             }
             scheduled.set(false);
             if (pending.get() == null || !scheduled.compareAndSet(false, true)) {
                 return;
             }
+        }
+    }
+
+    private boolean pauseBeforeRetry(int failures) {
+        long delay = Math.min(
+                MAX_RETRY_MILLIS,
+                INITIAL_RETRY_MILLIS << Math.min(4, failures - 1)
+        );
+        try {
+            Thread.sleep(delay);
+            return true;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

@@ -15,14 +15,22 @@ public record StorageConfiguration(
         String host,
         int port,
         String database,
+        String postgresqlSchema,
         String username,
         String password,
         boolean ssl,
+        String postgresqlSslMode,
         int poolSize,
-        long connectionTimeoutMillis
+        long connectionTimeoutMillis,
+        int socketTimeoutSeconds,
+        int queryTimeoutSeconds
 ) {
 
     private static final String SIMPLE_DATABASE = "[A-Za-z0-9_-]{1,64}";
+    private static final String SIMPLE_SCHEMA = "[A-Za-z_][A-Za-z0-9_]{0,62}";
+    private static final java.util.Set<String> POSTGRESQL_SSL_MODES = java.util.Set.of(
+            "disable", "allow", "prefer", "require", "verify-ca", "verify-full"
+    );
 
     public StorageConfiguration {
         Objects.requireNonNull(backend, "backend");
@@ -31,14 +39,27 @@ public record StorageConfiguration(
                 .normalize();
         host = Objects.requireNonNullElse(host, "").strip();
         database = Objects.requireNonNullElse(database, "").strip();
+        postgresqlSchema = Objects.requireNonNullElse(postgresqlSchema, "survivaltweaks").strip();
         username = Objects.requireNonNullElse(username, "").strip();
         password = Objects.requireNonNullElse(password, "");
+        postgresqlSslMode = Objects.requireNonNullElse(postgresqlSslMode, "verify-full")
+                .strip().toLowerCase(Locale.ROOT);
         if (poolSize < 1 || poolSize > 16) {
             throw new IllegalArgumentException("storage.remote.pool-size must be between 1 and 16");
         }
         if (connectionTimeoutMillis < 250 || connectionTimeoutMillis > 60_000) {
             throw new IllegalArgumentException(
                     "storage.remote.connection-timeout-millis must be between 250 and 60000"
+            );
+        }
+        if (socketTimeoutSeconds < 1 || socketTimeoutSeconds > 600) {
+            throw new IllegalArgumentException(
+                    "storage.remote.socket-timeout-seconds must be between 1 and 600"
+            );
+        }
+        if (queryTimeoutSeconds < 1 || queryTimeoutSeconds > 600) {
+            throw new IllegalArgumentException(
+                    "storage.remote.query-timeout-seconds must be between 1 and 600"
             );
         }
         if (backend != StorageBackend.SQLITE) {
@@ -55,6 +76,18 @@ public record StorageConfiguration(
             }
             if (username.isBlank()) {
                 throw new IllegalArgumentException("storage.remote.username must not be blank");
+            }
+            if (backend == StorageBackend.POSTGRESQL) {
+                if (!postgresqlSchema.matches(SIMPLE_SCHEMA)) {
+                    throw new IllegalArgumentException(
+                            "storage.remote.postgresql-schema must be a simple PostgreSQL identifier"
+                    );
+                }
+                if (!POSTGRESQL_SSL_MODES.contains(postgresqlSslMode)) {
+                    throw new IllegalArgumentException(
+                            "storage.remote.postgresql-ssl-mode is invalid"
+                    );
+                }
             }
         }
     }
@@ -97,11 +130,15 @@ public record StorageConfiguration(
                 config.getString("storage.remote.host", "localhost"),
                 configuredPort > 0 ? configuredPort : defaultPort,
                 config.getString("storage.remote.database", "survivaltweaks"),
+                config.getString("storage.remote.postgresql-schema", "survivaltweaks"),
                 config.getString("storage.remote.username", "survivaltweaks"),
                 config.getString("storage.remote.password", ""),
                 config.getBoolean("storage.remote.ssl", true),
+                config.getString("storage.remote.postgresql-ssl-mode", "verify-full"),
                 config.getInt("storage.remote.pool-size", 4),
-                config.getLong("storage.remote.connection-timeout-millis", 5_000)
+                config.getLong("storage.remote.connection-timeout-millis", 5_000),
+                config.getInt("storage.remote.socket-timeout-seconds", 30),
+                config.getInt("storage.remote.query-timeout-seconds", 30)
         );
     }
 
@@ -114,19 +151,22 @@ public record StorageConfiguration(
                         ? port
                         : portFor(requested),
                 database,
+                postgresqlSchema,
                 username,
                 password,
                 ssl,
+                postgresqlSslMode,
                 poolSize,
-                connectionTimeoutMillis
+                connectionTimeoutMillis,
+                socketTimeoutSeconds,
+                queryTimeoutSeconds
         );
     }
 
     public String jdbcUrl() {
         return switch (backend) {
             case SQLITE -> "jdbc:sqlite:" + sqliteFile;
-            case POSTGRESQL -> "jdbc:postgresql://" + host + ":" + port + "/" + database
-                    + (ssl ? "?sslmode=require" : "?sslmode=disable");
+            case POSTGRESQL -> "jdbc:postgresql://" + host + ":" + port + "/" + database;
             case MYSQL -> "jdbc:mysql://" + host + ":" + port + "/" + database
                     + "?useUnicode=true&characterEncoding=utf8"
                     + "&serverTimezone=UTC&useSSL=" + ssl
@@ -145,7 +185,19 @@ public record StorageConfiguration(
     public String endpointFingerprint() {
         String endpoint = backend == StorageBackend.SQLITE
                 ? backend.key() + "|" + sqliteFile
+                : backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database
+                        + (backend == StorageBackend.POSTGRESQL ? "|" + postgresqlSchema : "");
+        return fingerprint(endpoint);
+    }
+
+    public String legacyEndpointFingerprint() {
+        String endpoint = backend == StorageBackend.SQLITE
+                ? backend.key() + "|" + sqliteFile
                 : backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database;
+        return fingerprint(endpoint);
+    }
+
+    private static String fingerprint(String endpoint) {
         try {
             return HexFormat.of().formatHex(
                     MessageDigest.getInstance("SHA-256")

@@ -621,7 +621,7 @@ public final class LockControlPanelController implements Listener {
         TRANSFER
     }
 
-    private static final class LockPanel implements InventoryHolder {
+    private static final class LockPanel implements SurvivalTweaksMenu {
 
         private final UUID viewerId;
         private final UUID lockId;

@@ -12,12 +12,15 @@ import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+
+import java.util.logging.Level;
 
 public final class ConnectionListener implements Listener {
 
@@ -56,7 +59,21 @@ public final class ConnectionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         if (event.getLoginResult() == AsyncPlayerPreLoginEvent.Result.ALLOWED) {
-            profiles.load(event.getUniqueId());
+            try {
+                profiles.load(event.getUniqueId());
+            } catch (RuntimeException exception) {
+                Bukkit.getLogger().log(
+                        Level.SEVERE,
+                        "Could not load SurvivalTweaks profile for " + event.getUniqueId(),
+                        exception
+                );
+                event.disallow(
+                        AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
+                        Component.text(
+                                "Your player data could not be loaded. Please try again shortly."
+                        )
+                );
+            }
         }
     }
 

@@ -182,10 +182,14 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
         assertNotNull(config.getString("feedback.cues.afk-enabled.sound"));
         assertNotNull(config.getString("feedback.cues.afk-disabled.particle"));
-        assertEquals(2, config.getInt("config-version"));
+        assertEquals(4, config.getInt("config-version"));
         assertEquals("auto", config.getString("storage.backend"));
         assertEquals("survivaltweaks.db", config.getString("storage.sqlite.file"));
         assertEquals(4, config.getInt("storage.remote.pool-size"));
+        assertTrue(config.getBoolean("storage.portable-exports.enabled"));
+        assertEquals(24, config.getInt("storage.portable-exports.interval-hours"));
+        assertEquals(5, config.getInt("storage.portable-exports.initial-delay-minutes"));
+        assertEquals(7, config.getInt("storage.portable-exports.retention"));
         assertTrue(config.getBoolean("updates.enabled"));
         assertEquals(6, config.getInt("updates.check-interval-hours"));
         assertNotNull(finnish.getString("lock.denied-open"));

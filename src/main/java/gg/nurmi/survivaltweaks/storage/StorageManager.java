@@ -56,6 +56,20 @@ public final class StorageManager implements AutoCloseable {
         StorageStateStore.State previous = states.loadState().orElse(null);
         StorageStateStore.Migration migration = states.loadMigration().orElse(null);
         if (migration != null) {
+            if (previous != null
+                    && previous.backend() == migration.target()
+                    && configured.backend() == migration.target()
+                    && endpointMatches(configured, previous.endpointFingerprint())
+                    && endpointMatches(configured, migration.targetFingerprint())) {
+                return recoverCompletedMigration(
+                        normalized,
+                        logger,
+                        configured,
+                        states,
+                        previous,
+                        migration
+                );
+            }
             return migrate(
                     normalized,
                     logger,
@@ -75,7 +89,7 @@ public final class StorageManager implements AutoCloseable {
             );
         }
         if (previous != null
-                && !previous.endpointFingerprint().equals(configured.endpointFingerprint())) {
+                && !endpointMatches(configured, previous.endpointFingerprint())) {
             throw new IOException(
                     "The configured storage endpoint differs from the pinned endpoint; "
                             + "use the storage migration command instead of changing it directly"
@@ -88,6 +102,7 @@ public final class StorageManager implements AutoCloseable {
                     ? existingOrNewInstance(storage)
                     : previous.instanceId();
             storage.ensureInstanceId(instanceId);
+            storage.acquireInstanceLease();
             ImportResult imported = importLegacyIfNeeded(
                     normalized,
                     logger,
@@ -144,10 +159,20 @@ public final class StorageManager implements AutoCloseable {
         return storage.exportSnapshot();
     }
 
-    public ExportResult exportPortable() throws IOException {
+    public synchronized ExportResult exportPortable() throws IOException {
+        return exportPortableTo(dataFolder.resolve("storage-exports"));
+    }
+
+    public synchronized ExportResult exportPortable(String collection) throws IOException {
+        if (collection == null || !collection.matches("[a-z0-9-]{1,32}")) {
+            throw new IllegalArgumentException("Portable export collection name is invalid");
+        }
+        return exportPortableTo(dataFolder.resolve("storage-exports").resolve(collection));
+    }
+
+    private ExportResult exportPortableTo(Path exports) throws IOException {
         StorageSnapshot snapshot = storage.exportSnapshot();
         String checksum = StorageChecksum.calculate(snapshot);
-        Path exports = dataFolder.resolve("storage-exports");
         Files.createDirectories(exports);
         String timestamp = DateTimeFormatter.ofPattern("uuuuMMdd-HHmmss")
                 .withZone(ZoneOffset.UTC)
@@ -165,11 +190,15 @@ public final class StorageManager implements AutoCloseable {
                 "",
                 5432,
                 "",
+                "survivaltweaks",
                 "",
                 "",
                 false,
+                "disable",
                 1,
-                5_000
+                5_000,
+                30,
+                30
         );
         try (SqlStorage portable = new SqlStorage(portableConfiguration, logger)) {
             portable.replaceAll(snapshot, state.instanceId());
@@ -187,7 +216,7 @@ public final class StorageManager implements AutoCloseable {
         StorageConfiguration tested = configuration.forBackend(target);
         long started = System.nanoTime();
         try (SqlStorage candidate = new SqlStorage(tested, logger)) {
-            SqlStorage.Verification verification = candidate.verify();
+            SqlStorage.Verification verification = candidate.verifyUninitialized();
             if (!verification.healthy()) {
                 throw new IOException(String.join("; ", verification.problems()));
             }
@@ -207,12 +236,13 @@ public final class StorageManager implements AutoCloseable {
         }
         StorageConfiguration targetConfiguration = configuration.forBackend(target);
         try (SqlStorage destination = new SqlStorage(targetConfiguration, logger)) {
+            destination.acquireInstanceLease();
             if (!destination.isEmpty()) {
                 throw new IOException(
                         "The destination database is not empty; refusing to overwrite it"
                 );
             }
-            SqlStorage.Verification verification = destination.verify();
+            SqlStorage.Verification verification = destination.verifyUninitialized();
             if (!verification.healthy()) {
                 throw new IOException(
                         "Destination verification failed: "
@@ -239,6 +269,10 @@ public final class StorageManager implements AutoCloseable {
     }
 
     public SqlStorage.SnapshotLease acquireSnapshotLease() throws IOException {
+        if (configuration.backend() != StorageBackend.SQLITE) {
+            return () -> {
+            };
+        }
         return storage.acquireSnapshotLease();
     }
 
@@ -274,10 +308,10 @@ public final class StorageManager implements AutoCloseable {
                 configured.forBackend(migration.source());
         StorageConfiguration targetConfiguration =
                 configured.forBackend(migration.target());
-        if (!sourceConfiguration.endpointFingerprint().equals(previous.endpointFingerprint())) {
+        if (!endpointMatches(sourceConfiguration, previous.endpointFingerprint())) {
             throw new IOException("Source storage endpoint no longer matches the pinned endpoint");
         }
-        if (!targetConfiguration.endpointFingerprint().equals(migration.targetFingerprint())) {
+        if (!endpointMatches(targetConfiguration, migration.targetFingerprint())) {
             throw new IOException("Target storage configuration changed after migration was staged");
         }
 
@@ -287,6 +321,8 @@ public final class StorageManager implements AutoCloseable {
         boolean targetWasEmpty = false;
         try {
             source.ensureInstanceId(previous.instanceId());
+            source.acquireInstanceLease();
+            target.acquireInstanceLease();
             StorageSnapshot snapshot = source.exportSnapshot();
             String sourceChecksum = StorageChecksum.calculate(snapshot);
             if (target.isEmpty()) {
@@ -315,12 +351,21 @@ public final class StorageManager implements AutoCloseable {
             }
             StorageStateStore.State active = new StorageStateStore.State(
                     migration.target(),
-                    migration.targetFingerprint(),
+                    targetConfiguration.endpointFingerprint(),
                     previous.instanceId()
             );
             states.saveState(active);
-            states.completeMigration();
+            // Once the active state is switched, the verified target is
+            // authoritative and must never enter failed-copy cleanup.
             keepTarget = true;
+            try {
+                states.completeMigration();
+            } catch (IOException cleanupFailure) {
+                logger.warning(
+                        "Storage migration completed, but its staging marker could not be removed; "
+                                + "startup will retry cleanup: " + cleanupFailure.getMessage()
+                );
+            }
             logger.info(
                     "Completed storage migration " + migration.id()
                             + " from " + migration.source().key()
@@ -362,6 +407,73 @@ public final class StorageManager implements AutoCloseable {
         }
     }
 
+    private static StorageManager recoverCompletedMigration(
+            Path dataFolder,
+            Logger logger,
+            StorageConfiguration configuration,
+            StorageStateStore states,
+            StorageStateStore.State previous,
+            StorageStateStore.Migration migration
+    ) throws IOException {
+        SqlStorage target = new SqlStorage(configuration, logger);
+        try {
+            target.ensureInstanceId(previous.instanceId());
+            target.acquireInstanceLease();
+            SqlStorage.Verification verification = target.verify();
+            if (!verification.healthy()) {
+                throw new IOException(
+                        "Interrupted migration target failed verification: "
+                                + String.join("; ", verification.problems())
+                );
+            }
+            StorageSnapshot snapshot = target.exportSnapshot();
+            StorageStateStore.State active = new StorageStateStore.State(
+                    migration.target(),
+                    configuration.endpointFingerprint(),
+                    previous.instanceId()
+            );
+            states.saveState(active);
+            try {
+                states.completeMigration();
+            } catch (IOException cleanupFailure) {
+                logger.warning(
+                        "Recovered storage migration, but its staging marker could not be removed; "
+                                + "startup will retry cleanup: " + cleanupFailure.getMessage()
+                );
+            }
+            String checksum = StorageChecksum.calculate(snapshot);
+            logger.info(
+                    "Recovered completed storage migration " + migration.id()
+                            + " after an interrupted state-file cleanup"
+            );
+            return new StorageManager(
+                    dataFolder,
+                    logger,
+                    configuration,
+                    states,
+                    target,
+                    active,
+                    new ImportResult(false, snapshot.counts(), checksum, Instant.now())
+            );
+        } catch (Exception exception) {
+            target.close();
+            if (exception instanceof IOException io) {
+                throw io;
+            }
+            throw new IOException("Could not recover interrupted storage migration", exception);
+        }
+    }
+
+    private static boolean endpointMatches(
+            StorageConfiguration configuration,
+            String fingerprint
+    ) {
+        return configuration.endpointFingerprint().equals(fingerprint)
+                || (configuration.backend() == StorageBackend.POSTGRESQL
+                && configuration.postgresqlSchema().equals("public")
+                && configuration.legacyEndpointFingerprint().equals(fingerprint));
+    }
+
     private static ImportResult importLegacyIfNeeded(
             Path dataFolder,
             Logger logger,
@@ -376,7 +488,7 @@ public final class StorageManager implements AutoCloseable {
         if (!hasLegacy || (!storage.isEmpty() && !recoverUnpinned)) {
             return new ImportResult(
                     false,
-                    new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0),
+                    new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0, 0),
                     "",
                     Instant.now()
             );

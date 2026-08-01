@@ -21,7 +21,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -357,7 +356,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         return item;
     }
 
-    private static final class StatisticsHolder implements InventoryHolder {
+    private static final class StatisticsHolder implements SurvivalTweaksMenu {
 
         private final UUID viewerId;
         private final Consumer<Player> back;

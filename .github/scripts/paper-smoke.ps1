@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-$paperUrl = "https://fill-data.papermc.io/v1/objects/defe82c1c89067186895de34cf32983e9f5a2ea387cfe7597c020faebb98ca16/paper-26.2-84.jar"
-$paperSha256 = "DEFE82C1C89067186895DE34CF32983E9F5A2EA387CFE7597C020FAEBB98CA16"
+$paperUrl = "https://fill-data.papermc.io/v1/objects/3ab7536642d04c504a06fe43174b8a94f8c5f25d5847d4672212413f6e54b906/paper-26.2-87.jar"
+$paperSha256 = "3AB7536642D04C504A06FE43174B8A94F8C5F25D5847D4672212413F6E54B906"
 $repository = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $runnerTemporary = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $smokeRoot = Join-Path $runnerTemporary "survivaltweaks-paper-smoke"
@@ -20,7 +20,7 @@ $pluginJar = $jars[0]
 $version = [regex]::Match($pluginJar.Name, "^SurvivalTweaks-(.+)\.jar$").Groups[1].Value
 Copy-Item -LiteralPath $pluginJar.FullName -Destination (Join-Path $smokeRoot "plugins/$($pluginJar.Name)")
 
-$paperJar = Join-Path $smokeRoot "paper-26.2-84.jar"
+$paperJar = Join-Path $smokeRoot "paper-26.2-87.jar"
 Invoke-WebRequest -Uri $paperUrl -OutFile $paperJar
 $actualPaperSha256 = (Get-FileHash -LiteralPath $paperJar -Algorithm SHA256).Hash
 if ($actualPaperSha256 -ne $paperSha256) {
@@ -95,7 +95,7 @@ $startInfo.WorkingDirectory = $smokeRoot
 $startInfo.UseShellExecute = $false
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
-$startInfo.Arguments = "-Xms512M -Xmx1G -jar paper-26.2-84.jar --nogui"
+$startInfo.Arguments = "-Xms512M -Xmx1G -jar paper-26.2-87.jar --nogui"
 
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
@@ -177,4 +177,4 @@ if (($standardOutput + "`n" + $standardError) -match "(?im)\b(SEVERE|ERROR)\b|Ex
     throw "Paper smoke-test logs contain an exception or error-level entry. Logs: $smokeRoot"
 }
 
-Write-Host "Paper 26.2 build 84 smoke test passed for SurvivalTweaks $version."
+Write-Host "Paper 26.2 build 87 smoke test passed for SurvivalTweaks $version."

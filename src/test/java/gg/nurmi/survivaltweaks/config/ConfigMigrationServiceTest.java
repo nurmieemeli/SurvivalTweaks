@@ -32,11 +32,31 @@ class ConfigMigrationServiceTest {
         ConfigMigrationService.Result result = migrations.migrate(config, dataFolder);
 
         assertTrue(result.changed());
-        assertEquals(2, config.getInt("config-version"));
+        assertEquals(4, config.getInt("config-version"));
+        assertEquals("public", config.getString("storage.remote.postgresql-schema"));
+        assertEquals("require", config.getString("storage.remote.postgresql-ssl-mode"));
         assertFalse(config.contains("disabled-commands", true));
         assertFalse(config.contains("death-recovery.give-compass", true));
         assertTrue(Files.readString(dataFolder.resolve("config-migration-report.txt"))
-                .contains("Schema: 0 -> 2"));
+                .contains("Schema: 0 -> 4"));
+        assertTrue(config.getBoolean("storage.portable-exports.enabled"));
+        assertEquals(24, config.getInt("storage.portable-exports.interval-hours"));
+        assertEquals(5, config.getInt("storage.portable-exports.initial-delay-minutes"));
+        assertEquals(7, config.getInt("storage.portable-exports.retention"));
+    }
+
+    @Test
+    void versionTwoPreservesItsPostgresqlLocationAndTlsSemantics() throws Exception {
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("config-version", 2);
+        config.set("storage.remote.ssl", false);
+
+        service().migrate(config, dataFolder);
+
+        assertEquals("public", config.getString("storage.remote.postgresql-schema"));
+        assertEquals("disable", config.getString("storage.remote.postgresql-ssl-mode"));
+        assertEquals(30, config.getInt("storage.remote.socket-timeout-seconds"));
+        assertEquals(30, config.getInt("storage.remote.query-timeout-seconds"));
     }
 
     @Test

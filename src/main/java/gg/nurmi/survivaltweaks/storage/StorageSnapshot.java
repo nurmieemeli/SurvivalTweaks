@@ -36,7 +36,8 @@ public record StorageSnapshot(
                 deathMarkers.size(),
                 newPlayerSpawns.available().size(),
                 newPlayerSpawns.assignments().size(),
-                newPlayerSpawns.retired().size()
+                newPlayerSpawns.retired().size(),
+                newPlayerSpawns.awaitingReplacement().size()
         );
     }
 
@@ -52,12 +53,13 @@ public record StorageSnapshot(
             int deathMarkers,
             int preparedSpawns,
             int assignedSpawns,
-            int retiredSpawns
+            int retiredSpawns,
+            int replacementSpawns
     ) {
 
         public int total() {
             return profiles + homes + notifications + locks + deathMarkers
-                    + preparedSpawns + assignedSpawns + retiredSpawns;
+                    + preparedSpawns + assignedSpawns + retiredSpawns + replacementSpawns;
         }
     }
 }

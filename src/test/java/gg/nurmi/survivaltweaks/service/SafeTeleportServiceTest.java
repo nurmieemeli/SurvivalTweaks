@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.ui.SurvivalTweaksMenu;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
@@ -13,6 +14,8 @@ import org.bukkit.block.Block;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
@@ -56,6 +59,7 @@ class SafeTeleportServiceTest {
     private World originWorld;
     private Location origin;
     private BukkitTask warmupTask;
+    private SettingsService settingsService;
 
     @BeforeEach
     void setUp() {
@@ -139,6 +143,121 @@ class SafeTeleportServiceTest {
 
         assertFalse(damageService.isPending(player.getUniqueId()));
         verify(messages).send(player, "teleport.safety.cancelled-damage");
+    }
+
+    @Test
+    void anOpenContainerPreventsTeleportingAtAll() {
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        service.containerOpened(player);
+
+        assertFalse(service.begin(player, origin::clone, SUCCESS));
+
+        assertFalse(service.isPending(player.getUniqueId()));
+        verify(messages).send(player, "teleport.safety.container-open");
+        verify(scheduler, never()).runTaskLater(eq(plugin), any(Runnable.class), anyLong());
+    }
+
+    @Test
+    void aContainerAlreadyOpenWhenTheServiceStartsPreventsTeleporting() {
+        InventoryView view = mock(InventoryView.class);
+        Inventory inventory = mock(Inventory.class);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(view.getTopInventory()).thenReturn(inventory);
+
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+
+        assertFalse(service.begin(player, origin::clone, SUCCESS));
+        verify(messages).send(player, "teleport.safety.container-open");
+    }
+
+    @Test
+    void aSurvivalTweaksMenuDoesNotCountAsAnOpenContainer() {
+        InventoryView view = mock(InventoryView.class);
+        Inventory inventory = mock(Inventory.class);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(view.getTopInventory()).thenReturn(inventory);
+        SurvivalTweaksMenu menu = mock(SurvivalTweaksMenu.class);
+        when(inventory.getHolder(false)).thenReturn(menu);
+
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+
+        assertTrue(service.begin(player, origin::clone, SUCCESS));
+        assertTrue(service.isPending(player.getUniqueId()));
+    }
+
+    @Test
+    void closingTheContainerAllowsTeleportingAgain() {
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        service.containerOpened(player);
+        assertFalse(service.begin(player, origin::clone, SUCCESS));
+
+        service.containerClosed(player.getUniqueId());
+
+        assertTrue(service.begin(player, origin::clone, SUCCESS));
+        assertTrue(service.isPending(player.getUniqueId()));
+    }
+
+    @Test
+    void openingAContainerDuringWarmupCancelsTheTeleport() {
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, origin::clone, SUCCESS));
+
+        service.containerOpened(player);
+
+        assertFalse(service.isPending(player.getUniqueId()));
+        verify(warmupTask).cancel();
+        verify(messages).send(player, "teleport.safety.cancelled-inventory");
+    }
+
+    @Test
+    void aContainerOpenedDuringWarmupStillBlocksTheCutover() {
+        World destinationWorld = safeWorld();
+        Location destination = new Location(destinationWorld, 100.5, 70, -20.5);
+        SafeTeleportService service = service(
+                Duration.ofSeconds(3),
+                Duration.ZERO,
+                0,
+                false
+        );
+        assertTrue(service.begin(player, destination::clone, SUCCESS));
+
+        service.containerOpened(player);
+        enableContainerGuard();
+        scheduledWarmup().run();
+
+        assertFalse(service.isPending(player.getUniqueId()));
+        verify(player, never()).teleportAsync(
+                any(Location.class),
+                any(PlayerTeleportEvent.TeleportCause.class)
+        );
+        verify(messages).send(player, "teleport.safety.cancelled-inventory");
+    }
+
+    @Test
+    void disconnectingForgetsAnOpenContainer() {
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        service.containerOpened(player);
+
+        service.playerDisconnected(player.getUniqueId());
+
+        assertFalse(service.hasContainerOpen(player.getUniqueId()));
+        assertTrue(service.begin(player, origin::clone, SUCCESS));
+    }
+
+    @Test
+    void theContainerGuardCanBeDisabled() {
+        SafeTeleportService service = service(
+                Duration.ofSeconds(3),
+                Duration.ZERO,
+                0,
+                false
+        );
+        service.containerOpened(player);
+
+        assertTrue(service.begin(player, origin::clone, SUCCESS));
+
+        assertTrue(service.isPending(player.getUniqueId()));
+        verify(messages, never()).send(player, "teleport.safety.container-open");
     }
 
     @Test
@@ -235,18 +354,37 @@ class SafeTeleportServiceTest {
         );
     }
 
+    private void enableContainerGuard() {
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("teleport.cancel-on-inventory-open", true);
+        settingsService.apply(PluginSettings.load(config, Logger.getAnonymousLogger()));
+    }
+
     private SafeTeleportService service(Duration warmup, Duration cooldown, int searchRadius) {
+        return service(warmup, cooldown, searchRadius, true);
+    }
+
+    private SafeTeleportService service(
+            Duration warmup,
+            Duration cooldown,
+            int searchRadius,
+            boolean cancelOnInventoryOpen
+    ) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("teleport.warmup-seconds", warmup.toSeconds());
         config.set("teleport.cooldown-seconds", cooldown.toSeconds());
         config.set("teleport.safe-search-radius", searchRadius);
+        config.set("teleport.cancel-on-inventory-open", cancelOnInventoryOpen);
         config.set("ui.action-bar-enabled", false);
+        settingsService = new SettingsService(
+                PluginSettings.load(config, Logger.getAnonymousLogger())
+        );
         return new SafeTeleportService(
                 plugin,
                 messages,
                 feedback,
                 clock,
-                new SettingsService(PluginSettings.load(config, Logger.getAnonymousLogger())),
+                settingsService,
                 mock(ActionBarService.class)
         );
     }

@@ -8,7 +8,6 @@ import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
@@ -18,7 +17,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
 
-final class HomeMenu implements InventoryHolder {
+final class HomeMenu implements SurvivalTweaksMenu {
 
     static final int PAGE_SIZE = 45;
     static final int PREVIOUS_SLOT = 45;

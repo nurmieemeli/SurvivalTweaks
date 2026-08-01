@@ -12,14 +12,14 @@ body:
     attributes:
       label: SurvivalTweaks version
       description: Use the exact version shown by the server or JAR filename.
-      placeholder: 2.20.1
+      placeholder: 2.21.0
     validations:
       required: true
   - type: input
     id: paper-version
     attributes:
       label: Paper and Java versions
-      placeholder: Paper 26.2 build 84, Java 25
+      placeholder: Paper 26.2 build 87, Java 25
     validations:
       required: true
   - type: textarea

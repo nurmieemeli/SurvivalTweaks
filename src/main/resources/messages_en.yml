@@ -254,6 +254,8 @@ teleport:
     cooldown-one: "<red>You can teleport again in <seconds> second.</red>"
     cancelled-move: "<red>Teleport cancelled because you moved.</red>"
     cancelled-damage: "<red>Teleport cancelled because you took damage.</red>"
+    cancelled-inventory: "<red>Teleport cancelled because you opened a container.</red>"
+    container-open: "<red>Close the container before teleporting.</red>"
     unsafe: "<red>No safe teleport destination was found.</red>"
     unavailable: "<red>The teleport destination is no longer available.</red>"
     failed: "<red>Teleport failed.</red>"

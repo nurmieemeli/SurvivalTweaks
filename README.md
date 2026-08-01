@@ -165,8 +165,8 @@ feature:
 | Sections | Controls |
 | --- | --- |
 | `performance` | Adaptive MSPT thresholds, recovery hysteresis, and the shared per-tick budget for batchable work |
-| `home`, `storage` | Home limits, SQLite file, remote database connection, pooling, and timeouts |
-| `teleport` | Requests, warm-up, cooldown, cancellation, and safe landing |
+| `home`, `storage` | Home limits, SQLite file, remote database/schema, verified TLS, pooling, timeouts, and verified portable-export retention |
+| `teleport` | Requests, warm-up, cooldown, cancellation, safe landing, and the open-container duplication guard |
 | `new-player-spawn` | World, coordinate bounds, pool size, spacing, pacing, TPS floor, landing checks, and blocked biomes |
 | `locked-containers` | Targeting, limits, explosion protection, and automation defaults |
 | `tree-feller`, `fast-leaf-decay` | Felling safety limits and leaf-decay pacing |
@@ -227,7 +227,16 @@ English catalog.
 Profiles, locks, death markers, and first-join spawn state share one normalized,
 transactional SQL store. SQLite is automatic and requires no setup. PostgreSQL
 and MySQL are optional remote backends with bounded connection pooling; their
-JDBC drivers are bundled in the plugin JAR.
+JDBC drivers are bundled in the plugin JAR. Remote stores use finite I/O
+timeouts, automatic save retries, and a singleton database-session lock that
+rejects a second server using the same endpoint. PostgreSQL uses an explicit
+schema and defaults to `verify-full` TLS for new installations.
+
+When a remote backend is active, SurvivalTweaks also creates a verified,
+portable SQLite export every 24 hours by default. Each export is reopened and
+checked against the source record counts and deterministic checksum before it
+is retained; the newest seven are kept in
+`storage-exports/automatic/`. These settings are reloadable.
 
 The first SQL startup imports existing YAML data only when the database is
 empty, verifies record counts and a deterministic checksum, and preserves the
@@ -240,6 +249,11 @@ endpoint while leaving the active backend selected, run `storage test`, then
 run `storage migrate`. On restart, SurvivalTweaks copies the complete logical
 snapshot in one transaction, verifies it, and switches the pinned backend only
 after success. The source remains authoritative after any failure.
+
+Logical exports use one repeatable-read transaction and bulk-load each table,
+avoiding one query per player or lock. Runtime aggregate saves compare stable
+keys and only replace rows that actually changed, reducing database work while
+preserving transactional rollback behavior.
 
 SurvivalTweaks creates safety archives before startup data loading and
 configuration reloads, retaining the newest ten. Restores are staged while the
