@@ -46,11 +46,15 @@ public final class SessionSummaryService {
     }
 
     public void playerJoined(Player player) {
+        playerJoined(player, true);
+    }
+
+    public void playerJoined(Player player, boolean includeActivity) {
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
             if (!player.isOnline()) {
                 return;
             }
-            Component summary = summary(player);
+            Component summary = summary(player, includeActivity);
             if (summary != null) {
                 player.sendMessage(summary);
             }
@@ -58,25 +62,34 @@ public final class SessionSummaryService {
     }
 
     Component summary(Player player) {
-        long unread = notifications.unread(player.getUniqueId());
-        int incoming = requests.incomingRequests(player.getUniqueId(), clock.instant()).size();
+        return summary(player, true);
+    }
+
+    Component summary(Player player, boolean includeActivity) {
         List<Component> items = new ArrayList<>();
-        if (unread > 0) {
-            items.add(messages.component(
-                    player,
-                    MessageService.plural("session-summary.unread", unread),
-                    Placeholder.unparsed("count", Long.toString(unread))
-            ));
-        }
-        if (incoming > 0) {
-            items.add(messages.component(
-                    player,
-                    MessageService.plural("session-summary.teleports", incoming),
-                    Placeholder.unparsed("count", Integer.toString(incoming))
-            ));
-        }
-        if (deathRecovery.hasActiveMarker(player.getUniqueId())) {
-            items.add(messages.component(player, "session-summary.death-marker"));
+        if (includeActivity) {
+            long unread = notifications.unread(player.getUniqueId());
+            int incoming = requests.incomingRequests(
+                    player.getUniqueId(),
+                    clock.instant()
+            ).size();
+            if (unread > 0) {
+                items.add(messages.component(
+                        player,
+                        MessageService.plural("session-summary.unread", unread),
+                        Placeholder.unparsed("count", Long.toString(unread))
+                ));
+            }
+            if (incoming > 0) {
+                items.add(messages.component(
+                        player,
+                        MessageService.plural("session-summary.teleports", incoming),
+                        Placeholder.unparsed("count", Integer.toString(incoming))
+                ));
+            }
+            if (deathRecovery.hasActiveMarker(player.getUniqueId())) {
+                items.add(messages.component(player, "session-summary.death-marker"));
+            }
         }
 
         MaintenanceService.Status status = maintenance.status();

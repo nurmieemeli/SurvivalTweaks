@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.23.0 - 2026-08-01
+
+### Added
+
+- An architecture and state-ownership map, cross-feature player journey
+  contracts, and a complete 2.23 audit report for maintainers.
+- Runtime session and join-experience coordinators with lifecycle and ownership
+  contract coverage.
+
+### Changed
+
+- Returning-player arrival feedback is coordinated so a rich welcome overview
+  suppresses duplicate activity counts while retaining urgent maintenance and
+  restart notices.
+- Configuration reload now applies the exact validated candidate to every
+  runtime consumer.
+
+### Fixed
+
+- Player identity, play-time, and last-seen persistence no longer depend on a
+  welcome-screen controller.
+- Configuration reload rejects a file changed during validation and restores
+  previous runtime settings and configuration if application fails.
+
 ## 2.22.0 - 2026-08-01
 
 ### Added

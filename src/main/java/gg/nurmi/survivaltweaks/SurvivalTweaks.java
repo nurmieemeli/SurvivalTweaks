@@ -38,7 +38,9 @@ import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.OnboardingService;
 import gg.nurmi.survivaltweaks.service.JourneyService;
+import gg.nurmi.survivaltweaks.service.JoinExperienceCoordinator;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
+import gg.nurmi.survivaltweaks.service.PlayerSessionService;
 import gg.nurmi.survivaltweaks.service.PlayerListService;
 import gg.nurmi.survivaltweaks.service.PlayerStatisticsService;
 import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
@@ -97,6 +99,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private final Clock clock = Clock.systemUTC();
 
     private ProfileRepository profiles;
+    private PlayerSessionService playerSessions;
     private TeleportRequestService teleportRequests;
     private SafeTeleportService safeTeleports;
     private ContainerLockService containerLocks;
@@ -205,6 +208,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 messages
         );
         profiles = new ProfileRepository(storageManager.store(), getLogger(), persistenceMonitor);
+        playerSessions = new PlayerSessionService(profiles, clock);
         PlayerExperienceService experience = new PlayerExperienceService(profiles);
         messages.languagePreference(playerId -> experience.preferences(playerId).language());
         feedback.preferenceProvider(experience::preferences);
@@ -455,6 +459,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 this,
                 settings,
                 profiles,
+                playerSessions,
                 notifications,
                 teleportRequests,
                 deathRecovery,
@@ -498,6 +503,22 @@ public final class SurvivalTweaks extends JavaPlugin {
         inbox.backTo(hub::open);
 
         getServer().getOnlinePlayers().forEach(player -> profiles.load(player.getUniqueId()));
+        SessionSummaryService sessionSummaries = new SessionSummaryService(
+                this,
+                messages,
+                notifications,
+                teleportRequests,
+                deathRecovery,
+                maintenance,
+                clock
+        );
+        JoinExperienceCoordinator joinExperience = new JoinExperienceCoordinator(
+                newPlayerSpawns,
+                welcomeBack,
+                releaseUpdates,
+                sessionSummaries,
+                operationalHealth
+        );
         CustomEnchantItemService customEnchantments =
                 new CustomEnchantItemService(this, messages);
         registerListeners(
@@ -523,7 +544,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 notifications,
                 experience,
                 actionBars,
-                customEnchantments
+                customEnchantments,
+                joinExperience
         );
         registerCommands(
                 dialogs,
@@ -606,8 +628,12 @@ public final class SurvivalTweaks extends JavaPlugin {
             containerLocks = null;
         }
         if (welcomeBack != null) {
-            getServer().getOnlinePlayers().forEach(welcomeBack::playerLeaving);
             welcomeBack = null;
+        }
+        if (playerSessions != null) {
+            getServer().getOnlinePlayers().forEach(playerSessions::end);
+            playerSessions.close();
+            playerSessions = null;
         }
         if (portableExports != null) {
             portableExports.close();
@@ -664,7 +690,8 @@ public final class SurvivalTweaks extends JavaPlugin {
             NotificationService notifications,
             PlayerExperienceService experience,
             ActionBarService actionBars,
-            CustomEnchantItemService customEnchantments
+            CustomEnchantItemService customEnchantments,
+            JoinExperienceCoordinator joinExperience
     ) {
         PluginManager pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(
@@ -673,20 +700,9 @@ public final class SurvivalTweaks extends JavaPlugin {
                         teleportRequests,
                         messages,
                         settings,
-                        newPlayerSpawns,
-                        welcomeBack,
                         experience,
-                        releaseUpdates,
-                        new SessionSummaryService(
-                                this,
-                                messages,
-                                notifications,
-                                teleportRequests,
-                                deathRecovery,
-                                maintenance,
-                                clock
-                        ),
-                        operationalHealth
+                        playerSessions,
+                        joinExperience
                 ),
                 this
         );
@@ -898,7 +914,10 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
     }
 
-    private void applyReloadedSettings(PluginSettings reloaded) {
+    private void applyReloadedSettings(
+            PluginSettings reloaded,
+            FileConfiguration configuration
+    ) {
         restartAutosave(reloaded);
         purgeInactiveLocks(reloaded);
         if (newPlayerSpawns != null) {
@@ -914,10 +933,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             serverList.reconfigure();
         }
         if (releaseUpdates != null) {
-            releaseUpdates.reconfigure(getConfig());
+            releaseUpdates.reconfigure(configuration);
         }
         if (portableExports != null) {
-            portableExports.reconfigure(getConfig());
+            portableExports.reconfigure(configuration);
         }
     }
 

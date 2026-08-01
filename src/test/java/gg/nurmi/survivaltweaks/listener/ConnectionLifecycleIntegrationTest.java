@@ -3,13 +3,11 @@ package gg.nurmi.survivaltweaks.listener;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.MessageService;
-import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
+import gg.nurmi.survivaltweaks.service.JoinExperienceCoordinator;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
+import gg.nurmi.survivaltweaks.service.PlayerSessionService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
-import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
-import gg.nurmi.survivaltweaks.service.SessionSummaryService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
-import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -34,25 +32,26 @@ class ConnectionLifecycleIntegrationTest {
         MessageService messages = mock(MessageService.class);
         PluginSettings configuration = mock(PluginSettings.class);
         SettingsService settings = new SettingsService(configuration);
-        NewPlayerSpawnService spawns = mock(NewPlayerSpawnService.class);
-        WelcomeBackController welcomeBack = mock(WelcomeBackController.class);
         PlayerExperienceService experience = mock(PlayerExperienceService.class);
-        ReleaseUpdateService releaseUpdates = mock(ReleaseUpdateService.class);
-        SessionSummaryService sessionSummaries = mock(SessionSummaryService.class);
+        PlayerSessionService sessions = mock(PlayerSessionService.class);
+        JoinExperienceCoordinator joinExperience = mock(JoinExperienceCoordinator.class);
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(playerId);
         when(configuration.connectionMessagesEnabled()).thenReturn(false);
+        PlayerSessionService.Session session = new PlayerSessionService.Session(
+                false,
+                java.util.Optional.empty()
+        );
+        when(sessions.begin(player)).thenReturn(session);
 
         ConnectionListener listener = new ConnectionListener(
                 profiles,
                 requests,
                 messages,
                 settings,
-                spawns,
-                welcomeBack,
                 experience,
-                releaseUpdates,
-                sessionSummaries
+                sessions,
+                joinExperience
         );
         AsyncPlayerPreLoginEvent preLogin = mock(AsyncPlayerPreLoginEvent.class);
         when(preLogin.getLoginResult()).thenReturn(AsyncPlayerPreLoginEvent.Result.ALLOWED);
@@ -70,16 +69,14 @@ class ConnectionLifecycleIntegrationTest {
         when(quit.getPlayer()).thenReturn(player);
         listener.onQuit(quit);
 
-        verify(profiles, times(3)).load(playerId);
+        verify(profiles).load(playerId);
+        verify(sessions, times(2)).begin(player);
         verify(experience, times(2)).prime(playerId);
-        verify(welcomeBack, times(2)).playerJoined(player);
-        verify(spawns, times(2)).playerJoined(player);
-        verify(releaseUpdates, times(2)).playerJoined(player);
-        verify(sessionSummaries, times(2)).playerJoined(player);
-        verify(welcomeBack).playerLeaving(player);
+        verify(joinExperience, times(2)).playerJoined(player, session);
+        verify(sessions).end(player);
         verify(profiles).playerDisconnected(playerId);
         verify(experience).forget(playerId);
-        verify(spawns).playerDisconnected(playerId);
+        verify(joinExperience).playerDisconnected(player);
         verify(requests).removeForPlayer(playerId);
         verify(messages, never()).formatPlayerName(player, settings);
     }

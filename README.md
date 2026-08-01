@@ -20,6 +20,8 @@
   <a href="src/main/resources/config.yml">View configuration</a>
   ·
   <a href="docs/operations.md">Operations guide</a>
+  ·
+  <a href="docs/architecture.md">Architecture</a>
 </p>
 
 </div>
@@ -268,6 +270,10 @@ starting it again.
 
 See the [operations guide](docs/operations.md) for backup restoration,
 diagnostics, spawn-pool tuning, and recovery procedures.
+
+Maintainers can also review the [architecture and ownership map](docs/architecture.md),
+the cross-feature [player journey contracts](docs/player-journeys.md), and the
+[2.23 architecture audit](docs/architecture-audit-2.23.md).
 
 ## Building from source
 

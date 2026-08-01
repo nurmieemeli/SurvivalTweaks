@@ -5,14 +5,19 @@ import gg.nurmi.survivaltweaks.config.ConfigMigrationService;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.storage.StorageConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.logging.Level;
 
 public final class ReloadService {
@@ -22,7 +27,7 @@ public final class ReloadService {
     private final MessageService messages;
     private final FeedbackService feedback;
     private final BackupService backups;
-    private final Consumer<PluginSettings> afterApply;
+    private final BiConsumer<PluginSettings, FileConfiguration> afterApply;
     private final AtomicBoolean reloading = new AtomicBoolean();
 
     public ReloadService(
@@ -32,7 +37,10 @@ public final class ReloadService {
             FeedbackService feedback,
             Consumer<PluginSettings> afterApply
     ) {
-        this(plugin, settings, messages, feedback, null, afterApply);
+        this(
+                plugin, settings, messages, feedback, null,
+                (updated, ignored) -> afterApply.accept(updated)
+        );
     }
 
     public ReloadService(
@@ -42,6 +50,20 @@ public final class ReloadService {
             FeedbackService feedback,
             BackupService backups,
             Consumer<PluginSettings> afterApply
+    ) {
+        this(
+                plugin, settings, messages, feedback, backups,
+                (updated, ignored) -> afterApply.accept(updated)
+        );
+    }
+
+    public ReloadService(
+            JavaPlugin plugin,
+            SettingsService settings,
+            MessageService messages,
+            FeedbackService feedback,
+            BackupService backups,
+            BiConsumer<PluginSettings, FileConfiguration> afterApply
     ) {
         this.plugin = plugin;
         this.settings = settings;
@@ -94,33 +116,42 @@ public final class ReloadService {
         if (backups != null) {
             backups.create("reload");
         }
-        YamlConfiguration candidateConfig = loadCandidateConfig();
+        Candidate candidate = loadCandidateConfig();
+        YamlConfiguration candidateConfig = candidate.configuration();
         ConfigMigrationService.requireCurrent(candidateConfig);
         StorageConfiguration.load(candidateConfig, plugin.getDataFolder().toPath());
         PortableExportService.validate(candidateConfig);
         return new Prepared(
                 PluginSettings.validate(candidateConfig),
                 messages.prepareReload(),
-                feedback.prepare(candidateConfig)
+                feedback.prepare(candidateConfig),
+                candidateConfig,
+                candidate.fingerprint()
         );
     }
 
     private Result apply(Prepared prepared) {
+        if (!prepared.configFingerprint().equals(configFingerprint(configPath()))) {
+            throw new IllegalStateException(
+                    "config.yml changed while reload validation was running; retry the command"
+            );
+        }
         PluginSettings previousSettings = settings.current();
         MessageService.Prepared previousMessages = messages.snapshot();
         FeedbackService.Prepared previousFeedback = feedback.snapshot();
+        FileConfiguration previousConfig = plugin.getConfig();
         try {
-            plugin.reloadConfig();
             settings.apply(prepared.settings());
             messages.apply(prepared.messages());
             feedback.apply(prepared.feedback());
-            afterApply.accept(prepared.settings());
+            afterApply.accept(prepared.settings(), prepared.configuration());
+            plugin.reloadConfig();
         } catch (RuntimeException applyFailure) {
             settings.apply(previousSettings);
             messages.apply(previousMessages);
             feedback.apply(previousFeedback);
             try {
-                afterApply.accept(previousSettings);
+                afterApply.accept(previousSettings, previousConfig);
             } catch (RuntimeException rollbackFailure) {
                 applyFailure.addSuppressed(rollbackFailure);
             }
@@ -138,16 +169,39 @@ public final class ReloadService {
                 : reason);
     }
 
-    private YamlConfiguration loadCandidateConfig() throws Exception {
+    private Candidate loadCandidateConfig() throws Exception {
         YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
                 Objects.requireNonNull(plugin.getResource("config.yml"), "Missing bundled config.yml"),
                 StandardCharsets.UTF_8
         ));
+        byte[] source = Files.readAllBytes(configPath());
         YamlConfiguration candidate = new YamlConfiguration();
-        candidate.load(new File(plugin.getDataFolder(), "config.yml"));
+        candidate.loadFromString(new String(source, StandardCharsets.UTF_8));
         candidate.setDefaults(defaults);
         candidate.options().copyDefaults(true);
-        return candidate;
+        return new Candidate(candidate, configFingerprint(source));
+    }
+
+    private Path configPath() {
+        return plugin.getDataFolder().toPath().resolve("config.yml");
+    }
+
+    private String configFingerprint(Path path) {
+        try {
+            return configFingerprint(Files.readAllBytes(path));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not re-read config.yml before applying reload", exception);
+        }
+    }
+
+    private String configFingerprint(byte[] content) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(content)
+            );
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not fingerprint config.yml", exception);
+        }
     }
 
     public record Result(boolean successful, String reason) {
@@ -164,7 +218,12 @@ public final class ReloadService {
     private record Prepared(
             PluginSettings settings,
             MessageService.Prepared messages,
-            FeedbackService.Prepared feedback
+            FeedbackService.Prepared feedback,
+            YamlConfiguration configuration,
+            String configFingerprint
     ) {
+    }
+
+    private record Candidate(YamlConfiguration configuration, String fingerprint) {
     }
 }

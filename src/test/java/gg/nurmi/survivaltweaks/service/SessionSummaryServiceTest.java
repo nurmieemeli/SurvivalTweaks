@@ -86,6 +86,28 @@ class SessionSummaryServiceTest {
         assertNull(service().summary(player));
     }
 
+    @Test
+    void welcomeBackOverviewSuppressesDuplicateActivityButKeepsOperations() {
+        when(player.getUniqueId()).thenReturn(playerId);
+        when(player.locale()).thenReturn(Locale.ENGLISH);
+        when(notifications.unread(playerId)).thenReturn(3L);
+        when(requests.incomingRequests(playerId, clock.instant()))
+                .thenReturn(List.of(mock(TeleportRequest.class)));
+        when(deathRecovery.hasActiveMarker(playerId)).thenReturn(true);
+        when(maintenance.status()).thenReturn(
+                new MaintenanceService.Status(true, false, false, 0, false)
+        );
+
+        Component summary = service().summary(player, false);
+
+        assertNotNull(summary);
+        String plain = PlainTextComponentSerializer.plainText().serialize(summary);
+        assertTrue(plain.contains("maintenance"));
+        org.junit.jupiter.api.Assertions.assertFalse(plain.contains("unread"));
+        org.junit.jupiter.api.Assertions.assertFalse(plain.contains("request"));
+        org.junit.jupiter.api.Assertions.assertFalse(plain.contains("death marker"));
+    }
+
     private SessionSummaryService service() {
         return new SessionSummaryService(
                 mock(JavaPlugin.class),

@@ -7,6 +7,7 @@ import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
+import gg.nurmi.survivaltweaks.service.PlayerSessionService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -14,7 +15,6 @@ import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
-import org.bukkit.Statistic;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -32,9 +32,7 @@ import org.jetbrains.annotations.NotNull;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -51,6 +49,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
     private final Server server;
     private final SettingsService settings;
     private final ProfileRepository profiles;
+    private final PlayerSessionService sessions;
     private final NotificationService notifications;
     private final TeleportRequestService teleports;
     private final DeathRecoveryService deathRecovery;
@@ -60,13 +59,13 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
     private final MessageService messages;
     private final FeedbackService feedback;
     private final Clock clock;
-    private final Map<UUID, Instant> previousSeen = new HashMap<>();
     private Consumer<Player> back = Player::closeInventory;
 
     public WelcomeBackController(
             JavaPlugin plugin,
             SettingsService settings,
             ProfileRepository profiles,
+            PlayerSessionService sessions,
             NotificationService notifications,
             TeleportRequestService teleports,
             DeathRecoveryService deathRecovery,
@@ -81,6 +80,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
         this.server = plugin.getServer();
         this.settings = settings;
         this.profiles = profiles;
+        this.sessions = sessions;
         this.notifications = notifications;
         this.teleports = teleports;
         this.deathRecovery = deathRecovery;
@@ -96,38 +96,23 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
         back = action;
     }
 
-    public void playerJoined(Player player) {
-        var profile = profiles.load(player.getUniqueId());
-        Instant lastSeen = profile.lastSeenAt().orElse(null);
-        profile.lastKnownName(player.getName());
-        profile.playTimeTicks(player.getStatistic(Statistic.PLAY_ONE_MINUTE));
-        profiles.save(profile);
-        if (lastSeen != null) {
-            previousSeen.put(player.getUniqueId(), lastSeen);
-        }
+    public boolean playerJoined(Player player, PlayerSessionService.Session session) {
+        Instant lastSeen = session.previousSeen().orElse(null);
         if (!settings.current().welcomeBackEnabled()
                 || !shouldShow(
-                player.hasPlayedBefore(),
+                !session.firstJoin(),
                 lastSeen,
                 clock.instant(),
                 settings.current().welcomeBackMinimumAway()
         )) {
-            return;
+            return false;
         }
         plugin.getServer().getScheduler().runTaskLater(
                 plugin,
                 () -> present(player),
                 settings.current().welcomeBackDelayTicks()
         );
-    }
-
-    public void playerLeaving(Player player) {
-        previousSeen.remove(player.getUniqueId());
-        var profile = profiles.load(player.getUniqueId());
-        profile.lastKnownName(player.getName());
-        profile.lastSeenAt(clock.instant());
-        profile.playTimeTicks(player.getStatistic(Statistic.PLAY_ONE_MINUTE));
-        profiles.save(profile);
+        return true;
     }
 
     private void present(Player player) {
@@ -293,11 +278,7 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
     }
 
     private Duration awayDuration(UUID playerId) {
-        Instant lastSeen = previousSeen.get(playerId);
-        if (lastSeen == null) {
-            lastSeen = profiles.load(playerId).lastSeenAt().orElse(clock.instant());
-        }
-        return Duration.between(lastSeen, clock.instant());
+        return sessions.awayDuration(playerId);
     }
 
     private ItemStack item(Material material, Component name, List<Component> lore) {

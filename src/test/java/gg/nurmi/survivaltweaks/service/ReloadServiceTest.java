@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,14 +18,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ReloadServiceTest {
@@ -77,6 +82,73 @@ class ReloadServiceTest {
         try (var backups = Files.list(dataFolder.resolve("backups"))) {
             assertEquals(2L, backups.filter(path -> path.toString().endsWith(".zip")).count());
         }
+    }
+
+    @Test
+    void reloadCallbackReceivesTheExactValidatedConfiguration() throws Exception {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        JavaPlugin plugin = plugin();
+        YamlConfiguration initialConfig = bundledConfig();
+        SettingsService settings = new SettingsService(PluginSettings.validate(initialConfig));
+        MessageService messages = new MessageService(plugin, initialConfig, plugin.getLogger());
+        FeedbackService feedback = new FeedbackService(initialConfig, plugin.getLogger());
+        AtomicReference<FileConfiguration> appliedConfig = new AtomicReference<>();
+        ReloadService reloads = new ReloadService(
+                plugin,
+                settings,
+                messages,
+                feedback,
+                null,
+                (updated, configuration) -> appliedConfig.set(configuration)
+        );
+
+        YamlConfiguration candidate = bundledConfig();
+        candidate.set("home.max-amount", 13);
+        candidate.save(dataFolder.resolve("config.yml").toFile());
+
+        assertTrue(reloads.reload().successful());
+        assertEquals(13, appliedConfig.get().getInt("home.max-amount"));
+    }
+
+    @Test
+    void failedRuntimeApplyRestoresSettingsAndRuntimeConfiguration() throws Exception {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        JavaPlugin plugin = plugin();
+        YamlConfiguration initialConfig = bundledConfig();
+        when(plugin.getConfig()).thenReturn(initialConfig);
+        SettingsService settings = new SettingsService(PluginSettings.validate(initialConfig));
+        MessageService messages = new MessageService(plugin, initialConfig, plugin.getLogger());
+        FeedbackService feedback = new FeedbackService(initialConfig, plugin.getLogger());
+        AtomicInteger callbackCalls = new AtomicInteger();
+        AtomicReference<FileConfiguration> rolledBackConfig = new AtomicReference<>();
+        ReloadService reloads = new ReloadService(
+                plugin,
+                settings,
+                messages,
+                feedback,
+                null,
+                (updated, configuration) -> {
+                    if (callbackCalls.incrementAndGet() == 1) {
+                        throw new IllegalStateException("simulated runtime apply failure");
+                    }
+                    rolledBackConfig.set(configuration);
+                }
+        );
+
+        YamlConfiguration candidate = bundledConfig();
+        candidate.set("home.max-amount", 14);
+        candidate.save(dataFolder.resolve("config.yml").toFile());
+        ReloadService.Result result = reloads.reload();
+
+        assertFalse(result.successful());
+        assertEquals(initialConfig.getInt("home.max-amount"), settings.current().maxHomes());
+        assertEquals(2, callbackCalls.get());
+        assertSame(initialConfig, rolledBackConfig.get());
+        verify(plugin, never()).reloadConfig();
     }
 
     private JavaPlugin plugin() {

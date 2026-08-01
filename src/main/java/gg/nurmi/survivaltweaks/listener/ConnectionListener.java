@@ -4,12 +4,9 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
-import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
-import gg.nurmi.survivaltweaks.service.OperationalHealthService;
+import gg.nurmi.survivaltweaks.service.JoinExperienceCoordinator;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
-import gg.nurmi.survivaltweaks.service.ReleaseUpdateService;
-import gg.nurmi.survivaltweaks.service.SessionSummaryService;
-import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
+import gg.nurmi.survivaltweaks.service.PlayerSessionService;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
@@ -29,52 +26,26 @@ public final class ConnectionListener implements Listener {
     private final TeleportRequestService requests;
     private final MessageService messages;
     private final SettingsService settings;
-    private final NewPlayerSpawnService newPlayerSpawns;
-    private final WelcomeBackController welcomeBack;
     private final PlayerExperienceService experience;
-    private final ReleaseUpdateService releaseUpdates;
-    private final SessionSummaryService sessionSummaries;
-    private final OperationalHealthService operationalHealth;
+    private final PlayerSessionService sessions;
+    private final JoinExperienceCoordinator joinExperience;
 
     public ConnectionListener(
             ProfileRepository profiles,
             TeleportRequestService requests,
             MessageService messages,
             SettingsService settings,
-            NewPlayerSpawnService newPlayerSpawns,
-            WelcomeBackController welcomeBack,
             PlayerExperienceService experience,
-            ReleaseUpdateService releaseUpdates,
-            SessionSummaryService sessionSummaries
-    ) {
-        this(
-                profiles, requests, messages, settings, newPlayerSpawns, welcomeBack,
-                experience, releaseUpdates, sessionSummaries, null
-        );
-    }
-
-    public ConnectionListener(
-            ProfileRepository profiles,
-            TeleportRequestService requests,
-            MessageService messages,
-            SettingsService settings,
-            NewPlayerSpawnService newPlayerSpawns,
-            WelcomeBackController welcomeBack,
-            PlayerExperienceService experience,
-            ReleaseUpdateService releaseUpdates,
-            SessionSummaryService sessionSummaries,
-            OperationalHealthService operationalHealth
+            PlayerSessionService sessions,
+            JoinExperienceCoordinator joinExperience
     ) {
         this.profiles = profiles;
         this.requests = requests;
         this.messages = messages;
         this.settings = settings;
-        this.newPlayerSpawns = newPlayerSpawns;
-        this.welcomeBack = welcomeBack;
         this.experience = experience;
-        this.releaseUpdates = releaseUpdates;
-        this.sessionSummaries = sessionSummaries;
-        this.operationalHealth = operationalHealth;
+        this.sessions = sessions;
+        this.joinExperience = joinExperience;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -100,15 +71,9 @@ public final class ConnectionListener implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        profiles.load(event.getPlayer().getUniqueId());
+        PlayerSessionService.Session session = sessions.begin(event.getPlayer());
         experience.prime(event.getPlayer().getUniqueId());
-        welcomeBack.playerJoined(event.getPlayer());
-        newPlayerSpawns.playerJoined(event.getPlayer());
-        releaseUpdates.playerJoined(event.getPlayer());
-        sessionSummaries.playerJoined(event.getPlayer());
-        if (operationalHealth != null) {
-            operationalHealth.playerJoined(event.getPlayer());
-        }
+        joinExperience.playerJoined(event.getPlayer(), session);
         if (settings.current().connectionMessagesEnabled()) {
             event.joinMessage(null);
             Server server = event.getPlayer().getServer();
@@ -132,10 +97,10 @@ public final class ConnectionListener implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        welcomeBack.playerLeaving(event.getPlayer());
+        sessions.end(event.getPlayer());
         profiles.playerDisconnected(event.getPlayer().getUniqueId());
         experience.forget(event.getPlayer().getUniqueId());
-        newPlayerSpawns.playerDisconnected(event.getPlayer().getUniqueId());
+        joinExperience.playerDisconnected(event.getPlayer());
         requests.removeForPlayer(event.getPlayer().getUniqueId());
         if (settings.current().connectionMessagesEnabled()) {
             event.quitMessage(null);
