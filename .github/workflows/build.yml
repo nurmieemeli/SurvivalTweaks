@@ -17,9 +17,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Java 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -37,7 +37,7 @@ jobs:
           test -n "$jar"
           sha256sum "$jar" > "$jar.sha256"
       - name: Upload verified build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SurvivalTweaks-${{ github.sha }}
           path: |
@@ -54,7 +54,7 @@ jobs:
       contents: write
     steps:
       - name: Download verified build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: SurvivalTweaks-${{ github.sha }}
           path: release

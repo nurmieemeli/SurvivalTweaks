@@ -82,6 +82,50 @@ class SqlStorageTest {
         }
     }
 
+    @Test
+    void checksumUsesTheMillisecondPrecisionProvidedByTheSqlSchema() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        Instant precise = Instant.parse("2026-07-30T12:00:00.123456789Z");
+        ProfileSnapshot profile = new ProfileSnapshot(
+                playerId,
+                List.of(),
+                PlayerPreferences.DEFAULTS,
+                Set.of(),
+                List.of(new PlayerNotification(
+                        UUID.randomUUID(),
+                        NotificationType.MAIL,
+                        precise,
+                        null,
+                        "",
+                        "Precision",
+                        false
+                )),
+                "Emeli",
+                precise,
+                1,
+                Set.of()
+        );
+        StorageSnapshot source = new StorageSnapshot(
+                List.of(profile),
+                List.of(),
+                List.of(),
+                NewPlayerSpawnState.EMPTY
+        );
+        try (SqlStorage storage = sqlite("precision.db")) {
+            storage.replaceAll(source, UUID.randomUUID());
+            StorageSnapshot roundTripped = storage.exportSnapshot();
+
+            assertEquals(
+                    StorageChecksum.calculate(source),
+                    StorageChecksum.calculate(roundTripped)
+            );
+            assertEquals(
+                    Instant.parse("2026-07-30T12:00:00.123Z"),
+                    roundTripped.profiles().getFirst().lastSeenAt()
+            );
+        }
+    }
+
     private SqlStorage sqlite(String filename) {
         return new SqlStorage(
                 new StorageConfiguration(

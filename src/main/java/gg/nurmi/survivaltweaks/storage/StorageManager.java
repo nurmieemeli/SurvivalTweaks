@@ -93,7 +93,8 @@ public final class StorageManager implements AutoCloseable {
                     logger,
                     worldResolver,
                     storage,
-                    instanceId
+                    instanceId,
+                    previous == null
             );
             StorageStateStore.State active = new StorageStateStore.State(
                     configured.backend(),
@@ -366,11 +367,13 @@ public final class StorageManager implements AutoCloseable {
             Logger logger,
             Function<String, UUID> worldResolver,
             SqlStorage storage,
-            UUID instanceId
+            UUID instanceId,
+            boolean recoverUnpinned
     ) throws IOException {
         LegacyYamlImporter importer =
                 new LegacyYamlImporter(dataFolder, logger, worldResolver);
-        if (!storage.isEmpty() || !importer.hasData()) {
+        boolean hasLegacy = importer.hasData();
+        if (!hasLegacy || (!storage.isEmpty() && !recoverUnpinned)) {
             return new ImportResult(
                     false,
                     new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0),
@@ -380,10 +383,34 @@ public final class StorageManager implements AutoCloseable {
         }
         StorageSnapshot legacy = importer.read();
         String expected = StorageChecksum.calculate(legacy);
+        if (!storage.isEmpty()) {
+            StorageSnapshot existing = storage.exportSnapshot();
+            String actual = StorageChecksum.calculate(existing);
+            if (!legacy.counts().equals(existing.counts()) || !expected.equals(actual)) {
+                throw new IOException(
+                        "The unpinned SQL database contains data that does not match "
+                                + "the preserved YAML files; refusing to choose either copy"
+                );
+            }
+            logger.info(
+                    "Recovered a verified legacy YAML import into " + storage.backend().key()
+                            + " after an interrupted first startup ("
+                            + existing.counts().total() + " logical records)"
+            );
+            return new ImportResult(true, existing.counts(), actual, Instant.now());
+        }
         storage.replaceAll(legacy, instanceId);
         StorageSnapshot imported = storage.exportSnapshot();
         String actual = StorageChecksum.calculate(imported);
         if (!legacy.counts().equals(imported.counts()) || !expected.equals(actual)) {
+            try {
+                storage.clearData(instanceId);
+            } catch (IOException cleanupFailure) {
+                logger.severe(
+                        "Could not clean a rejected legacy import: "
+                                + cleanupFailure.getMessage()
+                );
+            }
             throw new IOException(
                     "Legacy YAML import verification failed; original files were preserved"
             );

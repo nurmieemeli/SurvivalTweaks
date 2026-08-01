@@ -9,7 +9,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Logger;
 
@@ -57,6 +59,49 @@ class StorageManagerTest {
                 () -> StorageManager.open(drifted, directory, logger, ignored -> worldId)
         );
         assertTrue(failure.getMessage().contains("pinned endpoint"));
+    }
+
+    @Test
+    void recoversAVerifiedImportInterruptedBeforeItsStateWasPinned() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        UUID worldId = UUID.randomUUID();
+        Instant precise = Instant.parse("2026-07-30T12:00:00.123456789Z");
+        ProfileSnapshot legacy = new ProfileSnapshot(
+                playerId,
+                List.of(new Home("base", worldId, "world", 1, 64, 2, 0, 0)),
+                gg.nurmi.survivaltweaks.object.PlayerPreferences.DEFAULTS,
+                Set.of(),
+                List.of(),
+                "Emeli",
+                precise,
+                10,
+                Set.of()
+        );
+        new ProfileStore(directory.resolve("userdata"), logger).save(legacy);
+        StorageConfiguration configuration =
+                StorageConfiguration.load(sqliteConfig("survivaltweaks.db"), directory);
+        try (SqlStorage interrupted = new SqlStorage(configuration, logger)) {
+            interrupted.replaceAll(
+                    new StorageSnapshot(
+                            List.of(legacy),
+                            List.of(),
+                            List.of(),
+                            gg.nurmi.survivaltweaks.object.NewPlayerSpawnState.EMPTY
+                    ),
+                    UUID.randomUUID()
+            );
+        }
+
+        try (StorageManager manager = StorageManager.open(
+                sqliteConfig("survivaltweaks.db"),
+                directory,
+                logger,
+                ignored -> worldId
+        )) {
+            assertTrue(manager.startupImport().imported());
+            assertEquals(1, manager.exportSnapshot().profiles().size());
+        }
+        assertTrue(Files.isRegularFile(directory.resolve("storage-state.yml")));
     }
 
     private static YamlConfiguration sqliteConfig(String filename) {

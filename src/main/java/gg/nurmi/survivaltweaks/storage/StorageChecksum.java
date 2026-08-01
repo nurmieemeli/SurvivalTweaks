@@ -78,7 +78,7 @@ public final class StorageChecksum {
         put(preferences.mailEnabled());
         put(preferences.language());
         put(profile.lastKnownName());
-        put(profile.lastSeenAt());
+        putInstant(profile.lastSeenAt());
         put(profile.playTimeTicks());
         profile.homes().forEach(home -> home(profile.uniqueId(), home));
         profile.seenHints().stream().sorted(Comparator.comparing(Enum::name)).forEach(this::put);
@@ -112,7 +112,7 @@ public final class StorageChecksum {
         put(playerId);
         put(notification.id());
         put(notification.type());
-        put(notification.createdAt());
+        putInstant(notification.createdAt());
         put(notification.actorId());
         put(notification.actor());
         put(notification.detail());
@@ -148,8 +148,8 @@ public final class StorageChecksum {
         put(Double.toHexString(marker.x()));
         put(Double.toHexString(marker.y()));
         put(Double.toHexString(marker.z()));
-        put(marker.createdAt());
-        put(marker.expiresAt());
+        putInstant(marker.createdAt());
+        putInstant(marker.expiresAt());
         put(marker.cause());
     }
 
@@ -175,5 +175,9 @@ public final class StorageChecksum {
         byte[] bytes = String.valueOf(value).getBytes(StandardCharsets.UTF_8);
         digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
         digest.update(bytes);
+    }
+
+    private void putInstant(java.time.Instant value) {
+        put(value == null ? null : value.toEpochMilli());
     }
 }
