@@ -46,6 +46,8 @@ command:
     shout: "/shout <viesti>"
     lock: "/lock [trust|untrust|transfer|info|nearby] [pelaaja|säde]"
     unlock: "/unlock [confirm]"
+    trust: "/trust <pelaaja>"
+    untrust: "/untrust <pelaaja>"
 
 connection:
   join: "<green><player> liittyi.</green>"
@@ -310,6 +312,19 @@ lock:
     trusted: "<green>🔓 Käyttöoikeus</green> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
     denied: "<red>🔒 Lukittu</red> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
 
+trust:
+  usage: "<red>Käyttö: /trust <pelaaja></red>"
+  unknown-player: "<red>Kyseinen pelaaja ei ole koskaan liittynyt tälle palvelimelle.</red>"
+  cannot-trust-self: "<red>Sinulla on jo pääsy omiin säiliöihisi.</red>"
+  cannot-untrust-self: "<red>Et voi poistaa omaa pääsyäsi.</red>"
+  trusted: "<green><player> voi nyt avata kaikki lukitsemasi säiliöt.</green>"
+  already-trusted: "<yellow><player> on jo luotettu pelaajasi.</yellow>"
+
+untrust:
+  usage: "<red>Käyttö: /untrust <pelaaja></red>"
+  untrusted: "<green><player> ei voi enää avata lukitsemiasi säiliöitä.</green>"
+  not-trusted: "<yellow><player> ei ole luotettu pelaajasi.</yellow>"
+
 enchantments:
   discovered: "<light_purple>Lumouspöytä paljasti lumouksen <enchantment> <level>.</light_purple>"
   tooltip:
@@ -515,6 +530,8 @@ admin:
     deathlocation: "Hallitse kuolinpaikkaasi ja yksityistä kelluvaa opasta."
     lock: "Lukitse säiliö tai hallitse luotettuja pelaajia."
     unlock: "Poista hallitsemasi säiliölukko."
+    trust: "Anna pelaajalle pääsy kaikkiin lukitsemiisi säiliöihin."
+    untrust: "Poista pelaajan pääsy lukitsemiisi säiliöihin."
     shout: "Lähetä palvelinilmoitus konsolista."
     reload: "Tarkista ja lataa lisäosan asetukset turvallisesti uudelleen."
     doctor: "Tarkista asetukset, pelaajatiedot, lukot, kuolinmerkinnät ja varmuuskopiot."

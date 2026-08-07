@@ -224,6 +224,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         NotificationService notifications = new NotificationService(profiles, clock);
         MailService mail = new MailService(
+                this,
                 getServer(),
                 settings,
                 profiles,
@@ -286,7 +287,6 @@ public final class SurvivalTweaks extends JavaPlugin {
                 getLogger(),
                 persistenceMonitor
         );
-        purgeInactiveLocks(initialSettings);
         ContainerBlockResolver containerResolver = new ContainerBlockResolver();
         ActionBarService actionBars = new ActionBarService(clock);
         sleepVotes = new SleepVoteService(
@@ -416,6 +416,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock
         );
         StatisticsJournalController statistics = new StatisticsJournalController(
+                this,
                 getServer(),
                 settings,
                 profiles,
@@ -424,6 +425,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback
         );
         SocialProfileController socialProfile = new SocialProfileController(
+                this,
                 getServer(),
                 profiles,
                 settings,
@@ -735,7 +737,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                         feedback,
                         settings,
                         clock,
-                        notifications
+                        notifications,
+                        profiles
                 ),
                 this
         );
@@ -824,7 +827,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         ));
         register("teleportaccept", teleportAccept);
         register("teleportinbox", inbox);
-        register("home", new HomeCommand(profiles, messages, homeMenu, getServer(), feedback));
+        register("home", new HomeCommand(profiles, messages, homeMenu, this, getServer(), feedback));
         register("sethome", new SetHomeCommand(profiles, messages, feedback, settings, onboarding));
         register("deletehome", new DeleteHomeCommand(profiles, messages, feedback));
         register("shout", new ShoutCommand(getServer(), messages, feedback));
@@ -866,6 +869,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                         storageManager,
                         portableExports,
                         persistenceMonitor,
+                        settings,
                         this
                 )
         );
@@ -919,7 +923,6 @@ public final class SurvivalTweaks extends JavaPlugin {
             FileConfiguration configuration
     ) {
         restartAutosave(reloaded);
-        purgeInactiveLocks(reloaded);
         if (newPlayerSpawns != null) {
             newPlayerSpawns.reconfigure();
         }
@@ -940,18 +943,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
     }
 
-    private void purgeInactiveLocks(PluginSettings current) {
-        if (containerLocks == null || current.purgeInactiveLocksDays() <= 0) {
-            return;
-        }
-        int purged = containerLocks.purgeInactiveLocks(
-                getServer(),
-                current.purgeInactiveLocksDays()
-        );
-        if (purged > 0) {
-            getLogger().info("Purged " + purged + " inactive container locks.");
-        }
-    }
+
 
     private void register(String name, CommandExecutor executor) {
         PluginCommand command = Objects.requireNonNull(

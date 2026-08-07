@@ -50,6 +50,7 @@ class SqlStorageScaleTest {
                         "Player" + index,
                         now.plusSeconds(index),
                         index * 20L,
+                        Set.of(),
                         Set.of()
                 ));
                 if (index < DEATH_MARKER_COUNT) {

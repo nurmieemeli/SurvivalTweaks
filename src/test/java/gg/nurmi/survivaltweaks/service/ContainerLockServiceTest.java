@@ -84,34 +84,6 @@ class ContainerLockServiceTest {
     }
 
     @Test
-    void configuredInactiveOwnerPurgeRemovesOnlyEligibleLocks() {
-        Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
-        ContainerLockService service = new ContainerLockService(
-                new ContainerLockStore(directory.resolve("purge.yml"), logger),
-                logger
-        );
-        UUID inactiveOwner = UUID.randomUUID();
-        UUID activeOwner = UUID.randomUUID();
-        ContainerLock inactive = service.create(inactiveOwner, Set.of(block(40))).orElseThrow();
-        ContainerLock active = service.create(activeOwner, Set.of(block(50))).orElseThrow();
-        Server server = mock(Server.class);
-        OfflinePlayer inactivePlayer = mock(OfflinePlayer.class);
-        OfflinePlayer activePlayer = mock(OfflinePlayer.class);
-        when(server.getOfflinePlayer(inactiveOwner)).thenReturn(inactivePlayer);
-        when(server.getOfflinePlayer(activeOwner)).thenReturn(activePlayer);
-        when(inactivePlayer.hasPlayedBefore()).thenReturn(true);
-        when(inactivePlayer.isOnline()).thenReturn(false);
-        when(inactivePlayer.getLastSeen()).thenReturn(1L);
-        when(activePlayer.hasPlayedBefore()).thenReturn(true);
-        when(activePlayer.isOnline()).thenReturn(true);
-
-        assertEquals(1, service.purgeInactiveLocks(server, 30));
-        assertFalse(service.contains(inactive));
-        assertTrue(service.contains(active));
-        service.close();
-    }
-
-    @Test
     void allocationFreeAutomationCheckCoversBothBlocksAndRemovalClearsHistory() {
         Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
         ContainerLockService service = new ContainerLockService(

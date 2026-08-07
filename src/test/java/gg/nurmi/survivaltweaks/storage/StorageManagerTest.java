@@ -75,6 +75,7 @@ class StorageManagerTest {
                 "Emeli",
                 precise,
                 10,
+                Set.of(),
                 Set.of()
         );
         new ProfileStore(directory.resolve("userdata"), logger).save(legacy);

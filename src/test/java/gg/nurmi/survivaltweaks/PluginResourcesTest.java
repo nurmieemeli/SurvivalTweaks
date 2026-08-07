@@ -182,7 +182,7 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
         assertNotNull(config.getString("feedback.cues.afk-enabled.sound"));
         assertNotNull(config.getString("feedback.cues.afk-disabled.particle"));
-        assertEquals(4, config.getInt("config-version"));
+        assertEquals(5, config.getInt("config-version"));
         assertEquals("auto", config.getString("storage.backend"));
         assertEquals("survivaltweaks.db", config.getString("storage.sqlite.file"));
         assertEquals(4, config.getInt("storage.remote.pool-size"));
@@ -236,6 +236,10 @@ class PluginResourcesTest {
                 "shout.usage",
                 "command.usage.teleport",
                 "command.usage.shout",
+                "command.usage.trust",
+                "command.usage.untrust",
+                "trust.usage",
+                "untrust.usage",
                 "death-recovery.guide-prompt-enabled"
         );
         for (String key : orderedMessageKeys(english)) {

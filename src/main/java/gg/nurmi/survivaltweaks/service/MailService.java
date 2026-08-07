@@ -6,6 +6,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 
+import org.bukkit.plugin.Plugin;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -13,9 +15,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public final class MailService {
 
+    private final Plugin plugin;
     private final Server server;
     private final SettingsService settings;
     private final ProfileRepository profiles;
@@ -28,6 +32,7 @@ public final class MailService {
     private int sendsSinceCleanup;
 
     public MailService(
+            Plugin plugin,
             Server server,
             SettingsService settings,
             ProfileRepository profiles,
@@ -36,6 +41,7 @@ public final class MailService {
             FeedbackService feedback,
             Clock clock
     ) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.server = Objects.requireNonNull(server, "server");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.profiles = Objects.requireNonNull(profiles, "profiles");
@@ -57,30 +63,31 @@ public final class MailService {
         return cached != null && cached.hasPlayedBefore() ? cached : null;
     }
 
-    public SendResult send(Player sender, OfflinePlayer recipient, String rawMessage) {
+    public CompletableFuture<SendResult> sendAsync(Player sender, OfflinePlayer recipient, String rawMessage) {
         if (!settings.current().mailEnabled()) {
-            return SendResult.DISABLED;
+            return CompletableFuture.completedFuture(SendResult.DISABLED);
         }
         if (recipient == null || (!recipient.isOnline() && !recipient.hasPlayedBefore())) {
-            return SendResult.UNKNOWN_PLAYER;
+            return CompletableFuture.completedFuture(SendResult.UNKNOWN_PLAYER);
         }
         if (sender.getUniqueId().equals(recipient.getUniqueId())) {
-            return SendResult.SELF;
+            return CompletableFuture.completedFuture(SendResult.SELF);
         }
         String message = normalize(rawMessage);
         if (message.isEmpty()) {
-            return SendResult.EMPTY;
+            return CompletableFuture.completedFuture(SendResult.EMPTY);
         }
         if (message.codePointCount(0, message.length()) > settings.current().mailMaximumLength()) {
-            return SendResult.TOO_LONG;
+            return CompletableFuture.completedFuture(SendResult.TOO_LONG);
         }
-        var recipientProfile = profiles.load(recipient.getUniqueId());
-        if (!recipientProfile.preferences().mailEnabled()
-                || recipientProfile.blocksMailFrom(sender.getUniqueId())) {
-            return SendResult.UNAVAILABLE;
-        }
+        
+        return profiles.loadAsync(recipient.getUniqueId()).thenApplyAsync(recipientProfile -> {
+            if (!recipientProfile.preferences().mailEnabled()
+                    || recipientProfile.blocksMailFrom(sender.getUniqueId())) {
+                return SendResult.UNAVAILABLE;
+            }
 
-        Instant now = clock.instant();
+            Instant now = clock.instant();
         if (++sendsSinceCleanup >= 64) {
             cleanupRateLimits(now);
             sendsSinceCleanup = 0;
@@ -108,17 +115,18 @@ public final class MailService {
                 message
         );
         cooldowns.put(sender.getUniqueId(), now.plus(settings.current().mailCooldown()));
-        recent.addLast(now);
-        Player online = recipient.getPlayer();
-        if (online != null) {
-            messages.send(
-                    online,
-                    "mail.received",
-                    Placeholder.unparsed("sender", sender.getName())
-            );
-            feedback.play(online, FeedbackService.MAIL);
-        }
-        return SendResult.SENT;
+            recent.addLast(now);
+            Player online = recipient.getPlayer();
+            if (online != null) {
+                messages.send(
+                        online,
+                        "mail.received",
+                        Placeholder.unparsed("sender", sender.getName())
+                );
+                feedback.play(online, FeedbackService.MAIL);
+            }
+            return SendResult.SENT;
+        }, runnable -> server.getScheduler().runTask(plugin, runnable));
     }
 
     private void cleanupRateLimits(Instant now) {
@@ -132,20 +140,24 @@ public final class MailService {
         hourlySends.entrySet().removeIf(entry -> entry.getValue().isEmpty());
     }
 
-    public void sendWithFeedback(Player sender, OfflinePlayer recipient, String rawMessage) {
-        SendResult result = send(sender, recipient, rawMessage);
-        String recipientName = recipient == null || recipient.getName() == null
-                ? ""
-                : recipient.getName();
-        messages.send(
-                sender,
-                "mail.result." + result.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'),
-                Placeholder.unparsed("player", recipientName),
-                Placeholder.unparsed("maximum", Integer.toString(settings.current().mailMaximumLength()))
-        );
-        if (result == SendResult.SENT) {
-            feedback.play(sender, FeedbackService.UI_CLICK);
-        }
+    public void sendWithFeedbackAsync(Player sender, OfflinePlayer recipient, String rawMessage) {
+        sendAsync(sender, recipient, rawMessage).thenAccept(result -> {
+            if (!sender.isOnline()) {
+                return;
+            }
+            String recipientName = recipient == null || recipient.getName() == null
+                    ? ""
+                    : recipient.getName();
+            messages.send(
+                    sender,
+                    "mail.result." + result.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'),
+                    Placeholder.unparsed("player", recipientName),
+                    Placeholder.unparsed("maximum", Integer.toString(settings.current().mailMaximumLength()))
+            );
+            if (result == SendResult.SENT) {
+                feedback.play(sender, FeedbackService.UI_CLICK);
+            }
+        });
     }
 
     public boolean block(Player owner, OfflinePlayer sender) {

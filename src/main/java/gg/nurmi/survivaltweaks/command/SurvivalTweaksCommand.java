@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.command;
 
+import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import gg.nurmi.survivaltweaks.service.BackupService;
 import gg.nurmi.survivaltweaks.service.CustomEnchantItemService;
@@ -141,6 +142,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     ENCHANT_PERMISSION,
                     "admin.help.enchant",
                     true
+            ),
+            new HelpEntry(
+                    "/survivaltweaks config ",
+                    RELOAD_PERMISSION,
+                    "admin.help.config",
+                    true
             )
     );
 
@@ -161,6 +168,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final StorageManager storage;
     private final PortableExportService portableExports;
     private final PersistenceMonitor persistenceMonitor;
+    private final SettingsService settings;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
     private final AtomicBoolean storageOperation = new AtomicBoolean();
 
@@ -181,6 +189,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             StorageManager storage,
             PortableExportService portableExports,
             PersistenceMonitor persistenceMonitor,
+            SettingsService settings,
             JavaPlugin plugin
     ) {
         this.messages = messages;
@@ -199,6 +208,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.storage = storage;
         this.portableExports = portableExports;
         this.persistenceMonitor = persistenceMonitor;
+        this.settings = settings;
         this.plugin = plugin;
     }
 
@@ -278,6 +288,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("enchant")) {
             return handleEnchant(sender, arguments);
         }
+        if (arguments.length >= 1 && arguments[0].equalsIgnoreCase("config")) {
+            return handleConfig(sender, arguments);
+        }
 
         messages.send(sender, "admin.usage");
         return true;
@@ -325,6 +338,9 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             if (sender.hasPermission(ENCHANT_PERMISSION) && "enchant".startsWith(prefix)) {
                 options.add("enchant");
+            }
+            if (sender.hasPermission(RELOAD_PERMISSION) && "config".startsWith(prefix)) {
+                options.add("config");
             }
             return List.copyOf(options);
         }
@@ -400,6 +416,11 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                         .toList();
             }
             if (arguments.length == 4
+                    && arguments[1].equalsIgnoreCase("migrate")
+                    && "confirm".startsWith(arguments[3].toLowerCase(Locale.ROOT))) {
+                return List.of("confirm");
+            }
+            if (arguments.length == 4
                     && arguments[1].equalsIgnoreCase("maintenance")
                     && arguments[2].equalsIgnoreCase("run")
                     && "confirm".startsWith(arguments[3].toLowerCase(Locale.ROOT))) {
@@ -438,7 +459,72 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 && "confirm".startsWith(arguments[2].toLowerCase(Locale.ROOT))) {
             return List.of("confirm");
         }
+        
+        if (sender.hasPermission(RELOAD_PERMISSION)
+                && arguments[0].equalsIgnoreCase("config")) {
+            if (arguments.length == 2) {
+                return List.of("set", "get").stream()
+                        .filter(option -> option.startsWith(arguments[1].toLowerCase(Locale.ROOT)))
+                        .toList();
+            }
+        }
+        
         return List.of();
+    }
+    
+    private boolean handleConfig(CommandSender sender, String[] arguments) {
+        if (!sender.hasPermission(RELOAD_PERMISSION)) {
+            messages.send(sender, "admin.no-permission");
+            return true;
+        }
+        if (arguments.length < 3) {
+            messages.send(sender, "admin.usage");
+            return true;
+        }
+        String action = arguments[1];
+        String path = arguments[2];
+        if (action.equalsIgnoreCase("get")) {
+            Object value = plugin.getConfig().get(path);
+            String display = value == null ? "null" : value.toString();
+            messages.send(sender, "admin.config.get", 
+                    Placeholder.unparsed("path", path), 
+                    Placeholder.unparsed("value", display));
+            return true;
+        } else if (action.equalsIgnoreCase("set")) {
+            if (arguments.length < 4) {
+                messages.send(sender, "admin.usage");
+                return true;
+            }
+            String valueStr = String.join(" ", java.util.Arrays.copyOfRange(arguments, 3, arguments.length));
+            Object parsedValue = valueStr;
+            if (valueStr.equalsIgnoreCase("true") || valueStr.equalsIgnoreCase("false")) {
+                parsedValue = Boolean.parseBoolean(valueStr);
+            } else {
+                try {
+                    parsedValue = Integer.parseInt(valueStr);
+                } catch (NumberFormatException e1) {
+                    try {
+                        parsedValue = Double.parseDouble(valueStr);
+                    } catch (NumberFormatException e2) {
+                        // string
+                    }
+                }
+            }
+            plugin.getConfig().set(path, parsedValue);
+            plugin.saveConfig();
+            
+            reloads.reloadAsync(result -> {
+                if (result.successful()) {
+                    messages.send(sender, "admin.config.set-success",
+                            Placeholder.unparsed("path", path),
+                            Placeholder.unparsed("value", valueStr));
+                } else {
+                    messages.send(sender, "admin.reload-failed", Placeholder.unparsed("reason", result.reason()));
+                }
+            });
+            return true;
+        }
+        return true;
     }
 
     private boolean handleEnchant(CommandSender sender, String[] arguments) {
@@ -676,7 +762,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         if (arguments.length == 3
                 && arguments[1].equalsIgnoreCase("maintenance")
                 && arguments[2].equalsIgnoreCase("preview")) {
-            runStorageOperation(sender, storage::previewMaintenance, preview ->
+            runStorageOperation(sender, () -> storage.previewMaintenance(settings.current().mailPurgeInactiveDays()), preview ->
                     showMaintenancePreview(sender, preview)
             );
             return true;
@@ -701,7 +787,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 messages.send(sender, "admin.storage.maintenance-confirm");
                 return true;
             }
-            runStorageOperation(sender, storage::maintain, result -> {
+            runStorageOperation(sender, () -> storage.maintain(settings.current().mailPurgeInactiveDays()), result -> {
                 messages.send(
                         sender,
                         "admin.storage.maintenance-complete",
@@ -718,7 +804,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             });
             return true;
         }
-        if (arguments.length == 3
+        if (arguments.length >= 3
                 && (arguments[1].equalsIgnoreCase("test")
                 || arguments[1].equalsIgnoreCase("migrate"))) {
             StorageBackend target;
@@ -759,18 +845,38 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 );
                 return true;
             }
-            runStorageOperation(sender, () -> storage.stageMigration(target), migration -> {
-                plugin.getConfig().set("storage.backend", target.key());
-                plugin.saveConfig();
-                messages.send(
-                        sender,
-                        "admin.storage.migration-staged",
-                        Placeholder.unparsed("source", migration.source().key()),
-                        Placeholder.unparsed("target", migration.target().key()),
-                        Placeholder.unparsed("id", migration.id().toString())
-                );
-            });
-            return true;
+            if (arguments[1].equalsIgnoreCase("migrate")) {
+                if (arguments.length != 4 || !arguments[3].equalsIgnoreCase("confirm")) {
+                    messages.send(sender, "admin.storage.migration-confirm");
+                    return true;
+                }
+                int online = plugin.getServer().getOnlinePlayers().size();
+                if (online > 0) {
+                    messages.send(
+                            sender,
+                            "admin.storage.migration-players-online",
+                            Placeholder.unparsed("count", Integer.toString(online))
+                    );
+                    return true;
+                }
+                runStorageOperation(sender, () -> storage.stageMigration(target), migration -> {
+                    plugin.getConfig().set("storage.backend", target.key());
+                    plugin.saveConfig();
+                    messages.send(
+                            sender,
+                            "admin.storage.migration-staged",
+                            Placeholder.unparsed("source", migration.source().key()),
+                            Placeholder.unparsed("target", migration.target().key()),
+                            Placeholder.unparsed("id", migration.id().toString())
+                    );
+                    plugin.getServer().getScheduler().runTaskLater(
+                            plugin,
+                            plugin.getServer()::shutdown,
+                            20L
+                    );
+                });
+                return true;
+            }
         }
         messages.send(sender, "admin.storage.usage");
         return true;

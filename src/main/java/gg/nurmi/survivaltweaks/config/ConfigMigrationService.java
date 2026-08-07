@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 
 public final class ConfigMigrationService {
 
-    public static final int CURRENT_VERSION = 4;
+    public static final int CURRENT_VERSION = 5;
     private static final List<String> VERSION_ONE_OBSOLETE_PATHS = List.of(
             "disabled-commands",
             "commands.disabled",
@@ -102,6 +102,14 @@ public final class ConfigMigrationService {
             version = 4;
             changes.add("Recorded configuration schema version 4.");
         }
+        if (version == 4) {
+            // Inactive-player lock purging was removed; storage maintenance now cleans
+            // orphaned and empty locks instead.
+            removeIfPresent(config, "locked-containers.purge-inactive-days", changes);
+            setIfMissing(config, "mail.purge-inactive-days", 0, changes);
+            version = 5;
+            changes.add("Recorded configuration schema version 5.");
+        }
         config.set("config-version", version);
 
         Result result = new Result(sourceVersion, version, List.copyOf(changes));
@@ -142,7 +150,14 @@ public final class ConfigMigrationService {
     ) {
         if (!config.contains(path, true)) {
             config.set(path, value);
-            changes.add("Added storage setting: " + path);
+            changes.add("Added setting: " + path);
+        }
+    }
+
+    private void removeIfPresent(FileConfiguration config, String path, List<String> changes) {
+        if (config.contains(path, true)) {
+            config.set(path, null);
+            changes.add("Removed obsolete setting: " + path);
         }
     }
 

@@ -1,4 +1,4 @@
-config-version: 4
+config-version: 5
 
 home:
   max-amount: 3
@@ -100,7 +100,6 @@ locked-containers:
   max-per-player: 100
   protect-from-explosions: true
   block-automation: true
-  purge-inactive-days: 0
 
 tree-feller:
   # Felling I always requires sneaking; this caps work performed by one tree.
@@ -456,8 +455,10 @@ mail:
   maximum-length: 160
   cooldown-seconds: 30
   maximum-per-hour: 10
+  # Delete delivered mail older than this during storage maintenance. 0 keeps it forever.
+  purge-inactive-days: 0
 
-# Localized TAB dashboard with stable player ordering and lightweight live metrics.
+# Localized tablist dashboard with stable player ordering and lightweight live metrics.
 player-list:
   enabled: true
   refresh-seconds: 2

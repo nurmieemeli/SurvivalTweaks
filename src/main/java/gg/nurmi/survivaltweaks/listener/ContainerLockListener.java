@@ -9,6 +9,7 @@ import gg.nurmi.survivaltweaks.service.ContainerLockService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
+import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -29,6 +30,7 @@ import org.bukkit.event.inventory.InventoryAction;
 
 import java.util.Set;
 import java.time.Clock;
+import java.util.UUID;
 
 public final class ContainerLockListener implements Listener {
 
@@ -39,6 +41,7 @@ public final class ContainerLockListener implements Listener {
     private final SettingsService settings;
     private final Clock clock;
     private final NotificationService notifications;
+    private final ProfileRepository profiles;
 
     public ContainerLockListener(
             ContainerBlockResolver resolver,
@@ -47,7 +50,8 @@ public final class ContainerLockListener implements Listener {
             FeedbackService feedback,
             SettingsService settings,
             Clock clock,
-            NotificationService notifications
+            NotificationService notifications,
+            ProfileRepository profiles
     ) {
         this.resolver = resolver;
         this.locks = locks;
@@ -56,6 +60,7 @@ public final class ContainerLockListener implements Listener {
         this.settings = settings;
         this.clock = clock;
         this.notifications = notifications;
+        this.profiles = profiles;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -66,11 +71,7 @@ public final class ContainerLockListener implements Listener {
 
         Set<BlockKey> blocks = resolver.blocksFor(event.getInventory());
         Set<ContainerLock> selectedLocks = locks.locksFor(blocks);
-        boolean allowed = blocks.isEmpty() || locks.canAccess(
-                player.getUniqueId(),
-                player.hasPermission(LockCommand.ADMIN_PERMISSION),
-                blocks
-        );
+        boolean allowed = blocks.isEmpty() || hasAccess(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION), selectedLocks);
         selectedLocks.forEach(lock -> locks.recordAccess(
                 lock,
                 player.getUniqueId(),
@@ -100,10 +101,8 @@ public final class ContainerLockListener implements Listener {
             return;
         }
         boolean administrator = player.hasPermission(LockCommand.ADMIN_PERMISSION);
-        boolean denied = selected.stream().anyMatch(lock ->
-                !lock.canAccess(player.getUniqueId(), administrator));
-        boolean withdrawalBlocked = selected.stream().anyMatch(lock ->
-                !lock.canWithdraw(player.getUniqueId(), administrator))
+        boolean denied = !hasAccess(player.getUniqueId(), administrator, selected);
+        boolean withdrawalBlocked = !hasWithdrawAccess(player.getUniqueId(), administrator, selected)
                 && !isDepositSafeAction(event);
         if (denied || withdrawalBlocked) {
             event.setCancelled(true);
@@ -122,7 +121,7 @@ public final class ContainerLockListener implements Listener {
             return;
         }
         boolean administrator = player.hasPermission(LockCommand.ADMIN_PERMISSION);
-        if (selected.stream().anyMatch(lock -> !lock.canAccess(player.getUniqueId(), administrator))) {
+        if (!hasAccess(player.getUniqueId(), administrator, selected)) {
             event.setCancelled(true);
         }
     }
@@ -276,5 +275,15 @@ public final class ContainerLockListener implements Listener {
         return connected.isEmpty()
                 ? locks.isLocked(BlockKey.from(block))
                 : !locks.locksFor(connected).isEmpty();
+    }
+
+    private boolean hasAccess(UUID playerId, boolean administrator, Set<ContainerLock> selectedLocks) {
+        return selectedLocks.stream().allMatch(lock ->
+                lock.canAccess(playerId, administrator) || profiles.isTrusted(lock.ownerId(), playerId));
+    }
+
+    private boolean hasWithdrawAccess(UUID playerId, boolean administrator, Set<ContainerLock> selectedLocks) {
+        return selectedLocks.stream().allMatch(lock ->
+                lock.canWithdraw(playerId, administrator) || profiles.isTrusted(lock.ownerId(), playerId));
     }
 }

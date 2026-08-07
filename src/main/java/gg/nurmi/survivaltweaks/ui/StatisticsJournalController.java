@@ -15,6 +15,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -41,6 +42,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
     private static final int FAVORITE_TOOLS = 20;
     private static final int BACK = 22;
 
+    private final Plugin plugin;
     private final Server server;
     private final SettingsService settings;
     private final ProfileRepository profiles;
@@ -50,6 +52,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
     private Consumer<Player> defaultBack = Player::closeInventory;
 
     public StatisticsJournalController(
+            Plugin plugin,
             Server server,
             SettingsService settings,
             ProfileRepository profiles,
@@ -57,6 +60,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             MessageService messages,
             FeedbackService feedback
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.settings = settings;
         this.profiles = profiles;
@@ -69,40 +73,44 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         defaultBack = action;
     }
 
-    public boolean open(Player viewer, OfflinePlayer target) {
-        return open(viewer, target, defaultBack);
+    public void open(Player viewer, OfflinePlayer target) {
+        open(viewer, target, defaultBack);
     }
 
-    public boolean open(
+    public void open(
             Player viewer,
             OfflinePlayer target,
             Consumer<Player> back
     ) {
         if (!settings.current().statisticsEnabled()) {
             messages.send(viewer, "statistics.disabled");
-            return false;
+            return;
         }
         if (target == null || (!target.isOnline() && !target.hasPlayedBefore())) {
             messages.send(viewer, "statistics.unknown");
-            return false;
+            return;
         }
-        var targetProfile = profiles.load(target.getUniqueId());
-        boolean own = viewer.getUniqueId().equals(target.getUniqueId());
-        if (!own
-                && (!settings.current().statisticsPublicViewing()
-                || !targetProfile.preferences().publicProfileEnabled())
-                && !viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
-            messages.send(viewer, "statistics.private");
-            return false;
-        }
-        String targetName = target.getName() == null
-                ? targetProfile.lastKnownName()
-                : target.getName();
-        if (targetName.isBlank()) {
-            targetName = target.getUniqueId().toString().substring(0, 8);
-        }
+        
+        profiles.loadAsync(target.getUniqueId()).thenAcceptAsync(targetProfile -> {
+            PlayerStatisticsService.Snapshot snapshot = statistics.snapshot(target);
+            server.getScheduler().runTask(plugin, () -> {
+                if (!viewer.isOnline()) return;
+                
+                boolean own = viewer.getUniqueId().equals(target.getUniqueId());
+                if (!own
+                        && (!settings.current().statisticsPublicViewing()
+                        || !targetProfile.preferences().publicProfileEnabled())
+                        && !viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
+                    messages.send(viewer, "statistics.private");
+                    return;
+                }
+                String targetName = target.getName() == null
+                        ? targetProfile.lastKnownName()
+                        : target.getName();
+                if (targetName.isBlank()) {
+                    targetName = target.getUniqueId().toString().substring(0, 8);
+                }
 
-        PlayerStatisticsService.Snapshot snapshot = statistics.snapshot(target);
         StatisticsHolder holder = new StatisticsHolder(
                 viewer.getUniqueId(),
                 back,
@@ -155,7 +163,8 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         ));
         viewer.openInventory(inventory);
         feedback.play(viewer, FeedbackService.UI_OPEN);
-        return true;
+            });
+        });
     }
 
     @Override

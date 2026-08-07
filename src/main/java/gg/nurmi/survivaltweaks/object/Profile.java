@@ -20,6 +20,7 @@ public final class Profile {
     private final LinkedHashSet<OnboardingHint> seenHints = new LinkedHashSet<>();
     private final ArrayList<PlayerNotification> notifications = new ArrayList<>();
     private final LinkedHashSet<UUID> blockedMailSenders = new LinkedHashSet<>();
+    private final LinkedHashSet<UUID> trustedPlayers = new LinkedHashSet<>();
     private String lastKnownName = "";
     private Instant lastSeenAt;
     private long playTimeTicks;
@@ -205,6 +206,27 @@ public final class Profile {
         return blockedMailSenders.contains(playerId);
     }
 
+    public Set<UUID> trustedPlayers() {
+        return Set.copyOf(trustedPlayers);
+    }
+
+    public void trustedPlayers(java.util.Collection<UUID> playerIds) {
+        trustedPlayers.clear();
+        trustedPlayers.addAll(playerIds);
+    }
+
+    public boolean trustPlayer(UUID playerId) {
+        return trustedPlayers.add(Objects.requireNonNull(playerId, "playerId"));
+    }
+
+    public boolean untrustPlayer(UUID playerId) {
+        return trustedPlayers.remove(playerId);
+    }
+
+    public boolean isTrusted(UUID playerId) {
+        return trustedPlayers.contains(playerId);
+    }
+
     public ProfileSnapshot snapshot() {
         return new ProfileSnapshot(
                 uniqueId,
@@ -215,7 +237,8 @@ public final class Profile {
                 lastKnownName,
                 lastSeenAt,
                 playTimeTicks,
-                blockedMailSenders
+                blockedMailSenders,
+                trustedPlayers
         );
     }
 

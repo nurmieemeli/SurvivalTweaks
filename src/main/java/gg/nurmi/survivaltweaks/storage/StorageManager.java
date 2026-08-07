@@ -155,14 +155,14 @@ public final class StorageManager implements AutoCloseable {
         return storage.verify();
     }
 
-    public SqlStorage.MaintenancePreview previewMaintenance() throws IOException {
-        return storage.maintenancePreview(Instant.now());
+    public SqlStorage.MaintenancePreview previewMaintenance(int mailPurgeInactiveDays) throws IOException {
+        return storage.maintenancePreview(Instant.now(), mailPurgeInactiveDays);
     }
 
-    public synchronized MaintenanceResult maintain() throws IOException {
+    public synchronized MaintenanceResult maintain(int mailPurgeInactiveDays) throws IOException {
         Instant now = Instant.now();
         ExportResult safetyExport = exportPortable("maintenance");
-        SqlStorage.MaintenanceResult result = storage.maintain(now);
+        SqlStorage.MaintenanceResult result = storage.maintain(now, mailPurgeInactiveDays);
         SqlStorage.Verification verification = storage.verify();
         if (!verification.healthy()) {
             throw new IOException(

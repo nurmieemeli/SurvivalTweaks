@@ -70,6 +70,15 @@ public final class ProfileStore implements ProfileDataStore {
         return profile;
     }
 
+    /**
+     * The legacy YAML format predates global trusts and never stored them, so there is nothing to
+     * read. This store only backs the one-time import into SQL; trusts are held there instead.
+     */
+    @Override
+    public Map<UUID, Set<UUID>> loadAllGlobalTrusts() {
+        return Map.of();
+    }
+
     public void save(ProfileSnapshot snapshot) throws IOException {
         Files.createDirectories(directory);
 

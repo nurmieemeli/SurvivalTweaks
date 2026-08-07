@@ -46,6 +46,8 @@ command:
     shout: "/shout <message>"
     lock: "/lock [trust|untrust|transfer|info|nearby] [player|radius]"
     unlock: "/unlock [confirm]"
+    trust: "/trust <player>"
+    untrust: "/untrust <player>"
 
 connection:
   join: "<green><player> joined.</green>"
@@ -311,6 +313,19 @@ lock:
     trusted: "<green>🔓 Access granted</green> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
     denied: "<red>🔒 Locked</red> <dark_gray>•</dark_gray> <gray>Owner: <owner></gray>"
 
+trust:
+  usage: "<red>Usage: /trust <player></red>"
+  unknown-player: "<red>That player has never joined this server.</red>"
+  cannot-trust-self: "<red>You already have access to your own containers.</red>"
+  cannot-untrust-self: "<red>You cannot remove your own access.</red>"
+  trusted: "<green><player> can now open every container you lock.</green>"
+  already-trusted: "<yellow><player> already has access to your containers.</yellow>"
+
+untrust:
+  usage: "<red>Usage: /untrust <player></red>"
+  untrusted: "<green><player> can no longer open the containers you lock.</green>"
+  not-trusted: "<yellow><player> does not have access to your containers.</yellow>"
+
 enchantments:
   discovered: "<light_purple>The enchanting table revealed <enchantment> <level>.</light_purple>"
   tooltip:
@@ -516,6 +531,8 @@ admin:
     deathlocation: "Manage your death marker and private floating guide."
     lock: "Lock a container or manage trusted players."
     unlock: "Remove a container lock you manage."
+    trust: "Let a player use every container you lock."
+    untrust: "Withdraw a player's access to your locked containers."
     shout: "Send a server announcement from the console."
     reload: "Safely validate and reload plugin configuration."
     doctor: "Scan configuration, player data, locks, death markers, and backups."

@@ -15,11 +15,12 @@ public record ProfileSnapshot(
         String lastKnownName,
         Instant lastSeenAt,
         long playTimeTicks,
-        Set<UUID> blockedMailSenders
+        Set<UUID> blockedMailSenders,
+        Set<UUID> trustedPlayers
 ) {
 
     public ProfileSnapshot(UUID uniqueId, List<Home> homes) {
-        this(uniqueId, homes, PlayerPreferences.DEFAULTS, Set.of(), List.of(), "", null, 0, Set.of());
+        this(uniqueId, homes, PlayerPreferences.DEFAULTS, Set.of(), List.of(), "", null, 0, Set.of(), Set.of());
     }
 
     public ProfileSnapshot {
@@ -31,5 +32,6 @@ public record ProfileSnapshot(
         lastKnownName = lastKnownName == null ? "" : lastKnownName.strip();
         playTimeTicks = Math.max(0, playTimeTicks);
         blockedMailSenders = Set.copyOf(blockedMailSenders);
+        trustedPlayers = Set.copyOf(trustedPlayers);
     }
 }

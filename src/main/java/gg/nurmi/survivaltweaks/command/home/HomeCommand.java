@@ -14,6 +14,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
     private final ProfileRepository profiles;
     private final MessageService messages;
     private final HomeMenuController homeMenu;
+    private final Plugin plugin;
     private final Server server;
     private final FeedbackService feedback;
 
@@ -34,19 +36,21 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             MessageService messages,
             HomeMenuController homeMenu
     ) {
-        this(profiles, messages, homeMenu, null, null);
+        this(profiles, messages, homeMenu, null, null, null);
     }
 
     public HomeCommand(
             ProfileRepository profiles,
             MessageService messages,
             HomeMenuController homeMenu,
+            Plugin plugin,
             Server server,
             FeedbackService feedback
     ) {
         this.profiles = profiles;
         this.messages = messages;
         this.homeMenu = homeMenu;
+        this.plugin = plugin;
         this.server = server;
         this.feedback = feedback;
     }
@@ -172,20 +176,25 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        Profile ownerProfile = profiles.load(owner.getUniqueId());
-        Optional<Home> homeOpt = ownerProfile.home(homeName);
-        if (homeOpt.isEmpty()) {
-            messages.send(visitor, "home.not-found", Placeholder.unparsed("home", homeName));
-            return;
-        }
+        profiles.loadAsync(owner.getUniqueId()).thenAcceptAsync(ownerProfile -> {
+            server.getScheduler().runTask(plugin, () -> {
+                if (!visitor.isOnline()) return;
+                
+                Optional<Home> homeOpt = ownerProfile.home(homeName);
+                if (homeOpt.isEmpty()) {
+                    messages.send(visitor, "home.not-found", Placeholder.unparsed("home", homeName));
+                    return;
+                }
 
-        Home home = homeOpt.orElseThrow();
-        if (!home.isSharedWith(visitor.getUniqueId()) && !owner.getUniqueId().equals(visitor.getUniqueId())) {
-            messages.send(visitor, "home.not-shared");
-            return;
-        }
+                Home home = homeOpt.orElseThrow();
+                if (!home.isSharedWith(visitor.getUniqueId()) && !owner.getUniqueId().equals(visitor.getUniqueId())) {
+                    messages.send(visitor, "home.not-shared");
+                    return;
+                }
 
-        homeMenu.teleport(visitor, home);
+                homeMenu.teleport(visitor, home);
+            });
+        });
     }
 
     @Override

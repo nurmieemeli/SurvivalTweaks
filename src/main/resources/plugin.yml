@@ -59,6 +59,12 @@ commands:
   unlock:
     aliases: [poistalukko]
     permission: survivaltweaks.command.unlock
+  trust:
+    aliases: [luota]
+    permission: survivaltweaks.command.trust
+  untrust:
+    aliases: [äläluota, poistaluottamus]
+    permission: survivaltweaks.command.trust
 
 permissions:
   survivaltweaks.command.afk:
@@ -151,3 +157,6 @@ permissions:
   survivaltweaks.lock.admin:
     description: Allows using and managing every container lock.
     default: op
+  survivaltweaks.command.trust:
+    description: Allows trusting and untrusting players globally.
+    default: true

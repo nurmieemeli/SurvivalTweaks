@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +34,7 @@ public final class ProfileRepository implements AutoCloseable {
     private final ConcurrentMap<UUID, ProfileSnapshot> latestRequested = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> pending = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, EvictionCandidate> evictionCandidates = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, Set<UUID>> globalTrusts = new ConcurrentHashMap<>();
     private final Set<UUID> scheduled = ConcurrentHashMap.newKeySet();
     private final ExecutorService writer;
     private boolean closing;
@@ -54,6 +56,11 @@ public final class ProfileRepository implements AutoCloseable {
             thread.setDaemon(false);
             return thread;
         });
+        try {
+            globalTrusts.putAll(store.loadAllGlobalTrusts());
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Failed to load global trusts", e);
+        }
     }
 
     public Profile load(UUID uniqueId) {
@@ -79,9 +86,19 @@ public final class ProfileRepository implements AutoCloseable {
         return loaded;
     }
 
+    public CompletableFuture<Profile> loadAsync(UUID uniqueId) {
+        Profile cached = profiles.get(uniqueId);
+        if (cached != null) {
+            evictionCandidates.remove(uniqueId);
+            return CompletableFuture.completedFuture(cached);
+        }
+        return CompletableFuture.supplyAsync(() -> load(uniqueId));
+    }
+
     public void save(Profile profile) {
         profiles.putIfAbsent(profile.uniqueId(), profile);
         evictionCandidates.remove(profile.uniqueId());
+        globalTrusts.put(profile.uniqueId(), profile.trustedPlayers());
         enqueueIfChanged(profile.snapshot());
     }
 
@@ -97,6 +114,11 @@ public final class ProfileRepository implements AutoCloseable {
                 .filter(uniqueId -> !online.contains(uniqueId))
                 .toList()
                 .forEach(this::playerDisconnected);
+    }
+
+    public boolean isTrusted(UUID ownerId, UUID playerId) {
+        Set<UUID> trusts = globalTrusts.get(ownerId);
+        return trusts != null && trusts.contains(playerId);
     }
 
     public void playerDisconnected(UUID uniqueId) {

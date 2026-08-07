@@ -25,7 +25,6 @@ class PluginSettingsTest {
         assertEquals(47.0, settings.performanceCriticalMspt());
         assertEquals(256, settings.performanceWorkBudgetPerTick());
         assertEquals(5, settings.lockTargetDistance());
-        assertEquals(0, settings.purgeInactiveLocksDays());
         assertTrue(settings.deathFloatingGuideEnabled());
         assertEquals(32.0, settings.deathFloatingGuideNearDistance());
         assertEquals(3.5, settings.deathFloatingGuideOffset());

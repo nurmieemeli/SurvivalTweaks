@@ -25,6 +25,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Clock;
@@ -43,6 +44,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
     private static final int TELEPORT_SLOT = 21;
     private static final int BACK_SLOT = 22;
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final SettingsService settings;
@@ -55,6 +57,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
     private Consumer<Player> back = Player::closeInventory;
 
     public SocialProfileController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             SettingsService settings,
@@ -65,6 +68,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
             FeedbackService feedback,
             Clock clock
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.settings = settings;
@@ -80,29 +84,32 @@ public final class SocialProfileController implements Listener, CommandExecutor,
         back = action;
     }
 
-    public boolean open(Player viewer, OfflinePlayer target) {
+    public void open(Player viewer, OfflinePlayer target) {
         if (!settings.current().playerProfilesEnabled()) {
             messages.send(viewer, "profile.disabled");
-            return false;
+            return;
         }
         if (target == null || (!target.isOnline() && !target.hasPlayedBefore())) {
             messages.send(viewer, "profile.unknown");
-            return false;
+            return;
         }
-        var targetProfile = profiles.load(target.getUniqueId());
-        boolean own = viewer.getUniqueId().equals(target.getUniqueId());
-        if (!own
-                && !targetProfile.preferences().publicProfileEnabled()
-                && !viewer.hasPermission(BYPASS_PERMISSION)) {
-            messages.send(viewer, "profile.private");
-            return false;
-        }
-        String targetName = target.getName() == null
-                ? targetProfile.lastKnownName()
-                : target.getName();
-        if (targetName.isBlank()) {
-            targetName = target.getUniqueId().toString().substring(0, 8);
-        }
+        profiles.loadAsync(target.getUniqueId()).thenAccept(targetProfile -> {
+            server.getScheduler().runTask(plugin, () -> {
+                if (!viewer.isOnline()) return;
+                
+                boolean own = viewer.getUniqueId().equals(target.getUniqueId());
+                if (!own
+                        && !targetProfile.preferences().publicProfileEnabled()
+                        && !viewer.hasPermission(BYPASS_PERMISSION)) {
+                    messages.send(viewer, "profile.private");
+                    return;
+                }
+                String targetName = target.getName() == null
+                        ? targetProfile.lastKnownName()
+                        : target.getName();
+                if (targetName.isBlank()) {
+                    targetName = target.getUniqueId().toString().substring(0, 8);
+                }
         ProfileHolder holder = new ProfileHolder(
                 viewer.getUniqueId(),
                 target.getUniqueId(),
@@ -213,7 +220,8 @@ public final class SocialProfileController implements Listener, CommandExecutor,
         ));
         viewer.openInventory(inventory);
         feedback.play(viewer, FeedbackService.UI_OPEN);
-        return true;
+            });
+        });
     }
 
     @Override

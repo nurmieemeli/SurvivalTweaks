@@ -34,6 +34,11 @@ class ProfileRepositoryTest {
             }
 
             @Override
+            public java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts() {
+                return java.util.Map.of();
+            }
+
+            @Override
             public void save(gg.nurmi.survivaltweaks.object.ProfileSnapshot snapshot)
                     throws IOException {
                 if (attempts.incrementAndGet() == 1) {

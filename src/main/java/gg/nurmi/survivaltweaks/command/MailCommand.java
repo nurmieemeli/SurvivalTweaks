@@ -67,7 +67,7 @@ public final class MailCommand implements CommandExecutor, TabCompleter {
         }
         if (arguments.length >= 3 && arguments[0].equalsIgnoreCase("send")) {
             OfflinePlayer recipient = mail.findRecipient(arguments[1]);
-            mail.sendWithFeedback(
+            mail.sendWithFeedbackAsync(
                     player,
                     recipient,
                     String.join(" ", Arrays.copyOfRange(arguments, 2, arguments.length))

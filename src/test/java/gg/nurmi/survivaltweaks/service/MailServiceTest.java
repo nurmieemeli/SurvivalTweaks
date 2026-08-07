@@ -8,6 +8,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,11 +46,19 @@ class MailServiceTest {
     private final Logger logger = Logger.getAnonymousLogger();
     private final MutableClock clock = new MutableClock(NOW);
     private final Server server = mock(Server.class);
+    private final Plugin plugin = mock(Plugin.class);
     private ProfileRepository profiles;
 
     @BeforeEach
     void openProfiles() {
         profiles = new ProfileRepository(new ProfileStore(directory, logger), logger);
+        // Delivery completes on the main thread; run it inline so join() observes the result.
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(scheduler.runTask(eq(plugin), any(Runnable.class))).thenAnswer(invocation -> {
+            invocation.getArgument(1, Runnable.class).run();
+            return null;
+        });
     }
 
     @AfterEach
@@ -71,7 +83,7 @@ class MailServiceTest {
 
         assertEquals(
                 MailService.SendResult.SELF,
-                mail.send(sender, offline(id, true), "Hello")
+                mail.sendAsync(sender, offline(id, true), "Hello").join()
         );
     }
 
@@ -81,12 +93,12 @@ class MailServiceTest {
         Player sender = sender(UUID.randomUUID());
         OfflinePlayer recipient = offline(UUID.randomUUID(), true);
 
-        assertEquals(MailService.SendResult.EMPTY, mail.send(sender, recipient, "   "));
+        assertEquals(MailService.SendResult.EMPTY, mail.sendAsync(sender, recipient, "   ").join());
         assertEquals(
                 MailService.SendResult.TOO_LONG,
-                mail.send(sender, recipient, "x".repeat(17))
+                mail.sendAsync(sender, recipient, "x".repeat(17)).join()
         );
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "x".repeat(16)));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "x".repeat(16)).join());
     }
 
     @Test
@@ -97,7 +109,7 @@ class MailServiceTest {
         // Sixteen emoji would be 32 chars but is exactly sixteen code points.
         assertEquals(
                 MailService.SendResult.SENT,
-                mail.send(sender, offline(UUID.randomUUID(), true), "😀".repeat(16))
+                mail.sendAsync(sender, offline(UUID.randomUUID(), true), "😀".repeat(16)).join()
         );
     }
 
@@ -106,10 +118,10 @@ class MailServiceTest {
         MailService mail = mail(defaults());
         Player sender = sender(UUID.randomUUID());
 
-        assertEquals(MailService.SendResult.UNKNOWN_PLAYER, mail.send(sender, null, "Hello"));
+        assertEquals(MailService.SendResult.UNKNOWN_PLAYER, mail.sendAsync(sender, null, "Hello").join());
         assertEquals(
                 MailService.SendResult.UNKNOWN_PLAYER,
-                mail.send(sender, offline(UUID.randomUUID(), false), "Hello")
+                mail.sendAsync(sender, offline(UUID.randomUUID(), false), "Hello").join()
         );
     }
 
@@ -119,7 +131,7 @@ class MailServiceTest {
 
         assertEquals(
                 MailService.SendResult.DISABLED,
-                mail.send(sender(UUID.randomUUID()), offline(UUID.randomUUID(), true), "Hello")
+                mail.sendAsync(sender(UUID.randomUUID()), offline(UUID.randomUUID(), true), "Hello").join()
         );
     }
 
@@ -135,7 +147,7 @@ class MailServiceTest {
         profiles.save(profile);
         assertEquals(
                 MailService.SendResult.UNAVAILABLE,
-                mail.send(sender, offline(mailOff, true), "Hello")
+                mail.sendAsync(sender, offline(mailOff, true), "Hello").join()
         );
 
         UUID blocking = UUID.randomUUID();
@@ -144,7 +156,7 @@ class MailServiceTest {
         profiles.save(blocker);
         assertEquals(
                 MailService.SendResult.UNAVAILABLE,
-                mail.send(sender, offline(blocking, true), "Hello")
+                mail.sendAsync(sender, offline(blocking, true), "Hello").join()
         );
     }
 
@@ -154,14 +166,14 @@ class MailServiceTest {
         Player sender = sender(UUID.randomUUID());
         OfflinePlayer recipient = offline(UUID.randomUUID(), true);
 
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "One"));
-        assertEquals(MailService.SendResult.COOLDOWN, mail.send(sender, recipient, "Two"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "One").join());
+        assertEquals(MailService.SendResult.COOLDOWN, mail.sendAsync(sender, recipient, "Two").join());
 
         clock.advanceSeconds(29);
-        assertEquals(MailService.SendResult.COOLDOWN, mail.send(sender, recipient, "Three"));
+        assertEquals(MailService.SendResult.COOLDOWN, mail.sendAsync(sender, recipient, "Three").join());
 
         clock.advanceSeconds(1);
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "Four"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "Four").join());
     }
 
     @Test
@@ -173,15 +185,15 @@ class MailServiceTest {
         Player sender = sender(UUID.randomUUID());
         OfflinePlayer recipient = offline(UUID.randomUUID(), true);
 
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "One"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "One").join());
         clock.advanceSeconds(10);
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "Two"));
-        assertEquals(MailService.SendResult.HOURLY_LIMIT, mail.send(sender, recipient, "Three"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "Two").join());
+        assertEquals(MailService.SendResult.HOURLY_LIMIT, mail.sendAsync(sender, recipient, "Three").join());
 
         // The first send falls out of the window, freeing exactly one slot.
         clock.advanceSeconds(3591);
-        assertEquals(MailService.SendResult.SENT, mail.send(sender, recipient, "Four"));
-        assertEquals(MailService.SendResult.HOURLY_LIMIT, mail.send(sender, recipient, "Five"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender, recipient, "Four").join());
+        assertEquals(MailService.SendResult.HOURLY_LIMIT, mail.sendAsync(sender, recipient, "Five").join());
     }
 
     @Test
@@ -189,8 +201,8 @@ class MailServiceTest {
         MailService mail = mail(settings(config -> config.set("mail.cooldown-seconds", 30)));
         OfflinePlayer recipient = offline(UUID.randomUUID(), true);
 
-        assertEquals(MailService.SendResult.SENT, mail.send(sender(UUID.randomUUID()), recipient, "One"));
-        assertEquals(MailService.SendResult.SENT, mail.send(sender(UUID.randomUUID()), recipient, "Two"));
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender(UUID.randomUUID()), recipient, "One").join());
+        assertEquals(MailService.SendResult.SENT, mail.sendAsync(sender(UUID.randomUUID()), recipient, "Two").join());
     }
 
     @Test
@@ -201,7 +213,7 @@ class MailServiceTest {
 
         assertEquals(
                 MailService.SendResult.SENT,
-                mail.send(sender(senderId), offline(recipientId, true), "  Hello   there  ")
+                mail.sendAsync(sender(senderId), offline(recipientId, true), "  Hello   there  ").join()
         );
 
         Profile inbox = profiles.load(recipientId);
@@ -259,6 +271,7 @@ class MailServiceTest {
 
     private MailService mail(SettingsService settings) {
         return new MailService(
+                plugin,
                 server,
                 settings,
                 profiles,

@@ -172,6 +172,7 @@ class SqlStorageTest {
                 "Emeli",
                 precise,
                 1,
+                Set.of(),
                 Set.of()
         );
         StorageSnapshot source = new StorageSnapshot(
@@ -211,12 +212,12 @@ class SqlStorageTest {
         try (SqlStorage storage = sqlite("maintenance.db")) {
             storage.saveDeathMarkers(List.of(expired, active));
 
-            assertEquals(1, storage.maintenancePreview(now).expiredDeathMarkers());
-            SqlStorage.MaintenanceResult result = storage.maintain(now);
+            assertEquals(1, storage.maintenancePreview(now, 0).expiredDeathMarkers());
+            SqlStorage.MaintenanceResult result = storage.maintain(now, 0);
 
             assertEquals(1, result.removed().expiredDeathMarkers());
             assertEquals(List.of(active), storage.loadDeathMarkers());
-            assertEquals(0, storage.maintenancePreview(now).total());
+            assertEquals(0, storage.maintenancePreview(now, 0).total());
             assertTrue(storage.verifyUninitialized().healthy());
         }
     }
@@ -289,7 +290,8 @@ class SqlStorageTest {
                 "Emeli",
                 now,
                 72_000,
-                Set.of(blockedId)
+                Set.of(blockedId),
+                Set.of()
         );
         BlockKey block = new BlockKey(worldId, 12, 72, -41);
         ContainerLockSnapshot lock = new ContainerLockSnapshot(

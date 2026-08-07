@@ -71,7 +71,7 @@ public final class MailboxController implements Listener {
         prompts.request(
                 sender,
                 "mail.prompt",
-                (responding, text) -> mail.sendWithFeedback(responding, recipient, text)
+                (responding, text) -> mail.sendWithFeedbackAsync(responding, recipient, text)
         );
     }
 

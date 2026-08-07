@@ -249,9 +249,33 @@ public final class SqlStorage implements
             loadHints(connection, profile);
             loadNotifications(connection, profile);
             loadMailBlocks(connection, profile);
+            loadProfileTrusted(connection, profile);
             return profile;
         } catch (SQLException | RuntimeException exception) {
             throw new IllegalStateException("Could not load profile " + uniqueId, exception);
+        }
+    }
+
+    @Override
+    public java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts() throws IOException {
+        try (Connection connection = connection()) {
+            java.util.Map<UUID, java.util.Set<UUID>> trusted = new java.util.LinkedHashMap<>();
+            try (PreparedStatement statement = connection.prepareStatement(
+                    """
+                    SELECT player_id, trusted_player_id FROM st_profile_trusted
+                    ORDER BY player_id, trusted_player_id
+                    """
+            ); ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    trusted.computeIfAbsent(
+                            UUID.fromString(results.getString("player_id")),
+                            ignored -> new java.util.LinkedHashSet<>()
+                    ).add(UUID.fromString(results.getString("trusted_player_id")));
+                }
+            }
+            return trusted;
+        } catch (SQLException | RuntimeException exception) {
+            throw io("Could not load global trusts", exception);
         }
     }
 
@@ -404,22 +428,26 @@ public final class SqlStorage implements
         return verify(false);
     }
 
-    public MaintenancePreview maintenancePreview(Instant now) throws IOException {
+    public MaintenancePreview maintenancePreview(Instant now, int mailPurgeInactiveDays) throws IOException {
         Objects.requireNonNull(now, "now");
         try (Connection connection = connection()) {
-            return maintenancePreview(connection, now);
+            return maintenancePreview(connection, now, mailPurgeInactiveDays);
         } catch (SQLException | RuntimeException exception) {
             throw io("Could not preview storage maintenance", exception);
         }
     }
 
-    public MaintenanceResult maintain(Instant now) throws IOException {
+    public MaintenanceResult maintain(Instant now, int mailPurgeInactiveDays) throws IOException {
         Objects.requireNonNull(now, "now");
         snapshotGate.writeLock().lock();
         try (Connection connection = connection()) {
             connection.setAutoCommit(false);
             try {
-                MaintenancePreview before = maintenancePreview(connection, now);
+                MaintenancePreview before = maintenancePreview(connection, now, mailPurgeInactiveDays);
+                int oldMailRemoved = 0;
+                if (mailPurgeInactiveDays > 0) {
+                    oldMailRemoved = delete(connection, "DELETE FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli());
+                }
                 MaintenancePreview removed = new MaintenancePreview(
                         delete(connection, "DELETE FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
                         delete(connection, "DELETE FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
@@ -427,12 +455,14 @@ public final class SqlStorage implements
                         delete(connection, "DELETE FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
                         delete(connection, "DELETE FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
                         delete(connection, "DELETE FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
+                        delete(connection, "DELETE FROM st_profile_trusted WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_profile_trusted.player_id)"),
                         delete(connection, "DELETE FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
                         delete(connection, "DELETE FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
                         delete(connection, "DELETE FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
-                        delete(connection, "DELETE FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)")
+                        delete(connection, "DELETE FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)"),
+                        oldMailRemoved
                 );
-                MaintenancePreview remaining = maintenancePreview(connection, now);
+                MaintenancePreview remaining = maintenancePreview(connection, now, mailPurgeInactiveDays);
                 if (remaining.total() != 0) {
                     throw new SQLException(
                             "Maintenance cleanup left " + remaining.total()
@@ -479,6 +509,7 @@ public final class SqlStorage implements
             orphanCount(connection, "st_hints", "player_id", "st_profiles", "player_id", problems);
             orphanCount(connection, "st_notifications", "player_id", "st_profiles", "player_id", problems);
             orphanCount(connection, "st_mail_blocks", "player_id", "st_profiles", "player_id", problems);
+            orphanCount(connection, "st_profile_trusted", "player_id", "st_profiles", "player_id", problems);
             orphanCount(connection, "st_lock_blocks", "lock_id", "st_locks", "lock_id", problems);
             orphanCount(connection, "st_lock_trusted", "lock_id", "st_locks", "lock_id", problems);
             problemCount(
@@ -557,6 +588,7 @@ public final class SqlStorage implements
                 "SELECT player_id, notification_id, position, notification_type, created_at, actor_id, "
                         + "actor_name, detail, is_read FROM st_notifications WHERE 1 = 0",
                 "SELECT player_id, blocked_player_id FROM st_mail_blocks WHERE 1 = 0",
+                "SELECT player_id, trusted_player_id FROM st_profile_trusted WHERE 1 = 0",
                 "SELECT lock_id, owner_id, lock_name, access_mode, automation_allowed "
                         + "FROM st_locks WHERE 1 = 0",
                 "SELECT lock_id, world_id, x, y, z FROM st_lock_blocks WHERE 1 = 0",
@@ -569,8 +601,12 @@ public final class SqlStorage implements
         );
     }
 
-    private MaintenancePreview maintenancePreview(Connection connection, Instant now)
+    private MaintenancePreview maintenancePreview(Connection connection, Instant now, int mailPurgeInactiveDays)
             throws SQLException {
+        int oldMailCount = 0;
+        if (mailPurgeInactiveDays > 0) {
+            oldMailCount = queryCount(connection, "SELECT COUNT(*) FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli());
+        }
         return new MaintenancePreview(
                 queryCount(connection, "SELECT COUNT(*) FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
                 queryCount(connection, "SELECT COUNT(*) FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
@@ -578,10 +614,12 @@ public final class SqlStorage implements
                 queryCount(connection, "SELECT COUNT(*) FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
                 queryCount(connection, "SELECT COUNT(*) FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
                 queryCount(connection, "SELECT COUNT(*) FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
+                queryCount(connection, "SELECT COUNT(*) FROM st_profile_trusted WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_profile_trusted.player_id)"),
                 queryCount(connection, "SELECT COUNT(*) FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
                 queryCount(connection, "SELECT COUNT(*) FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
                 queryCount(connection, "SELECT COUNT(*) FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)")
+                queryCount(connection, "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)"),
+                oldMailCount
         );
     }
 
@@ -906,6 +944,14 @@ public final class SqlStorage implements
                 )
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS st_profile_trusted (
+                    player_id VARCHAR(36) NOT NULL,
+                    trusted_player_id VARCHAR(36) NOT NULL,
+                    PRIMARY KEY (player_id, trusted_player_id),
+                    FOREIGN KEY (player_id) REFERENCES st_profiles(player_id) ON DELETE CASCADE
+                )
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS st_locks (
                     lock_id VARCHAR(36) PRIMARY KEY,
                     owner_id VARCHAR(36) NOT NULL,
@@ -1044,6 +1090,7 @@ public final class SqlStorage implements
         insertHints(connection, snapshot);
         insertNotifications(connection, snapshot);
         insertMailBlocks(connection, snapshot);
+        insertProfileTrusted(connection, snapshot);
     }
 
     private void clearProfileChildren(Connection connection, String playerId) throws SQLException {
@@ -1052,7 +1099,8 @@ public final class SqlStorage implements
                 "st_homes",
                 "st_hints",
                 "st_notifications",
-                "st_mail_blocks"
+                "st_mail_blocks",
+                "st_profile_trusted"
         )) {
             try (PreparedStatement statement = connection.prepareStatement(
                     "DELETE FROM " + table + " WHERE player_id = ?"
@@ -1171,6 +1219,20 @@ public final class SqlStorage implements
             for (UUID blocked : snapshot.blockedMailSenders().stream().sorted().toList()) {
                 statement.setString(1, snapshot.uniqueId().toString());
                 statement.setString(2, blocked.toString());
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private void insertProfileTrusted(Connection connection, ProfileSnapshot snapshot)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO st_profile_trusted (player_id, trusted_player_id) VALUES (?, ?)"
+        )) {
+            for (UUID trusted : snapshot.trustedPlayers().stream().sorted().toList()) {
+                statement.setString(1, snapshot.uniqueId().toString());
+                statement.setString(2, trusted.toString());
                 statement.addBatch();
             }
             statement.executeBatch();
@@ -1325,12 +1387,28 @@ public final class SqlStorage implements
             }
         }
 
+        Map<UUID, Set<UUID>> trusted = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT player_id, trusted_player_id FROM st_profile_trusted
+                ORDER BY player_id, trusted_player_id
+                """
+        ); ResultSet results = statement.executeQuery()) {
+            while (results.next()) {
+                trusted.computeIfAbsent(
+                        UUID.fromString(results.getString("player_id")),
+                        ignored -> new LinkedHashSet<>()
+                ).add(UUID.fromString(results.getString("trusted_player_id")));
+            }
+        }
+
         for (Map.Entry<UUID, Profile> entry : profiles.entrySet()) {
             UUID playerId = entry.getKey();
             Profile profile = entry.getValue();
             profile.seenHints(hints.getOrDefault(playerId, Set.of()));
             profile.notifications(notifications.getOrDefault(playerId, List.of()));
             profile.blockedMailSenders(blocked.getOrDefault(playerId, Set.of()));
+            profile.trustedPlayers(trusted.getOrDefault(playerId, Set.of()));
         }
         return profiles.values().stream().map(Profile::snapshot).toList();
     }
@@ -1497,6 +1575,24 @@ public final class SqlStorage implements
             }
         }
         profile.blockedMailSenders(blocked);
+    }
+
+    private void loadProfileTrusted(Connection connection, Profile profile) throws SQLException {
+        Set<UUID> trusted = new LinkedHashSet<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT trusted_player_id FROM st_profile_trusted
+                WHERE player_id = ? ORDER BY trusted_player_id
+                """
+        )) {
+            statement.setString(1, profile.uniqueId().toString());
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    trusted.add(UUID.fromString(results.getString(1)));
+                }
+            }
+        }
+        profile.trustedPlayers(trusted);
     }
 
     private void replaceLocks(Connection connection, java.util.Collection<ContainerLockSnapshot> locks)
@@ -2157,15 +2253,17 @@ public final class SqlStorage implements
             int orphanHints,
             int orphanNotifications,
             int orphanMailBlocks,
+            int orphanProfileTrusted,
             int orphanLockBlocks,
             int orphanLockTrust,
             int emptyLocks,
-            int invalidSpawnLocations
+            int invalidSpawnLocations,
+            int oldMail
     ) {
         public int total() {
             return expiredDeathMarkers + orphanHomeShares + orphanHomes + orphanHints
-                    + orphanNotifications + orphanMailBlocks + orphanLockBlocks
-                    + orphanLockTrust + emptyLocks + invalidSpawnLocations;
+                    + orphanNotifications + orphanMailBlocks + orphanProfileTrusted + orphanLockBlocks
+                    + orphanLockTrust + emptyLocks + invalidSpawnLocations + oldMail;
         }
     }
 
