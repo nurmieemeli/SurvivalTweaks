@@ -133,6 +133,28 @@ class BackupServiceTest {
     }
 
     @Test
+    void restoreClearsSqliteSidecarsLeftBehindByAnUncleanShutdown() throws IOException {
+        Files.writeString(dataFolder.resolve("config.yml"), "storage: sqlite\n");
+        Files.writeString(dataFolder.resolve("survivaltweaks.db"), "snapshot");
+        BackupService backups = service(10);
+
+        Path archive = backups.create("manual").orElseThrow();
+
+        // A crash leaves the write-ahead log next to a database that has since
+        // moved on from the backup.
+        Files.writeString(dataFolder.resolve("survivaltweaks.db"), "newer");
+        Files.writeString(dataFolder.resolve("survivaltweaks.db-wal"), "frames for the newer database");
+        Files.writeString(dataFolder.resolve("survivaltweaks.db-shm"), "shared memory index");
+
+        backups.stageRestore(archive.getFileName().toString());
+        assertEquals(BackupService.RestoreResult.APPLIED, backups.applyPendingRestore());
+
+        assertEquals("snapshot", Files.readString(dataFolder.resolve("survivaltweaks.db")));
+        assertFalse(Files.exists(dataFolder.resolve("survivaltweaks.db-wal")));
+        assertFalse(Files.exists(dataFolder.resolve("survivaltweaks.db-shm")));
+    }
+
+    @Test
     void verificationRejectsTraversalAndCorruptArchives() throws IOException {
         Path backupFolder = Files.createDirectories(dataFolder.resolve("backups"));
         Path traversal = backupFolder.resolve("traversal.zip");

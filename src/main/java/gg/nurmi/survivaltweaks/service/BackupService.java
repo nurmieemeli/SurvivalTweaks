@@ -193,7 +193,15 @@ public final class BackupService {
         Path staging = Files.createTempDirectory(dataFolder, ".restore-stage-");
         Path rollback = Files.createTempDirectory(dataFolder, ".restore-rollback-");
         List<String> managedPaths = new ArrayList<>(ROOT_FILES);
-        managedPaths.addAll(databaseEntries(pending));
+        for (String database : databaseEntries(pending)) {
+            managedPaths.add(database);
+            // A SQLite sidecar only belongs to the exact database file it was
+            // written for. Backups hold a checkpointed database and no sidecars,
+            // so any left over from an unclean shutdown must move aside with the
+            // database they came from; pairing one with a restored file risks
+            // corruption or replaying transactions the restore was meant to undo.
+            managedPaths.addAll(databaseSidecars(database));
+        }
         managedPaths.add("userdata");
         List<String> touchedPaths = new ArrayList<>();
         boolean preserveRollback = false;
@@ -543,6 +551,11 @@ public final class BackupService {
         return name != null
                 && name.matches("[A-Za-z0-9._-]{1,128}\\.db")
                 && !name.startsWith(".");
+    }
+
+    /** The write-ahead log and rollback files SQLite keeps beside a database. */
+    static List<String> databaseSidecars(String database) {
+        return List.of(database + "-wal", database + "-shm", database + "-journal");
     }
 
     private static List<String> databaseEntries(Path archive) throws IOException {
