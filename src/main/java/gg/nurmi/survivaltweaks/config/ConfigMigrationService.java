@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 
 public final class ConfigMigrationService {
 
-    public static final int CURRENT_VERSION = 5;
+    public static final int CURRENT_VERSION = 7;
     private static final List<String> VERSION_ONE_OBSOLETE_PATHS = List.of(
             "disabled-commands",
             "commands.disabled",
@@ -109,6 +109,33 @@ public final class ConfigMigrationService {
             setIfMissing(config, "mail.purge-inactive-days", 0, changes);
             version = 5;
             changes.add("Recorded configuration schema version 5.");
+        }
+        if (version == 5) {
+            // Version 5 sent MySQL the legacy useSSL/requireSSL pair, which
+            // encrypts without ever validating the server certificate. Pin that
+            // behaviour for existing servers so upgrading cannot break a working
+            // connection; fresh installations default to verify-identity.
+            setIfMissing(
+                    config,
+                    "storage.remote.mysql-ssl-mode",
+                    config.getBoolean("storage.remote.ssl", true) ? "required" : "verify-identity",
+                    changes
+            );
+            changes.add(
+                    "storage.remote.mysql-ssl-mode kept version 5's behaviour of encrypting "
+                            + "without validating the MySQL server certificate. Set it to "
+                            + "verify-identity once the server presents a trusted certificate."
+            );
+            version = 6;
+            changes.add("Recorded configuration schema version 6.");
+        }
+        if (version == 6) {
+            // Version 6 always rendered audience-less text in English. Keep that
+            // so upgrading cannot silently switch a server's console and server
+            // list into another language.
+            setIfMissing(config, "default-language", "en", changes);
+            version = 7;
+            changes.add("Recorded configuration schema version 7.");
         }
         config.set("config-version", version);
 

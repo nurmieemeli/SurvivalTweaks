@@ -1,4 +1,10 @@
-config-version: 5
+config-version: 7
+
+# Language for text with no player to address: server list pings, pre-login
+# kicks, console output, and the lore baked into items handed out by loot tables
+# or villager trades. Players always see their own language wherever it is
+# known. Supported values: en, fi.
+default-language: "en"
 
 home:
   max-amount: 3
@@ -84,11 +90,18 @@ storage:
     postgresql-schema: "survivaltweaks"
     username: "survivaltweaks"
     password: ""
-    # MySQL TLS toggle. PostgreSQL uses the explicit mode below.
+    # TLS toggle for MySQL. Turning it off disables encryption entirely;
+    # the mode below then no longer applies. PostgreSQL uses its own mode.
     ssl: true
     # verify-full validates both the certificate chain and server hostname.
     # Other pgjdbc modes: disable, allow, prefer, require, verify-ca.
     postgresql-ssl-mode: "verify-full"
+    # verify-identity validates both the certificate chain and server hostname.
+    # Other Connector/J modes: preferred, required, verify-ca. Note that
+    # preferred and required encrypt without validating the certificate, so a
+    # MySQL server with a self-signed certificate needs a trust store rather
+    # than a weaker mode here.
+    mysql-ssl-mode: "verify-identity"
     pool-size: 4
     connection-timeout-millis: 5000
     # Bound stalled network operations and statements so shutdown cannot hang forever.

@@ -182,7 +182,12 @@ class PluginResourcesTest {
         assertNotNull(config.getString("feedback.cues.enchant-deflection.particle"));
         assertNotNull(config.getString("feedback.cues.afk-enabled.sound"));
         assertNotNull(config.getString("feedback.cues.afk-disabled.particle"));
-        assertEquals(5, config.getInt("config-version"));
+        // The shipped config must match the schema this build migrates to, not
+        // a literal that has to be chased on every bump.
+        assertEquals(
+                gg.nurmi.survivaltweaks.config.ConfigMigrationService.CURRENT_VERSION,
+                config.getInt("config-version")
+        );
         assertEquals("auto", config.getString("storage.backend"));
         assertEquals("survivaltweaks.db", config.getString("storage.sqlite.file"));
         assertEquals(4, config.getInt("storage.remote.pool-size"));

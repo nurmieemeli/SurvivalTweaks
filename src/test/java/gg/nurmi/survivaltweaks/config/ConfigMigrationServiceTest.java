@@ -32,13 +32,14 @@ class ConfigMigrationServiceTest {
         ConfigMigrationService.Result result = migrations.migrate(config, dataFolder);
 
         assertTrue(result.changed());
-        assertEquals(5, config.getInt("config-version"));
+        assertEquals(ConfigMigrationService.CURRENT_VERSION, config.getInt("config-version"));
         assertEquals("public", config.getString("storage.remote.postgresql-schema"));
         assertEquals("require", config.getString("storage.remote.postgresql-ssl-mode"));
         assertFalse(config.contains("disabled-commands", true));
         assertFalse(config.contains("death-recovery.give-compass", true));
         assertTrue(Files.readString(dataFolder.resolve("config-migration-report.txt"))
-                .contains("Schema: 0 -> 5"));
+                .contains("Schema: 0 -> " + ConfigMigrationService.CURRENT_VERSION));
+        assertEquals("en", config.getString("default-language"));
         assertTrue(config.getBoolean("storage.portable-exports.enabled"));
         assertEquals(24, config.getInt("storage.portable-exports.interval-hours"));
         assertEquals(5, config.getInt("storage.portable-exports.initial-delay-minutes"));
@@ -57,6 +58,27 @@ class ConfigMigrationServiceTest {
         assertEquals("disable", config.getString("storage.remote.postgresql-ssl-mode"));
         assertEquals(30, config.getInt("storage.remote.socket-timeout-seconds"));
         assertEquals(30, config.getInt("storage.remote.query-timeout-seconds"));
+    }
+
+    @Test
+    void versionFivePreservesItsUnverifiedMysqlTlsSemantics() throws Exception {
+        YamlConfiguration encrypted = new YamlConfiguration();
+        encrypted.set("config-version", 5);
+        encrypted.set("storage.remote.ssl", true);
+
+        service().migrate(encrypted, dataFolder);
+
+        // Version 5 encrypted without validating the certificate. Upgrading must
+        // not turn a working connection into a failing one.
+        assertEquals("required", encrypted.getString("storage.remote.mysql-ssl-mode"));
+
+        YamlConfiguration plaintext = new YamlConfiguration();
+        plaintext.set("config-version", 5);
+        plaintext.set("storage.remote.ssl", false);
+
+        service().migrate(plaintext, dataFolder);
+
+        assertEquals("verify-identity", plaintext.getString("storage.remote.mysql-ssl-mode"));
     }
 
     @Test
