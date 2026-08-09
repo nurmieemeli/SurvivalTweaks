@@ -20,6 +20,7 @@ public record StorageConfiguration(
         String password,
         boolean ssl,
         String postgresqlSslMode,
+        String mysqlSslMode,
         int poolSize,
         long connectionTimeoutMillis,
         int socketTimeoutSeconds,
@@ -30,6 +31,9 @@ public record StorageConfiguration(
     private static final String SIMPLE_SCHEMA = "[A-Za-z_][A-Za-z0-9_]{0,62}";
     private static final java.util.Set<String> POSTGRESQL_SSL_MODES = java.util.Set.of(
             "disable", "allow", "prefer", "require", "verify-ca", "verify-full"
+    );
+    private static final java.util.Set<String> MYSQL_SSL_MODES = java.util.Set.of(
+            "preferred", "required", "verify-ca", "verify-identity"
     );
 
     public StorageConfiguration {
@@ -43,6 +47,8 @@ public record StorageConfiguration(
         username = Objects.requireNonNullElse(username, "").strip();
         password = Objects.requireNonNullElse(password, "");
         postgresqlSslMode = Objects.requireNonNullElse(postgresqlSslMode, "verify-full")
+                .strip().toLowerCase(Locale.ROOT);
+        mysqlSslMode = Objects.requireNonNullElse(mysqlSslMode, "verify-identity")
                 .strip().toLowerCase(Locale.ROOT);
         if (poolSize < 1 || poolSize > 16) {
             throw new IllegalArgumentException("storage.remote.pool-size must be between 1 and 16");
@@ -88,6 +94,11 @@ public record StorageConfiguration(
                             "storage.remote.postgresql-ssl-mode is invalid"
                     );
                 }
+            }
+            if (backend == StorageBackend.MYSQL && !MYSQL_SSL_MODES.contains(mysqlSslMode)) {
+                throw new IllegalArgumentException(
+                        "storage.remote.mysql-ssl-mode is invalid"
+                );
             }
         }
     }
@@ -135,6 +146,7 @@ public record StorageConfiguration(
                 config.getString("storage.remote.password", ""),
                 config.getBoolean("storage.remote.ssl", true),
                 config.getString("storage.remote.postgresql-ssl-mode", "verify-full"),
+                config.getString("storage.remote.mysql-ssl-mode", "verify-identity"),
                 config.getInt("storage.remote.pool-size", 4),
                 config.getLong("storage.remote.connection-timeout-millis", 5_000),
                 config.getInt("storage.remote.socket-timeout-seconds", 30),
@@ -156,6 +168,7 @@ public record StorageConfiguration(
                 password,
                 ssl,
                 postgresqlSslMode,
+                mysqlSslMode,
                 poolSize,
                 connectionTimeoutMillis,
                 socketTimeoutSeconds,
@@ -169,9 +182,21 @@ public record StorageConfiguration(
             case POSTGRESQL -> "jdbc:postgresql://" + host + ":" + port + "/" + database;
             case MYSQL -> "jdbc:mysql://" + host + ":" + port + "/" + database
                     + "?useUnicode=true&characterEncoding=utf8"
-                    + "&serverTimezone=UTC&useSSL=" + ssl
-                    + "&requireSSL=" + ssl;
+                    + "&serverTimezone=UTC";
         };
+    }
+
+    /**
+     * The Connector/J {@code sslMode} for this endpoint. The legacy
+     * {@code useSSL}/{@code requireSSL} pair this replaces encrypts without ever
+     * validating the server certificate, because Connector/J still defaults
+     * {@code verifyServerCertificate} to false.
+     */
+    public String mysqlSslModeProperty() {
+        if (!ssl) {
+            return "DISABLED";
+        }
+        return mysqlSslMode.toUpperCase(Locale.ROOT).replace('-', '_');
     }
 
     public String driverClassName() {

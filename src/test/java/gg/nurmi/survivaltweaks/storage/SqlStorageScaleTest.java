@@ -96,6 +96,7 @@ class SqlStorageScaleTest {
                     "",
                     false,
                     "disable",
+                    "verify-identity",
                     1,
                     5_000,
                     30,

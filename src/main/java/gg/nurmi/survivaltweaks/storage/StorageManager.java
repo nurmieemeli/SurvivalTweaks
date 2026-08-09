@@ -161,6 +161,33 @@ public final class StorageManager implements AutoCloseable {
         return storage.verify();
     }
 
+    /**
+     * Verifies the database and returns the snapshot the check already read.
+     * Queued writes are drained first so callers see the same data a snapshot
+     * export would, and a failed drain becomes a reported problem rather than
+     * a silently stale reading.
+     */
+    public SqlStorage.Inspection inspect() {
+        String drainFailure = "";
+        try {
+            flushPendingWrites();
+        } catch (IOException exception) {
+            drainFailure = "Could not drain pending writes before inspecting storage: "
+                    + Objects.requireNonNullElse(exception.getMessage(), "unknown failure");
+        }
+        SqlStorage.Inspection inspection = storage.inspect();
+        if (drainFailure.isEmpty()) {
+            return inspection;
+        }
+        java.util.List<String> problems = new java.util.ArrayList<>();
+        problems.add(drainFailure);
+        problems.addAll(inspection.verification().problems());
+        return new SqlStorage.Inspection(
+                new SqlStorage.Verification(false, java.util.List.copyOf(problems)),
+                inspection.snapshot()
+        );
+    }
+
     public SqlStorage.MaintenancePreview previewMaintenance(int mailPurgeInactiveDays) throws IOException {
         return storage.maintenancePreview(Instant.now(), mailPurgeInactiveDays);
     }
@@ -229,6 +256,7 @@ public final class StorageManager implements AutoCloseable {
                 "",
                 false,
                 "disable",
+                "verify-identity",
                 1,
                 5_000,
                 30,

@@ -98,6 +98,7 @@ public final class SqlStorage implements
         dataSource = new HikariDataSource(hikari);
         try (Connection connection = dataSource.getConnection()) {
             configureConnection(connection);
+            initializeDatabaseDefaults(connection);
             initializeSchema(connection);
         } catch (SQLException | RuntimeException exception) {
             dataSource.close();
@@ -451,7 +452,16 @@ public final class SqlStorage implements
     }
 
     public Verification verify() {
-        return verify(false);
+        return inspect(false).verification();
+    }
+
+    /**
+     * Verifies the database and hands back the snapshot the integrity check
+     * already had to read, so callers that need the data do not pay for a
+     * second full pass over every table.
+     */
+    public Inspection inspect() {
+        return inspect(false);
     }
 
     public MaintenancePreview maintenancePreview(Instant now, int mailPurgeInactiveDays) throws IOException {
@@ -509,10 +519,10 @@ public final class SqlStorage implements
     }
 
     Verification verifyUninitialized() {
-        return verify(true);
+        return inspect(true).verification();
     }
 
-    private Verification verify(boolean allowMissingInstanceId) {
+    private Inspection inspect(boolean allowMissingInstanceId) {
         List<String> problems = new ArrayList<>();
         if (!leaseFailure.isBlank()) {
             problems.add("Database instance lease failed: " + leaseFailure);
@@ -593,13 +603,17 @@ public final class SqlStorage implements
             problems.add(exception.getClass().getSimpleName() + ": "
                     + Objects.requireNonNullElse(exception.getMessage(), "verification failed"));
         }
+        StorageSnapshot snapshot = null;
         try {
-            exportSnapshot();
+            snapshot = exportSnapshot();
         } catch (Exception exception) {
             problems.add("Snapshot read failed: " + exception.getClass().getSimpleName() + ": "
                     + Objects.requireNonNullElse(exception.getMessage(), "unknown failure"));
         }
-        return new Verification(problems.isEmpty(), List.copyOf(problems));
+        return new Inspection(
+                new Verification(problems.isEmpty(), List.copyOf(problems)),
+                Optional.ofNullable(snapshot)
+        );
     }
 
     private List<String> requiredSchemaQueries() {
@@ -855,7 +869,11 @@ public final class SqlStorage implements
             hikari.addDataSourceProperty("tcpKeepAlive", true);
             hikari.addDataSourceProperty("ApplicationName", "SurvivalTweaks");
             hikari.addDataSourceProperty("reWriteBatchedInserts", true);
+            hikari.setConnectionInitSql(
+                    "SET search_path TO " + configuration.postgresqlSchema()
+            );
         } else if (configuration.backend() == StorageBackend.MYSQL) {
+            hikari.addDataSourceProperty("sslMode", configuration.mysqlSslModeProperty());
             hikari.addDataSourceProperty("connectTimeout", configuration.connectionTimeoutMillis());
             hikari.addDataSourceProperty(
                     "socketTimeout",
@@ -914,13 +932,12 @@ public final class SqlStorage implements
         );
     }
 
+    /**
+     * Session state that every connection needs. PostgreSQL gets its search
+     * path from {@code currentSchema} and the pool's init SQL instead, both of
+     * which run once per physical connection rather than once per borrow.
+     */
     private void configureConnection(Connection connection) throws SQLException {
-        if (configuration.backend() == StorageBackend.POSTGRESQL) {
-            try (Statement statement = connection.createStatement()) {
-                statement.execute("SET search_path TO " + configuration.postgresqlSchema());
-            }
-            return;
-        }
         if (configuration.backend() != StorageBackend.SQLITE) {
             return;
         }
@@ -928,6 +945,18 @@ public final class SqlStorage implements
             statement.execute("PRAGMA foreign_keys = ON");
             statement.execute("PRAGMA busy_timeout = 10000");
             statement.execute("PRAGMA synchronous = FULL");
+        }
+    }
+
+    /**
+     * Settings stored in the database itself rather than in a session, so they
+     * survive reconnects and only need applying when the storage is opened.
+     */
+    private void initializeDatabaseDefaults(Connection connection) throws SQLException {
+        if (configuration.backend() != StorageBackend.SQLITE) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA journal_mode = WAL");
         }
     }
@@ -2409,6 +2438,13 @@ public final class SqlStorage implements
     }
 
     public record Verification(boolean healthy, List<String> problems) {
+    }
+
+    /**
+     * A verification together with the snapshot it read, absent only when the
+     * snapshot read itself was what failed.
+     */
+    public record Inspection(Verification verification, Optional<StorageSnapshot> snapshot) {
     }
 
     public record MaintenancePreview(

@@ -175,7 +175,7 @@ class StorageManagerTest {
         }
         StorageConfiguration portableConfiguration = new StorageConfiguration(
                 StorageBackend.SQLITE, exported.file(), "", 5432, "", "survivaltweaks",
-                "", "", false, "disable", 1, 5_000, 30, 30
+                "", "", false, "disable", "verify-identity", 1, 5_000, 30, 30
         );
         StorageSnapshot reopened;
         UUID instanceId;
@@ -189,7 +189,7 @@ class StorageManagerTest {
         try (SqlStorage restored = new SqlStorage(
                 new StorageConfiguration(
                         StorageBackend.SQLITE, directory.resolve("restored.db"), "", 5432,
-                        "", "survivaltweaks", "", "", false, "disable", 1, 5_000, 30, 30
+                        "", "survivaltweaks", "", "", false, "disable", "verify-identity", 1, 5_000, 30, 30
                 ),
                 logger
         )) {

@@ -75,6 +75,43 @@ class StorageConfigurationTest {
         );
     }
 
+    @Test
+    void mysqlValidatesTheServerCertificateUnlessTlsIsTurnedOff() {
+        YamlConfiguration verified = base();
+        verified.set("storage.remote.type", "mysql");
+        verified.set("storage.remote.ssl", true);
+
+        StorageConfiguration secure = StorageConfiguration.load(verified, directory);
+
+        assertEquals("VERIFY_IDENTITY", secure.mysqlSslModeProperty());
+        // The legacy useSSL/requireSSL pair encrypts without ever checking the
+        // certificate, so it must not come back into the URL.
+        org.junit.jupiter.api.Assertions.assertFalse(secure.jdbcUrl().contains("useSSL"));
+        org.junit.jupiter.api.Assertions.assertFalse(secure.jdbcUrl().contains("requireSSL"));
+
+        YamlConfiguration plaintext = base();
+        plaintext.set("storage.remote.type", "mysql");
+        plaintext.set("storage.remote.ssl", false);
+
+        assertEquals(
+                "DISABLED",
+                StorageConfiguration.load(plaintext, directory).mysqlSslModeProperty()
+        );
+    }
+
+    @Test
+    void rejectsAnUnknownMysqlSslMode() {
+        YamlConfiguration config = base();
+        config.set("storage.remote.type", "mysql");
+        config.set("storage.remote.ssl", true);
+        config.set("storage.remote.mysql-ssl-mode", "trust-everything");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> StorageConfiguration.load(config, directory)
+        );
+    }
+
     private static YamlConfiguration base() {
         YamlConfiguration config = new YamlConfiguration();
         config.set("storage.backend", "auto");
@@ -88,6 +125,7 @@ class StorageConfigurationTest {
         config.set("storage.remote.ssl", false);
         config.set("storage.remote.postgresql-schema", "survivaltweaks");
         config.set("storage.remote.postgresql-ssl-mode", "disable");
+        config.set("storage.remote.mysql-ssl-mode", "verify-identity");
         config.set("storage.remote.pool-size", 4);
         config.set("storage.remote.connection-timeout-millis", 5_000);
         config.set("storage.remote.socket-timeout-seconds", 30);
