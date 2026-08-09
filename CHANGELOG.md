@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.24.0 - 2026-08-09
+
+### Added
+
+- Profile-wide `/trust` access for all containers owned by a player.
+- Persistence coordination that drains pending profile, lock, death-marker,
+  and first-join spawn writes before snapshots, backups, and maintenance.
+
+### Changed
+
+- Portable database exports are verified before being published atomically.
+- Remote database singleton leases are monitored continuously, and configured
+  query timeouts now apply consistently to MySQL and PostgreSQL statements.
+
+### Fixed
+
+- Database maintenance no longer allows cached aggregates to restore purged
+  mail or expired death markers.
+- Profile-wide trusts are included in storage checksums and record counts, and
+  trust preload failures now fail closed instead of silently denying access.
+- Players now retain their personal first-join random location as their native
+  respawn point, while valid beds and respawn anchors remain respected.
+
 ## 2.23.0 - 2026-08-01
 
 ### Added
