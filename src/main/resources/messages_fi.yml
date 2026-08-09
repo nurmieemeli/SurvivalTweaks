@@ -96,7 +96,7 @@ sleep:
 server-list:
   motd: "<dark_green><bold>Survival</bold></dark_green> <dark_gray>•</dark_gray> <status>\n<announcement>"
   status:
-    online: "<green>Paikalla</green>"
+    online: "<green>Päällä</green>"
     maintenance: "<yellow>Huoltotila</yellow>"
     restarting: "<red>Käynnistyy uudelleen</red>"
     # <time> on lyhenne (esim. "5m"), jota postpositio "kuluttua" ei voi hallita.
@@ -128,7 +128,7 @@ maintenance:
     hours-before: "<count> tunnin"
 
 journey:
-  title: "<green>Tervetuloa survivaliin</green>"
+  title: "<green>Tervetuloa Survivaliin</green>"
   subtitle: "<gray>Aloita matkasi komennolla <white>/survival</white></gray>"
 
 vanilla-guide:
@@ -194,7 +194,7 @@ new-player-spawn:
   preparing: "<gray>Valmistellaan sinulle omaa turvallista paikkaa maailmassa...</gray>"
   arrived: "<green>Tervetuloa! Tämä ainutlaatuinen aloitusalue on sinun tutkittavaksesi.</green>"
   replacing: "<yellow>Varattu aloitusalueesi muuttui tai ei ole enää turvallinen. Valmistellaan uutta sijaintia...</yellow>"
-  title: "<green>Tervetuloa survivaliin</green>"
+  title: "<green>Tervetuloa Survivaliin</green>"
   subtitle: "<gray>Seikkailusi alkaa tästä</gray>"
   failed: "<red>Aloituspaikkaasi ei voitu valmistella. Liity uudelleen tai ota yhteyttä ylläpitoon.</red>"
 
@@ -300,11 +300,11 @@ lock:
   removed-by-break: "<gray>Säiliön lukitus poistettiin ennen rikkomista.</gray>"
   extended: "<gray>Uusi säiliö liitettiin olemassa olevaan lukkoon.</gray>"
   conflict: "<red>Säiliön lukkotiedoissa on ristiriita. Pyydä ylläpitäjää tarkistamaan loki.</red>"
-  deposit-only: "<yellow>Tähän säiliöön voi tallettaa tavaroita, mutta et voi ottaa niitä.</yellow>"
+  deposit-only: "<yellow>Voit tallettaa tähän säiliöön tavaroita, mutta et voi ottaa niitä pois.</yellow>"
   nearby-radius: "<red>Lähilukituksen säteen täytyy olla 1–8 palikkaa.</red>"
   nearby-created: "<gray>Lukittiin <green><count></green> lähellä olevaa säiliötä.</gray>"
   transferred: "<gray>Lukon omistajuus siirretty pelaajalle <green><player></green>.</gray>"
-  transfer-received: "<gray>Olet nyt lukon omistaja, jonka siirsi <green><player></green>.</gray>"
+  transfer-received: "<gray>Pelaaja <green><player></green> siirsi sinulle lukon omistajuuden.</gray>"
   already-owner: "<red>Kyseinen pelaaja on jo tämän lukon omistaja.</red>"
   actionbar:
     deposit-only: "<yellow>Talletusoikeus</yellow> <dark_gray>•</dark_gray> <gray>Omistaja: <owner></gray>"
@@ -516,7 +516,7 @@ admin:
     header: "<dark_green><bold>SurvivalTweaks</bold></dark_green> <gray>— käytettävissä olevat komennot</gray>"
     entry: "<dark_gray>›</dark_gray> <green><command></green> <dark_gray>—</dark_gray> <gray><description></gray>"
     footer: "<dark_gray>Napsauta komentoa siirtääksesi sen chat-kenttään.</dark_gray>"
-    click: "<yellow>Napsauta valmistellaksesi komento.</yellow>"
+    click: "<yellow>Napsauta valmistellaksesi komennon.</yellow>"
     survivaltweaks: "Avaa pelaajakeskus tai hallitse lisäosaa."
     afk: "Vaihda poissaolomerkintäsi pelaajalistassa."
     mail: "Avaa postilaatikkosi tai lähetä offline-tilassa toimivaa tekstipostia."
@@ -579,7 +579,7 @@ admin:
     header: "<dark_green><bold>SurvivalTweaksin suorituskyky</bold></dark_green>"
     summary: "<gray>Kuormanhallinta: <level> <dark_gray>•</dark_gray> <mspt> MSPT <dark_gray>•</dark_gray> tahti 1/<cadence> <dark_gray>•</dark_gray> hiukkaset <particles>% <dark_gray>•</dark_gray> työ <work>%</gray>"
     stable: "<green>Normaali tahti on käytössä; palautumisjaksoa ei tarvita.</green>"
-    recovery: "<yellow>Seuraava palautumisaskel <seconds> terveen sekunnin kuluttua.</yellow>"
+    recovery: "<yellow>Seuraava palautumisaskel <seconds> vakaan sekunnin kuluttua.</yellow>"
     budget: "<gray>Nykyisen tickin työbudjetti: <used>/<limit> käytetty, <remaining> jäljellä.</gray>"
     lanes: "<gray>Kaistan käyttö / estot nyt / estot yhteensä: puut <tree> <dark_gray>•</dark_gray> lehdet <leaves> <dark_gray>•</dark_gray> aloituspaikat <spawn> <dark_gray>•</dark_gray> opas <guide> <dark_gray>•</dark_gray> tunnelma <atmosphere></gray>"
     queues: "<gray>Odottava työ: <tree-jobs> puutyötä / <tree-blocks> lohkoa <dark_gray>•</dark_gray> <leaves> lehteä <dark_gray>•</dark_gray> <spawn-waiting> aloituspaikan odottajaa <dark_gray>•</dark_gray> paikan luonti <spawn-generating></gray>"
@@ -605,7 +605,7 @@ admin:
     verify-invalid: "<red>Tietovaraston tarkistus epäonnistui: <problems></red>"
     test-success: "<green>Yhteys taustajärjestelmään <backend> muodostettiin <latency> ms:ssa.</green> <gray>Kohde tyhjä: <empty></gray>"
     exported: "<green>Luotiin tarkistettu siirrettävä vienti <file>.</green> <gray><records> loogista tietuetta • SHA-256 <sha></gray>"
-    migration-confirm: "<yellow>Tietovaraston siirto kopioi jokaisen tietueen kohteeseen, tarkistaa sen ja kiinnittää uuden päätepisteen. Vahvista komennolla <red>/survivaltweaks storage migrate [backend] confirm</red>.</yellow>"
+    migration-confirm: "<yellow>Tietovaraston siirto kopioi jokaisen tietueen kohteeseen, tarkistaa sen ja kiinnittää uuden päätepisteen. Vahvista komennolla <red>/survivaltweaks storage migrate [taustajärjestelmä] confirm</red>.</yellow>"
     migration-players-online: "<red>Tietovaraston siirto vaatii tyhjän palvelimen; paikalla on <count> pelaajaa.</red>"
     migration-staged: "<green>Tietovaraston siirto <id> valmisteltiin lähteestä <source> kohteeseen <target>.</green> <yellow>Käynnistä Paper uudelleen, jotta vaihto tehdään ja tarkistetaan ennen pelaajien liittymistä.</yellow>"
     maintenance-clean: "<green>Tietovaraston huoltoesikatselu on puhdas; vanhentuneita tai virheellisiä rivejä ei löytynyt.</green>"
@@ -742,7 +742,7 @@ ui:
     owner: "<green>Omistaja: <player></green>"
     transfer-action: "<yellow>Napsauta siirtääksesi omistajuuden.</yellow>"
     transferred: "<gray>Omistajuus siirrettiin pelaajalle <green><player></green>.</gray>"
-    transfer-prompt: "<yellow>Vahvista siirto kirjoittamalla uuden omistajan pelaajanimi uudelleen chattiin.</yellow>"
+    transfer-prompt: "<yellow>Vahvista siirto kirjoittamalla uuden omistajan pelaajanimen uudelleen chattiin.</yellow>"
     transfer-cancelled: "<gray>Omistajuuden siirto peruttiin.</gray>"
     access-mode: "<green>Käyttöoikeus: <mode></green>"
     mode-action: "<yellow>Napsauta vaihtaaksesi käyttöoikeustilaa.</yellow>"
@@ -851,7 +851,7 @@ ui:
     vanilla-guide: "<gold>Vaniljaopas</gold>"
     vanilla-guide-description: "<gray>Tarkista pelaamalla luonnollisesti löytämäsi mekaniikat.</gray>"
     objective:
-      welcome: "<green>Tervetuloa survivaliin</green>"
+      welcome: "<green>Tervetuloa Survivaliin</green>"
       hub: "<green>Avaa pelaajakeskus</green>"
       language: "<green>Tarkista kielesi</green>"
       home: "<green>Luo ensimmäinen kotisi</green>"

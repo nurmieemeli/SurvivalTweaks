@@ -1,5 +1,3 @@
-<div align="center">
-
 <img src=".github/assets/header.svg" alt="SurvivalTweaks" width="548">
 
 <h3>Vanilla-friendly quality of life for Paper survival servers</h3>
@@ -20,11 +18,7 @@
   <a href="src/main/resources/config.yml">View configuration</a>
   ·
   <a href="docs/operations.md">Operations guide</a>
-  ·
-  <a href="docs/architecture.md">Architecture</a>
 </p>
-
-</div>
 
 SurvivalTweaks brings the everyday features of a polished survival server into
 one dependency-free Paper plugin. Players get a unified, localized experience;
@@ -271,9 +265,7 @@ starting it again.
 See the [operations guide](docs/operations.md) for backup restoration,
 diagnostics, spawn-pool tuning, and recovery procedures.
 
-Maintainers can also review the [architecture and ownership map](docs/architecture.md),
-the cross-feature [player journey contracts](docs/player-journeys.md), and the
-[2.23 architecture audit](docs/architecture-audit-2.23.md).
+Maintainers can also review the cross-feature [player journey contracts](docs/player-journeys.md)
 
 ## Building from source
 
