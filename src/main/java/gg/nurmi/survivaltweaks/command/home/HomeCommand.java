@@ -113,6 +113,30 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /**
+     * Resolves a name the same way the trust and mail commands do. {@code
+     * Server#getOfflinePlayer(String)} is unusable here for two reasons: it can
+     * contact Mojang's API from the server thread, and it never returns null —
+     * it invents a profile for a name that has never played, so a typo would be
+     * accepted as a real invite rather than rejected.
+     */
+    private OfflinePlayer resolvePlayer(String name) {
+        if (server == null) {
+            return null;
+        }
+        Player online = server.getPlayerExact(name);
+        if (online != null) {
+            return online;
+        }
+        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
+        return cached != null && cached.hasPlayedBefore() ? cached : null;
+    }
+
+    private String displayName(OfflinePlayer player, String fallback) {
+        String name = player.getName();
+        return name == null ? fallback : name;
+    }
+
     private void handleInvite(Player owner, String homeName, String targetName) {
         Profile ownerProfile = profiles.load(owner.getUniqueId());
         Optional<Home> homeOpt = ownerProfile.home(homeName);
@@ -121,8 +145,8 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        OfflinePlayer target = server != null ? server.getOfflinePlayer(targetName) : null;
-        if (target == null || target.getName() == null) {
+        OfflinePlayer target = resolvePlayer(targetName);
+        if (target == null) {
             messages.send(owner, "teleport.player-not-found", Placeholder.unparsed("player", targetName));
             return;
         }
@@ -131,7 +155,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         ownerProfile.addHome(updated);
         profiles.save(ownerProfile);
 
-        messages.send(owner, "home.invited", Placeholder.unparsed("player", target.getName()), Placeholder.unparsed("home", homeName));
+        messages.send(owner, "home.invited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
         if (target.isOnline()) {
             messages.send(target.getPlayer(), "home.invite-received", Placeholder.unparsed("player", owner.getName()), Placeholder.unparsed("home", homeName));
         }
@@ -148,8 +172,8 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        OfflinePlayer target = server != null ? server.getOfflinePlayer(targetName) : null;
-        if (target == null || target.getName() == null) {
+        OfflinePlayer target = resolvePlayer(targetName);
+        if (target == null) {
             messages.send(owner, "teleport.player-not-found", Placeholder.unparsed("player", targetName));
             return;
         }
@@ -158,7 +182,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         ownerProfile.addHome(updated);
         profiles.save(ownerProfile);
 
-        messages.send(owner, "home.uninvited", Placeholder.unparsed("player", target.getName()), Placeholder.unparsed("home", homeName));
+        messages.send(owner, "home.uninvited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
         if (feedback != null) {
             feedback.play(owner, FeedbackService.UI_CLICK);
         }
@@ -170,8 +194,8 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        OfflinePlayer owner = server.getOfflinePlayer(ownerName);
-        if (owner == null || owner.getUniqueId() == null) {
+        OfflinePlayer owner = resolvePlayer(ownerName);
+        if (owner == null) {
             messages.send(visitor, "teleport.player-not-found", Placeholder.unparsed("player", ownerName));
             return;
         }

@@ -41,7 +41,14 @@ public final class TickWorkBudget {
         }
         refresh();
         int fairShare = Math.max(1, (limit + Lane.values().length - 1) / Lane.values().length);
-        if (remaining < units || used.get(lane) + units > fairShare) {
+        int laneUsed = used.get(lane);
+        // A request bigger than one lane's share would never fit, so the lane
+        // would be refused on every tick forever and its work would stop
+        // without any error. A lane that has not run yet this tick may take an
+        // oversized grant as long as the tick as a whole can cover it; sharing
+        // still applies to everything after that.
+        boolean withinShare = laneUsed + units <= fairShare || laneUsed == 0;
+        if (remaining < units || !withinShare) {
             deferredThisTick.merge(lane, 1, Integer::sum);
             deferredTotal.merge(lane, 1L, Long::sum);
             return false;

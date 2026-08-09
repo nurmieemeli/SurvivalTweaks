@@ -96,10 +96,21 @@ public final class PortableExportService implements AutoCloseable {
         }
         try {
             StorageManager.ExportResult result = storage.exportPortable(COLLECTION);
-            rotate(settings.retention());
+            // The export is verified and published once this returns, so record
+            // the success before touching retention. Cleanup is housekeeping and
+            // must not report a good export as a failed one.
             lastSuccess = Instant.now();
             lastFile = result.file();
             lastFailureReason = "";
+            try {
+                rotate(settings.retention());
+            } catch (IOException | RuntimeException cleanupFailure) {
+                logger.log(
+                        Level.WARNING,
+                        "Kept the new portable storage export but could not rotate older ones",
+                        cleanupFailure
+                );
+            }
             return result;
         } catch (IOException | RuntimeException exception) {
             lastFailure = Instant.now();

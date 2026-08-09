@@ -92,10 +92,20 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         }
         
         profiles.loadAsync(target.getUniqueId()).thenAcceptAsync(targetProfile -> {
-            PlayerStatisticsService.Snapshot snapshot = statistics.snapshot(target);
+            // An online player's statistics live in memory and are mutated by the
+            // server thread every tick, so they have to be read there. Only a
+            // genuinely offline player's file-backed statistics are safe to read
+            // here, and those are the ones worth keeping off the tick.
+            PlayerStatisticsService.Snapshot offlineSnapshot = target.isOnline()
+                    ? null
+                    : statistics.snapshot(target);
             server.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
-                
+
+                PlayerStatisticsService.Snapshot snapshot = offlineSnapshot == null
+                        ? statistics.snapshot(target)
+                        : offlineSnapshot;
+
                 boolean own = viewer.getUniqueId().equals(target.getUniqueId());
                 if (!own
                         && (!settings.current().statisticsPublicViewing()

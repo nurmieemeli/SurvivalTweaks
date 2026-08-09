@@ -467,7 +467,8 @@ public final class SafeTeleportService implements AutoCloseable {
         int searchRadius = settings.current().safeTeleportSearchRadius();
         Location candidate = requested.clone();
         for (int radius = 0; radius <= searchRadius; radius++) {
-            for (int yOffset = -VERTICAL_SEARCH_DISTANCE; yOffset <= VERTICAL_SEARCH_DISTANCE; yOffset++) {
+            for (int step = 0; step <= VERTICAL_SEARCH_DISTANCE * 2; step++) {
+                int yOffset = verticalOffset(step);
                 for (int xOffset = -radius; xOffset <= radius; xOffset++) {
                     for (int zOffset = -radius; zOffset <= radius; zOffset++) {
                         if (radius > 0 && Math.abs(xOffset) != radius && Math.abs(zOffset) != radius) {
@@ -484,6 +485,18 @@ public final class SafeTeleportService implements AutoCloseable {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Walks the vertical search outwards from the requested height: 0, -1, +1,
+     * -2, +2, and so on. Scanning from the bottom up would drop a player at the
+     * lowest safe spot in range even when the block they asked for was free,
+     * which reads as the teleport missing. Equal distances prefer the lower
+     * candidate, since a safe floor is more often below than above.
+     */
+    private static int verticalOffset(int step) {
+        int distance = (step + 1) / 2;
+        return step % 2 == 0 ? distance : -distance;
     }
 
     private boolean isSafe(Location location) {

@@ -1063,7 +1063,17 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         }
     }
 
+    /**
+     * Hands the current pool state to the writer, reporting whether it was
+     * accepted. A closing writer rejects submissions by throwing, so shutting
+     * down mid-change would otherwise raise out of a join or command handler.
+     * Returning false here instead lets each caller undo the change it had
+     * already applied in memory.
+     */
     private boolean saveState() {
+        if (closed) {
+            return false;
+        }
         writer.submit(new NewPlayerSpawnState(
                 available,
                 assignments,
@@ -1114,13 +1124,15 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     @Override
     public void close() {
         generationVersion++;
+        // Persist while the writer still accepts work; the teardown below only
+        // touches transient state, so this is the final pool state either way.
+        saveState();
         closed = true;
         cancelScheduledRefill();
         releaseTickets();
         waitingPlayers.clear();
         teleportingPlayers.clear();
         teleportAttempts.clear();
-        saveState();
         writer.close();
     }
 

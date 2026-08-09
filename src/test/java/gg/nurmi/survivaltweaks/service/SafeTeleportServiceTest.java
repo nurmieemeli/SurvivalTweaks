@@ -32,6 +32,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -261,6 +262,29 @@ class SafeTeleportServiceTest {
     }
 
     @Test
+    void verticalSearchPrefersTheHeightNearestTheRequestedOne() {
+        // Only three blocks down and one block up are stand-able.
+        World world = layeredWorld(java.util.Set.of(67, 71));
+        Location requested = new Location(world, 100.5, 70, -20.5);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+
+        Location resolved = service.findSafeDestination(requested).orElseThrow();
+
+        // Scanning the vertical range from its bottom would have dropped the
+        // player at 67, far below the block they actually asked for.
+        assertEquals(71, resolved.getBlockY());
+    }
+
+    @Test
+    void verticalSearchPrefersTheLowerCandidateAtEqualDistance() {
+        World world = layeredWorld(java.util.Set.of(69, 71));
+        Location requested = new Location(world, 100.5, 70, -20.5);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+
+        assertEquals(69, service.findSafeDestination(requested).orElseThrow().getBlockY());
+    }
+
+    @Test
     void unsafeDestinationDoesNotTeleport() {
         World unsafeWorld = unsafeWorld();
         Location destination = new Location(unsafeWorld, 10.5, 64, 10.5);
@@ -393,6 +417,42 @@ class SafeTeleportServiceTest {
         ArgumentCaptor<Runnable> action = ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).runTaskLater(eq(plugin), action.capture(), anyLong());
         return action.getValue();
+    }
+
+    /** A world whose columns are only stand-able at the given Y levels. */
+    private World layeredWorld(java.util.Set<Integer> standableLevels) {
+        World world = mock(World.class);
+        WorldBorder border = mock(WorldBorder.class);
+        when(world.getUID()).thenReturn(UUID.randomUUID());
+        when(world.getMinHeight()).thenReturn(-64);
+        when(world.getMaxHeight()).thenReturn(320);
+        when(world.getWorldBorder()).thenReturn(border);
+        when(border.isInside(any(Location.class))).thenReturn(true);
+        when(world.getChunkAtAsync(anyInt(), anyInt())).thenReturn(
+                CompletableFuture.completedFuture(mock(Chunk.class))
+        );
+        when(world.getBlockAt(any(Location.class))).thenAnswer(invocation -> {
+            Location queried = invocation.getArgument(0);
+            return column(standableLevels.contains(queried.getBlockY()));
+        });
+        return world;
+    }
+
+    private Block column(boolean standable) {
+        Block feet = mock(Block.class);
+        Block head = mock(Block.class);
+        Block floor = mock(Block.class);
+        when(feet.isPassable()).thenReturn(standable);
+        when(feet.isLiquid()).thenReturn(false);
+        when(feet.getType()).thenReturn(Material.AIR);
+        when(feet.getRelative(0, 1, 0)).thenReturn(head);
+        when(feet.getRelative(0, -1, 0)).thenReturn(floor);
+        when(head.isPassable()).thenReturn(true);
+        when(head.isLiquid()).thenReturn(false);
+        when(head.getType()).thenReturn(Material.AIR);
+        when(floor.isSolid()).thenReturn(true);
+        when(floor.getType()).thenReturn(Material.STONE);
+        return feet;
     }
 
     private World safeWorld() {
