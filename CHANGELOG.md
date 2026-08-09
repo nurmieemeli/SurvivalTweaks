@@ -1,5 +1,70 @@
 # Changelog
 
+## 2.25.0 - 2026-08-09
+
+### Added
+
+- A `default-language` setting that chooses the language for text with no
+  player to address: server list pings, pre-login kicks, console output, and
+  the lore on items handed out by loot tables and villager trades. Players
+  still see their own language everywhere it is known.
+- A `storage.remote.mysql-ssl-mode` setting that selects how far MySQL TLS
+  validates the server certificate.
+
+### Changed
+
+- MySQL connections validate the server certificate by default on new
+  installations. Existing servers keep their previous encrypt-without-verify
+  behaviour until the new setting is raised, and the migration report says so.
+- Configuration migrates automatically to schema 7; the report lists every
+  setting that was added.
+- Trust and transfer menus build their candidate list off the server thread,
+  and searching for a player resolves the typed name directly instead of
+  scanning every player who has ever joined.
+- Database verification reads the data once rather than twice, halving what a
+  diagnostics run costs on a large database.
+- Safe teleport searches outwards from the requested height instead of upwards
+  from the bottom of its range, so players land at the nearest safe spot rather
+  than up to three blocks below it.
+
+### Fixed
+
+- Persistence flushes wait for every write queued before them, so snapshots,
+  exports, and safety backups can no longer be published one revision stale.
+- A write lane no longer stops for the rest of the run if its thread is
+  interrupted while retrying a failed save.
+- Restoring a backup clears the SQLite write-ahead log left behind by an
+  unclean shutdown. Pairing one with a restored database risked corruption, or
+  silently reinstating the data the restore was meant to undo.
+- Pistons can no longer move or destroy a locked container, which left the lock
+  pointing at empty space and the container unprotected at its new position.
+- The lock status hint honours profile-wide `/trust`, instead of reporting a
+  container as denied while opening it actually succeeded.
+- `/home invite` and shared-home teleports reject player names that have never
+  joined, rather than accepting them against an invented profile, and no longer
+  risk stalling the server while resolving a name.
+- Statistics for an online player are read on the server thread.
+- A portable export is no longer reported as failed when the export itself
+  succeeded and only its retention cleanup did not.
+- Opening the lock trust or transfer menu no longer resolves a player name once
+  per comparison while sorting the roster.
+- The configuration get and set commands and the storage migration prompts
+  showed a missing-message placeholder instead of their text.
+- A `config set` whose value is rejected by validation is taken back out of
+  config.yml. The running server already kept its previous settings, but the
+  rejected value stayed on disk and would have stopped the plugin from
+  enabling at the next restart.
+- The administrator usage line lists `config`, which help and tab completion
+  already offered.
+- Changing the first-join spawn pool while the server is shutting down no
+  longer raises out of the join or command handler that triggered it. The
+  change is now declined and undone instead.
+- First-join spawn preparation no longer stops silently when the per-tick work
+  budget is lowered. Its request was larger than one lane's share of a small
+  budget, so it was deferred on every tick and never ran: entirely below a
+  budget of 36, and under load below 103. A lane that has not run yet in a tick
+  may now take an oversized grant when the tick can cover it.
+
 ## 2.24.0 - 2026-08-09
 
 ### Added
