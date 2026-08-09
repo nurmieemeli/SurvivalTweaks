@@ -46,6 +46,7 @@ class PostgresStorageIntegrationTest {
                 password,
                 false,
                 "disable",
+                "verify-identity",
                 2,
                 5_000,
                 15,

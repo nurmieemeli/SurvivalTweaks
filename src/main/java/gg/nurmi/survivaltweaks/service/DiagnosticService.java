@@ -182,7 +182,10 @@ public final class DiagnosticService implements AutoCloseable {
     }
 
     private DataSummary inspectSqlStorage(Snapshot runtime, List<Issue> issues) {
-        var verification = storage.verify();
+        // The integrity check already reads every table, so reuse its snapshot
+        // rather than exporting the whole database a second time.
+        var inspection = storage.inspect();
+        var verification = inspection.verification();
         if (!verification.healthy()) {
             issues.add(new Issue(
                     Severity.ERROR,
@@ -190,8 +193,11 @@ public final class DiagnosticService implements AutoCloseable {
                             + String.join("; ", verification.problems())
             ));
         }
+        if (inspection.snapshot().isEmpty()) {
+            return new DataSummary(0, 0, 0);
+        }
         try {
-            StorageSnapshot data = storage.exportSnapshot();
+            StorageSnapshot data = inspection.snapshot().get();
             data.profiles().forEach(profile -> profile.homes().forEach(home -> {
                 if (!loaded(home.worldId(), home.worldName(), runtime)) {
                     issues.add(new Issue(

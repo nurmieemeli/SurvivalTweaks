@@ -38,6 +38,7 @@ class MySqlStorageIntegrationTest {
                 environment("SURVIVALTWEAKS_MYSQL_PASSWORD", "survivaltweaks"),
                 false,
                 "disable",
+                "verify-identity",
                 2,
                 5_000,
                 15,
