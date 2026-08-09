@@ -503,12 +503,15 @@ session-summary:
   open-hover: "<gray>Avaa Survival-keskus.</gray>"
 
 admin:
-  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Käyttö: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant|config]</red>"
   no-permission: "<red>Sinulla ei ole oikeutta käyttää tätä ylläpitokomentoa.</red>"
   reload-success: "<green>SurvivalTweaksin asetukset, kielet ja tehosteet ladattiin uudelleen.</green>"
   reload-failed: "<red>Uudelleenlataus hylättiin; aiemmat asetukset jäivät voimaan: <reason></red>"
   reload-running: "<gray>Tarkistetaan asetuksia ja luodaan turvavarmuuskopio...</gray>"
   reload-already-running: "<yellow>SurvivalTweaksin uudelleenlataus on jo käynnissä.</yellow>"
+  config:
+    get: "<gray><path> = <white><value></white></gray>"
+    set-success: "<green>Asetus <path> asetettiin arvoon <value> ja asetukset ladattiin uudelleen.</green>"
   help:
     header: "<dark_green><bold>SurvivalTweaks</bold></dark_green> <gray>— käytettävissä olevat komennot</gray>"
     entry: "<dark_gray>›</dark_gray> <green><command></green> <dark_gray>—</dark_gray> <gray><description></gray>"
@@ -602,6 +605,8 @@ admin:
     verify-invalid: "<red>Tietovaraston tarkistus epäonnistui: <problems></red>"
     test-success: "<green>Yhteys taustajärjestelmään <backend> muodostettiin <latency> ms:ssa.</green> <gray>Kohde tyhjä: <empty></gray>"
     exported: "<green>Luotiin tarkistettu siirrettävä vienti <file>.</green> <gray><records> loogista tietuetta • SHA-256 <sha></gray>"
+    migration-confirm: "<yellow>Tietovaraston siirto kopioi jokaisen tietueen kohteeseen, tarkistaa sen ja kiinnittää uuden päätepisteen. Vahvista komennolla <red>/survivaltweaks storage migrate [backend] confirm</red>.</yellow>"
+    migration-players-online: "<red>Tietovaraston siirto vaatii tyhjän palvelimen; paikalla on <count> pelaajaa.</red>"
     migration-staged: "<green>Tietovaraston siirto <id> valmisteltiin lähteestä <source> kohteeseen <target>.</green> <yellow>Käynnistä Paper uudelleen, jotta vaihto tehdään ja tarkistetaan ennen pelaajien liittymistä.</yellow>"
     maintenance-clean: "<green>Tietovaraston huoltoesikatselu on puhdas; vanhentuneita tai virheellisiä rivejä ei löytynyt.</green>"
     maintenance-preview: "<yellow>Tietovaraston huolto poistaisi <total> riviä: <expired> vanhentunutta kuolinmerkintää ja <orphans> virheellistä tai orpoa riviä.</yellow>"

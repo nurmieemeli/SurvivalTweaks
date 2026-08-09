@@ -504,12 +504,15 @@ session-summary:
   open-hover: "<gray>Open the Survival hub.</gray>"
 
 admin:
-  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant]</red>"
+  usage: "<red>Usage: /survivaltweaks [help|reload|doctor|performance|storage|backup|spawnpool|maintenance|restart|enchant|config]</red>"
   no-permission: "<red>You do not have permission to use this administrator command.</red>"
   reload-success: "<green>SurvivalTweaks configuration, languages, and effects reloaded.</green>"
   reload-failed: "<red>Reload rejected; the previous configuration remains active: <reason></red>"
   reload-running: "<gray>Validating configuration and creating a safety backup...</gray>"
   reload-already-running: "<yellow>A SurvivalTweaks reload is already running.</yellow>"
+  config:
+    get: "<gray><path> = <white><value></white></gray>"
+    set-success: "<green>Set <path> to <value> and reloaded the configuration.</green>"
   help:
     header: "<dark_green><bold>SurvivalTweaks</bold></dark_green> <gray>— available commands</gray>"
     entry: "<dark_gray>›</dark_gray> <green><command></green> <dark_gray>—</dark_gray> <gray><description></gray>"
@@ -602,6 +605,8 @@ admin:
     verify-invalid: "<red>Storage verification failed: <problems></red>"
     test-success: "<green>Connected to <backend> in <latency> ms.</green> <gray>Destination empty: <empty></gray>"
     exported: "<green>Created verified portable export <file>.</green> <gray><records> logical records • SHA-256 <sha></gray>"
+    migration-confirm: "<yellow>A storage migration copies every record to the destination, verifies it, and pins the new endpoint. Confirm with <red>/survivaltweaks storage migrate [backend] confirm</red>.</yellow>"
+    migration-players-online: "<red>A storage migration requires an empty server; <count> player(s) are online.</red>"
     migration-staged: "<green>Storage migration <id> staged from <source> to <target>.</green> <yellow>Restart Paper to perform and verify the cutover before players can join.</yellow>"
     maintenance-clean: "<green>Storage maintenance preview is clean; no expired or invalid rows were found.</green>"
     maintenance-preview: "<yellow>Storage maintenance would remove <total> row(s): <expired> expired death markers and <orphans> invalid/orphan rows.</yellow>"

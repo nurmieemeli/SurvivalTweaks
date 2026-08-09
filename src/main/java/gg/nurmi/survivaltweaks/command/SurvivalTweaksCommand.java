@@ -515,17 +515,25 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     }
                 }
             }
+            boolean previouslySet = plugin.getConfig().contains(path, true);
+            Object previousValue = plugin.getConfig().get(path);
             plugin.getConfig().set(path, parsedValue);
             plugin.saveConfig();
-            
+
             reloads.reloadAsync(result -> {
                 if (result.successful()) {
                     messages.send(sender, "admin.config.set-success",
                             Placeholder.unparsed("path", path),
                             Placeholder.unparsed("value", valueStr));
-                } else {
-                    messages.send(sender, "admin.reload-failed", Placeholder.unparsed("reason", result.reason()));
+                    return;
                 }
+                // A rejected reload leaves the running server on its previous
+                // settings, but the value is already on disk. Take it back out,
+                // or config.yml would keep a value this build refuses to load
+                // and the plugin would fail to enable at the next restart.
+                plugin.getConfig().set(path, previouslySet ? previousValue : null);
+                plugin.saveConfig();
+                messages.send(sender, "admin.reload-failed", Placeholder.unparsed("reason", result.reason()));
             });
             return true;
         }
