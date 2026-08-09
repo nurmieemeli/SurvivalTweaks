@@ -92,16 +92,6 @@ public final class ContainerLockService implements AutoCloseable {
         return Set.copyOf(locks);
     }
 
-    public boolean canAccess(UUID playerId, boolean administrator, Collection<BlockKey> blocks) {
-        for (BlockKey block : blocks) {
-            ContainerLock lock = locksByBlock.get(block);
-            if (lock != null && !lock.canAccess(playerId, administrator)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     public Optional<ContainerLock> singleLockFor(Collection<BlockKey> blocks) {
         ContainerLock selected = null;
         for (BlockKey block : blocks) {

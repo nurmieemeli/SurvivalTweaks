@@ -30,6 +30,7 @@ public final class LockTargetStatusService implements AutoCloseable {
     private final ActionBarService actionBars;
     private final SafeTeleportService teleports;
     private final PlayerExperienceService experience;
+    private final ProfileRepository profiles;
     private final Set<UUID> hinted = new HashSet<>();
     private final Map<UUID, String> ownerNames = new HashMap<>();
     private final Map<UUID, HintState> hintStates = new HashMap<>();
@@ -43,7 +44,8 @@ public final class LockTargetStatusService implements AutoCloseable {
             SettingsService settings,
             ActionBarService actionBars,
             SafeTeleportService teleports,
-            PlayerExperienceService experience
+            PlayerExperienceService experience,
+            ProfileRepository profiles
     ) {
         this(
                 plugin,
@@ -54,6 +56,7 @@ public final class LockTargetStatusService implements AutoCloseable {
                 actionBars,
                 teleports,
                 experience,
+                profiles,
                 null
         );
     }
@@ -67,8 +70,10 @@ public final class LockTargetStatusService implements AutoCloseable {
             ActionBarService actionBars,
             SafeTeleportService teleports,
             PlayerExperienceService experience,
+            ProfileRepository profiles,
             TaskFailureIsolation failures
     ) {
+        this.profiles = java.util.Objects.requireNonNull(profiles, "profiles");
         this.server = plugin.getServer();
         this.resolver = resolver;
         this.locks = locks;
@@ -131,19 +136,24 @@ public final class LockTargetStatusService implements AutoCloseable {
             }
 
             ContainerLock selected = lock.orElseThrow();
+            UUID playerId = player.getUniqueId();
             boolean administrator = player.hasPermission(LockCommand.ADMIN_PERMISSION);
+            // Enforcement also honours the owner's profile-wide /trust list, so
+            // the hint has to apply it too or a trusted player is told a
+            // container is denied while opening it actually succeeds.
+            boolean trustedProfile = profiles.isTrusted(selected.ownerId(), playerId);
+            boolean canAccess = selected.canAccess(playerId, administrator) || trustedProfile;
+            boolean canWithdraw = selected.canWithdraw(playerId, administrator) || trustedProfile;
             String key;
-            if (selected.canManage(player.getUniqueId(), administrator)) {
+            if (selected.canManage(playerId, administrator)) {
                 key = "lock.actionbar.owner";
-            } else if (!selected.canWithdraw(player.getUniqueId(), administrator)
-                    && selected.canAccess(player.getUniqueId(), administrator)) {
+            } else if (!canWithdraw && canAccess) {
                 key = "lock.actionbar.deposit-only";
-            } else if (selected.canAccess(player.getUniqueId(), administrator)) {
+            } else if (canAccess) {
                 key = "lock.actionbar.trusted";
             } else {
                 key = "lock.actionbar.denied";
             }
-            UUID playerId = player.getUniqueId();
             String owner = playerName(selected.ownerId());
             HintState previous = hintStates.get(playerId);
             Component component;

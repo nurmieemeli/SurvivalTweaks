@@ -43,8 +43,10 @@ class ContainerLockServiceTest {
         assertTrue(service.rename(lock, "Workshop supplies"));
         assertTrue(service.cycleAccessMode(lock));
         assertTrue(service.cycleAccessMode(lock));
-        assertTrue(service.canAccess(trusted, false, Set.of(right)));
-        assertTrue(service.canAccess(UUID.randomUUID(), false, Set.of(left)));
+        // Cycled twice to PUBLIC, so a trusted player and a stranger both reach
+        // it. Asserted on the lock itself, which is what enforcement consults.
+        assertTrue(lock.canAccess(trusted, false));
+        assertTrue(lock.canAccess(UUID.randomUUID(), false));
         service.close();
 
         ContainerLockService reloaded = new ContainerLockService(store, logger);
@@ -80,6 +82,29 @@ class ContainerLockServiceTest {
         ContainerLock loaded = reloaded.lockFor(lock.blocks().iterator().next()).orElseThrow();
         assertEquals(newOwner, loaded.ownerId());
         assertTrue(loaded.trustedPlayers().contains(originalOwner));
+        reloaded.close();
+    }
+
+    @Test
+    void everyBlockOfALockIsIndividuallyReportedAsLockedAcrossReloads() {
+        Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
+        ContainerLockStore store = new ContainerLockStore(directory.resolve("blocks.yml"), logger);
+        ContainerLockService service = new ContainerLockService(store, logger);
+        BlockKey left = block(80);
+        BlockKey right = new BlockKey(left.worldId(), 81, left.y(), left.z());
+        service.create(UUID.randomUUID(), Set.of(left, right)).orElseThrow();
+
+        // Piston protection identifies a locked container by coordinate alone,
+        // without a block-state lookup, so both halves of a double chest have to
+        // answer for themselves.
+        assertTrue(service.isLocked(left));
+        assertTrue(service.isLocked(right));
+        assertFalse(service.isLocked(new BlockKey(left.worldId(), 82, left.y(), left.z())));
+        service.close();
+
+        ContainerLockService reloaded = new ContainerLockService(store, logger);
+        assertTrue(reloaded.isLocked(left));
+        assertTrue(reloaded.isLocked(right));
         reloaded.close();
     }
 

@@ -15,6 +15,7 @@ import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -55,6 +56,7 @@ public final class LockControlPanelController implements Listener {
     private static final int TRUSTED_END = 26;
     private static final int HISTORY_START = 36;
 
+    private final JavaPlugin plugin;
     private final Server server;
     private final ContainerBlockResolver resolver;
     private final ContainerLockService locks;
@@ -68,6 +70,7 @@ public final class LockControlPanelController implements Listener {
     private Consumer<Player> back = Player::closeInventory;
 
     public LockControlPanelController(
+            JavaPlugin plugin,
             Server server,
             ContainerBlockResolver resolver,
             ContainerLockService locks,
@@ -79,6 +82,7 @@ public final class LockControlPanelController implements Listener {
             NotificationService notifications,
             PlayerExperienceService experience
     ) {
+        this.plugin = java.util.Objects.requireNonNull(plugin, "plugin");
         this.server = server;
         this.resolver = resolver;
         this.locks = locks;
@@ -458,16 +462,64 @@ public final class LockControlPanelController implements Listener {
         return panel;
     }
 
+    /**
+     * Builds the candidate roster off the server thread. Enumerating every
+     * player who has ever joined reads the player data directory, which is far
+     * too much work to do on a tick just because someone opened a menu. The
+     * lock is re-checked once the roster is back, because it can be deleted or
+     * transferred while the scan runs.
+     */
     private void openCandidates(Player player, ContainerLock lock, CandidateAction action, int page) {
-        List<UUID> allCandidates = java.util.Arrays.stream(server.getOfflinePlayers())
-                .filter(candidate -> candidate.hasPlayedBefore() || candidate.isOnline())
-                .filter(candidate -> !candidate.getUniqueId().equals(lock.ownerId()))
-                .filter(candidate -> action == CandidateAction.TRANSFER
-                        || !lock.trustedPlayers().contains(candidate.getUniqueId()))
-                .map(OfflinePlayer::getUniqueId)
-                .distinct()
-                .sorted((left, right) -> playerName(left).compareToIgnoreCase(playerName(right)))
-                .toList();
+        UUID ownerId = lock.ownerId();
+        Set<UUID> alreadyTrusted = action == CandidateAction.TRANSFER
+                ? Set.of()
+                : Set.copyOf(lock.trustedPlayers());
+        server.getScheduler().runTaskAsynchronously(plugin, () -> {
+            java.util.Map<UUID, String> names = new java.util.LinkedHashMap<>();
+            for (OfflinePlayer candidate : server.getOfflinePlayers()) {
+                if (!candidate.hasPlayedBefore() && !candidate.isOnline()) {
+                    continue;
+                }
+                UUID candidateId = candidate.getUniqueId();
+                if (candidateId.equals(ownerId) || alreadyTrusted.contains(candidateId)) {
+                    continue;
+                }
+                // Read each name once; resolving inside the comparator would
+                // repeat the lookup on every comparison.
+                names.putIfAbsent(candidateId, candidate.getName() == null
+                        ? candidateId.toString().substring(0, 8)
+                        : candidate.getName());
+            }
+            List<UUID> sorted = names.keySet().stream()
+                    .sorted((left, right) -> names.get(left).compareToIgnoreCase(names.get(right)))
+                    .toList();
+            server.getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline() || !locks.contains(lock) || !lock.canManage(
+                        player.getUniqueId(),
+                        player.hasPermission(LockCommand.ADMIN_PERMISSION)
+                )) {
+                    return;
+                }
+                // The player may have closed the menu or navigated elsewhere
+                // while the roster was being read; reopening it under them would
+                // be worse than doing nothing.
+                if (!(player.getOpenInventory().getTopInventory().getHolder(false)
+                        instanceof LockPanel open) || !open.lockId().equals(lock.id())) {
+                    return;
+                }
+                showCandidates(player, lock, action, page, sorted, names);
+            });
+        });
+    }
+
+    private void showCandidates(
+            Player player,
+            ContainerLock lock,
+            CandidateAction action,
+            int page,
+            List<UUID> allCandidates,
+            java.util.Map<UUID, String> names
+    ) {
         List<UUID> candidates = allCandidates.stream()
                 .skip((long) page * 45)
                 .limit(45)
@@ -491,7 +543,7 @@ public final class LockControlPanelController implements Listener {
             UUID candidateId = candidates.get(index);
             panel.getInventory().setItem(index, playerHead(
                     candidateId,
-                    Component.text(playerName(candidateId)),
+                    Component.text(names.getOrDefault(candidateId, playerName(candidateId))),
                     List.of()
             ));
         }
@@ -523,6 +575,18 @@ public final class LockControlPanelController implements Listener {
         feedback.play(player, FeedbackService.UI_OPEN);
     }
 
+    private OfflinePlayer resolvePlayer(String name) {
+        if (name.isBlank()) {
+            return null;
+        }
+        Player online = server.getPlayerExact(name);
+        if (online != null) {
+            return online;
+        }
+        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
+        return cached != null && cached.hasPlayedBefore() ? cached : null;
+    }
+
     private void searchPlayer(Player player, ContainerLock lock, CandidateAction action) {
         prompts.request(player, "ui.lock-panel.search-prompt", (responding, text) -> {
             if (!locks.contains(lock) || !lock.canManage(
@@ -532,11 +596,10 @@ public final class LockControlPanelController implements Listener {
                 messages.send(responding, "lock.not-owner");
                 return;
             }
-            OfflinePlayer found = java.util.Arrays.stream(server.getOfflinePlayers())
-                    .filter(candidate -> candidate.getName() != null)
-                    .filter(candidate -> candidate.getName().equalsIgnoreCase(text.strip()))
-                    .findFirst()
-                    .orElse(null);
+            // Resolving the typed name directly beats scanning every player who
+            // has ever joined, and unlike getOfflinePlayer(String) it neither
+            // blocks on Mojang's API nor invents a profile for an unknown name.
+            OfflinePlayer found = resolvePlayer(text.strip());
             if (found == null
                     || found.getUniqueId().equals(lock.ownerId())
                     || (action == CandidateAction.TRUST

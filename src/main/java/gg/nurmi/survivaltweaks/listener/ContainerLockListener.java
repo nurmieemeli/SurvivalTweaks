@@ -19,6 +19,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockBurnEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
@@ -28,6 +30,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryAction;
 
+import java.util.List;
 import java.util.Set;
 import java.time.Clock;
 import java.util.UUID;
@@ -221,6 +224,36 @@ public final class ContainerLockListener implements Listener {
         if (settings.current().protectLocksFromExplosions()) {
             protect(event.blockList());
         }
+    }
+
+    /**
+     * A lock is bound to exact block coordinates, so a piston that moves a
+     * locked container would leave the lock pointing at empty space and the
+     * container itself unprotected at its new position. Containers that break
+     * when pushed drop their contents outright, and neither path raises a
+     * {@link BlockBreakEvent}, so the move has to be refused instead.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent event) {
+        if (movesLockedBlock(event.getBlocks())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent event) {
+        if (movesLockedBlock(event.getBlocks())) {
+            event.setCancelled(true);
+        }
+    }
+
+    private boolean movesLockedBlock(List<Block> blocks) {
+        if (locks.lockCount() == 0) {
+            return false;
+        }
+        // Every block of a locked container is registered by its own
+        // coordinates, so this needs no block-state lookup per moved block.
+        return blocks.stream().anyMatch(block -> locks.isLocked(BlockKey.from(block)));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

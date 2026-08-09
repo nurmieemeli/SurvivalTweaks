@@ -327,6 +327,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 dialogs
         );
         LockControlPanelController lockPanel = new LockControlPanelController(
+                this,
                 getServer(),
                 containerResolver,
                 containerLocks,
@@ -347,6 +348,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 actionBars,
                 safeTeleports,
                 experience,
+                profiles,
                 taskFailures
         );
         ReloadService reloads = new ReloadService(
