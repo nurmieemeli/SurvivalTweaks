@@ -6,6 +6,7 @@ import gg.nurmi.survivaltweaks.storage.ProfileDataStore;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
@@ -58,8 +59,11 @@ public final class ProfileRepository implements AutoCloseable {
         });
         try {
             globalTrusts.putAll(store.loadAllGlobalTrusts());
-        } catch (IOException e) {
-            logger.log(Level.SEVERE, "Failed to load global trusts", e);
+        } catch (IOException exception) {
+            throw new IllegalStateException(
+                    "Could not load profile-wide container trusts safely",
+                    exception
+            );
         }
     }
 
@@ -78,6 +82,7 @@ public final class ProfileRepository implements AutoCloseable {
         }
 
         ProfileSnapshot initial = loaded.snapshot();
+        globalTrusts.put(uniqueId, loaded.trustedPlayers());
         if (loaded.migrationRequired()) {
             enqueueIfChanged(initial);
         } else {
@@ -106,6 +111,19 @@ public final class ProfileRepository implements AutoCloseable {
         profiles.values().stream()
                 .map(Profile::snapshot)
                 .forEach(this::enqueueIfChanged);
+    }
+
+    public void prepareMaintenance(Instant now, int mailPurgeInactiveDays) {
+        Objects.requireNonNull(now, "now");
+        if (mailPurgeInactiveDays <= 0) {
+            return;
+        }
+        Instant cutoff = now.minus(Duration.ofDays(mailPurgeInactiveDays));
+        profiles.values().forEach(profile -> {
+            if (profile.removeMailBefore(cutoff) > 0) {
+                save(profile);
+            }
+        });
     }
 
     public void evictOffline(Collection<UUID> onlinePlayers) {
@@ -174,6 +192,7 @@ public final class ProfileRepository implements AutoCloseable {
         latestRequested.clear();
         pending.clear();
         evictionCandidates.clear();
+        globalTrusts.clear();
         scheduled.clear();
     }
 

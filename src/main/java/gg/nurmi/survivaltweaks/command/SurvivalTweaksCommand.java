@@ -12,6 +12,7 @@ import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
 import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
 import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
+import gg.nurmi.survivaltweaks.service.PersistenceCoordinator;
 import gg.nurmi.survivaltweaks.service.PortableExportService;
 import gg.nurmi.survivaltweaks.service.ReloadService;
 import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
@@ -36,12 +37,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -168,6 +170,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
     private final StorageManager storage;
     private final PortableExportService portableExports;
     private final PersistenceMonitor persistenceMonitor;
+    private final PersistenceCoordinator persistence;
     private final SettingsService settings;
     private final AtomicBoolean backupOperation = new AtomicBoolean();
     private final AtomicBoolean storageOperation = new AtomicBoolean();
@@ -189,6 +192,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             StorageManager storage,
             PortableExportService portableExports,
             PersistenceMonitor persistenceMonitor,
+            PersistenceCoordinator persistence,
             SettingsService settings,
             JavaPlugin plugin
     ) {
@@ -208,6 +212,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         this.storage = storage;
         this.portableExports = portableExports;
         this.persistenceMonitor = persistenceMonitor;
+        this.persistence = persistence;
         this.settings = settings;
         this.plugin = plugin;
     }
@@ -787,21 +792,31 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 messages.send(sender, "admin.storage.maintenance-confirm");
                 return true;
             }
-            runStorageOperation(sender, () -> storage.maintain(settings.current().mailPurgeInactiveDays()), result -> {
-                messages.send(
-                        sender,
-                        "admin.storage.maintenance-complete",
-                        Placeholder.unparsed(
-                                "removed",
-                                Integer.toString(result.removed().total())
-                        ),
-                        Placeholder.unparsed(
-                                "file",
-                                result.safetyExport().file().getFileName().toString()
-                        ),
-                        Placeholder.unparsed("sha", result.safetyExport().checksum())
-                );
-            });
+            int purgeDays = settings.current().mailPurgeInactiveDays();
+            Instant maintenanceAt = Instant.now();
+            runStorageOperation(
+                    sender,
+                    () -> persistence.prepareMaintenance(maintenanceAt, purgeDays),
+                    () -> storage.maintain(maintenanceAt, purgeDays),
+                    result -> {
+                        messages.send(
+                                sender,
+                                "admin.storage.maintenance-complete",
+                                Placeholder.unparsed(
+                                        "removed",
+                                        Integer.toString(result.removed().total())
+                                ),
+                                Placeholder.unparsed(
+                                        "file",
+                                        result.safetyExport().file().getFileName().toString()
+                                ),
+                                Placeholder.unparsed(
+                                        "sha",
+                                        result.safetyExport().checksum()
+                                )
+                        );
+                    }
+            );
             return true;
         }
         if (arguments.length >= 3
@@ -908,8 +923,35 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             CheckedSupplier<T> operation,
             Consumer<T> completion
     ) {
+        runStorageOperation(sender, () -> {
+        }, operation, completion);
+    }
+
+    private <T> void runStorageOperation(
+            CommandSender sender,
+            Runnable preparation,
+            CheckedSupplier<T> operation,
+            Consumer<T> completion
+    ) {
         if (!storageOperation.compareAndSet(false, true)) {
             messages.send(sender, "admin.storage.busy");
+            return;
+        }
+        try {
+            preparation.run();
+        } catch (RuntimeException exception) {
+            storageOperation.set(false);
+            messages.send(
+                    sender,
+                    "admin.storage.failed",
+                    Placeholder.unparsed(
+                            "reason",
+                            Objects.requireNonNullElse(
+                                    exception.getMessage(),
+                                    exception.getClass().getSimpleName()
+                            )
+                    )
+            );
             return;
         }
         messages.send(sender, "admin.storage.working");

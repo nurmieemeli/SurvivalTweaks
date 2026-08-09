@@ -51,6 +51,7 @@ import gg.nurmi.survivaltweaks.service.LockTargetStatusService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.PortableExportService;
 import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
+import gg.nurmi.survivaltweaks.service.PersistenceCoordinator;
 import gg.nurmi.survivaltweaks.service.OperationalHealthService;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
@@ -110,6 +111,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private BackupService backups;
     private PortableExportService portableExports;
     private PersistenceMonitor persistenceMonitor;
+    private PersistenceCoordinator persistenceCoordinator;
     private OperationalHealthService operationalHealth;
     private StorageManager storageManager;
     private DiagnosticService diagnostics;
@@ -369,6 +371,13 @@ public final class SurvivalTweaks extends JavaPlugin {
                 taskFailures,
                 persistenceMonitor
         );
+        persistenceCoordinator = new PersistenceCoordinator(
+                profiles,
+                containerLocks,
+                deathRecovery,
+                newPlayerSpawns
+        );
+        storageManager.persistenceBarrier(persistenceCoordinator::flush);
 
         TeleportAcceptCommand teleportAccept = new TeleportAcceptCommand(
                 getServer(),
@@ -643,6 +652,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         operationalHealth = null;
         persistenceMonitor = null;
+        persistenceCoordinator = null;
         if (profiles != null) {
             profiles.close();
             profiles = null;
@@ -869,6 +879,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                         storageManager,
                         portableExports,
                         persistenceMonitor,
+                        persistenceCoordinator,
                         settings,
                         this
                 )

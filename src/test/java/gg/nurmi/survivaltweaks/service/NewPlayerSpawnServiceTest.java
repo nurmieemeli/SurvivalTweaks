@@ -6,6 +6,8 @@ import gg.nurmi.survivaltweaks.object.NewPlayerSpawnAssignment;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnLocation;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnState;
 import gg.nurmi.survivaltweaks.storage.NewPlayerSpawnStore;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -32,12 +34,65 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class NewPlayerSpawnServiceTest {
 
     @TempDir
     Path temporary;
+
+    @Test
+    void completedAssignmentRepairsMissingNativeRespawnPointOnJoin() throws IOException {
+        UUID worldId = UUID.randomUUID();
+        UUID playerId = UUID.randomUUID();
+        NewPlayerSpawnLocation assigned = location(worldId, 1_200, -800);
+        NewPlayerSpawnStore store = new NewPlayerSpawnStore(
+                temporary.resolve("respawn-repair.yml"),
+                Logger.getAnonymousLogger()
+        );
+        store.save(new NewPlayerSpawnState(
+                List.of(),
+                Map.of(
+                        playerId,
+                        new NewPlayerSpawnAssignment(playerId, assigned, true)
+                ),
+                List.of(),
+                Set.of()
+        ));
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        World world = mock(World.class);
+        Player player = mock(Player.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(server.getWorld(worldId)).thenReturn(world);
+        when(scheduler.runTask(eq(plugin), any(Runnable.class))).thenAnswer(invocation -> {
+            invocation.getArgument(1, Runnable.class).run();
+            return task;
+        });
+        when(player.hasPlayedBefore()).thenReturn(true);
+        when(player.getUniqueId()).thenReturn(playerId);
+        when(player.isOnline()).thenReturn(true);
+        when(player.getRespawnLocation(false)).thenReturn(null);
+        NewPlayerSpawnService service = new NewPlayerSpawnService(
+                plugin,
+                store,
+                mock(MessageService.class),
+                mock(FeedbackService.class),
+                new SettingsService(PluginSettings.validate(bundledConfig()))
+        );
+
+        service.playerJoined(player);
+
+        verify(player).setRespawnLocation(
+                new Location(world, 1_200.5, 70, -799.5, 0.0f, 0.0f),
+                true
+        );
+        service.close();
+    }
 
     @Test
     void separationIncludesPreparedPendingAndCompletedLocations() throws IOException {

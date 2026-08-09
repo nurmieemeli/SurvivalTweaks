@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -257,6 +258,23 @@ public final class ContainerLockService implements AutoCloseable {
         return locksById.values().stream()
                 .sorted((left, right) -> left.id().compareTo(right.id()))
                 .toList();
+    }
+
+    public boolean flush(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout");
+        if (closing) {
+            return false;
+        }
+        Future<?> barrier = writer.submit(() -> {
+        });
+        try {
+            barrier.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (Exception exception) {
+            barrier.cancel(true);
+            logger.log(Level.WARNING, "Could not flush container locks before the deadline", exception);
+            return false;
+        }
     }
 
     @Override

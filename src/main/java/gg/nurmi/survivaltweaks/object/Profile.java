@@ -150,6 +150,15 @@ public final class Profile {
         return before - notifications.size();
     }
 
+    public int removeMailBefore(Instant cutoff) {
+        Objects.requireNonNull(cutoff, "cutoff");
+        int before = notifications.size();
+        notifications.removeIf(notification ->
+                notification.type() == NotificationType.MAIL
+                        && notification.createdAt().isBefore(cutoff));
+        return before - notifications.size();
+    }
+
     public long unreadNotificationCount() {
         return notifications.stream().filter(notification -> !notification.read()).count();
     }

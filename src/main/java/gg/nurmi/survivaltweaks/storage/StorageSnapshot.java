@@ -28,10 +28,14 @@ public record StorageSnapshot(
         int notifications = profiles.stream()
                 .mapToInt(profile -> profile.notifications().size())
                 .sum();
+        int profileTrusts = profiles.stream()
+                .mapToInt(profile -> profile.trustedPlayers().size())
+                .sum();
         return new Counts(
                 profiles.size(),
                 homes,
                 notifications,
+                profileTrusts,
                 locks.size(),
                 deathMarkers.size(),
                 newPlayerSpawns.available().size(),
@@ -49,6 +53,7 @@ public record StorageSnapshot(
             int profiles,
             int homes,
             int notifications,
+            int profileTrusts,
             int locks,
             int deathMarkers,
             int preparedSpawns,
@@ -58,7 +63,7 @@ public record StorageSnapshot(
     ) {
 
         public int total() {
-            return profiles + homes + notifications + locks + deathMarkers
+            return profiles + homes + notifications + profileTrusts + locks + deathMarkers
                     + preparedSpawns + assignedSpawns + retiredSpawns + replacementSpawns;
         }
     }

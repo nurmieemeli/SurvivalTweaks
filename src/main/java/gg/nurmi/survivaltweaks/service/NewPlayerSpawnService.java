@@ -14,6 +14,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -168,6 +169,8 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             if (existing != null) {
                 if (!existing.completed()) {
                     teleportReserved(player, existing);
+                } else {
+                    restoreAssignedRespawnIfMissing(player, existing);
                 }
                 return;
             }
@@ -188,12 +191,13 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         teleportAttempts.remove(playerId);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         if (!settings.current().newPlayerSpawnEnabled()) {
             return;
         }
-        if (event.isBedSpawn() || event.isAnchorSpawn()) {
+        if (!event.isMissingRespawnBlock()
+                && (event.isBedSpawn() || event.isAnchorSpawn())) {
             return;
         }
         Player player = event.getPlayer();
@@ -599,6 +603,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                         NewPlayerSpawnAssignment completed = assignment.complete();
                         assignments.put(playerId, completed);
                         saveState();
+                        setAssignedRespawn(player, completed);
                         messages.send(player, "new-player-spawn.arrived");
                         player.showTitle(Title.title(
                                 messages.component(player, "new-player-spawn.title"),
@@ -1005,7 +1010,29 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     }
 
     private Optional<World> resolveWorld(NewPlayerSpawnLocation location) {
-        return Optional.ofNullable(plugin.getServer().getWorld(location.worldId()));
+        World world = plugin.getServer().getWorld(location.worldId());
+        return Optional.ofNullable(
+                world == null
+                        ? plugin.getServer().getWorld(location.worldName())
+                        : world
+        );
+    }
+
+    private void restoreAssignedRespawnIfMissing(
+            Player player,
+            NewPlayerSpawnAssignment assignment
+    ) {
+        if (player.getRespawnLocation(false) == null) {
+            setAssignedRespawn(player, assignment);
+        }
+    }
+
+    private void setAssignedRespawn(
+            Player player,
+            NewPlayerSpawnAssignment assignment
+    ) {
+        resolveWorld(assignment.location()).ifPresent(world ->
+                player.setRespawnLocation(assignment.location().toLocation(world), true));
     }
 
     private void scheduleRefillRetry() {
@@ -1078,6 +1105,10 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         if (!closed) {
             plugin.getServer().getScheduler().runTask(plugin, action);
         }
+    }
+
+    public boolean flush(Duration timeout) {
+        return writer.flush(timeout);
     }
 
     @Override

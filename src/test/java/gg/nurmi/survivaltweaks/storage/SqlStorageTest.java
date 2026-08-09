@@ -16,12 +16,14 @@ import gg.nurmi.survivaltweaks.object.OnboardingHint;
 import gg.nurmi.survivaltweaks.object.PlayerNotification;
 import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
+import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import org.bukkit.Material;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,7 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -197,6 +200,45 @@ class SqlStorageTest {
     }
 
     @Test
+    void checksumAndCountsIncludeProfileWideTrusts() {
+        UUID playerId = UUID.randomUUID();
+        ProfileSnapshot withoutTrust = new ProfileSnapshot(
+                playerId,
+                List.of(),
+                PlayerPreferences.DEFAULTS,
+                Set.of(),
+                List.of(),
+                "",
+                null,
+                0,
+                Set.of(),
+                Set.of()
+        );
+        ProfileSnapshot withTrust = new ProfileSnapshot(
+                playerId,
+                List.of(),
+                PlayerPreferences.DEFAULTS,
+                Set.of(),
+                List.of(),
+                "",
+                null,
+                0,
+                Set.of(),
+                Set.of(UUID.randomUUID())
+        );
+        StorageSnapshot left = new StorageSnapshot(
+                List.of(withoutTrust), List.of(), List.of(), NewPlayerSpawnState.EMPTY
+        );
+        StorageSnapshot right = new StorageSnapshot(
+                List.of(withTrust), List.of(), List.of(), NewPlayerSpawnState.EMPTY
+        );
+
+        assertNotEquals(left.counts(), right.counts());
+        assertNotEquals(StorageChecksum.calculate(left), StorageChecksum.calculate(right));
+        assertEquals(1, right.counts().profileTrusts());
+    }
+
+    @Test
     void maintenancePreviewsAndTransactionallyRemovesExpiredDeathMarkers() throws IOException {
         UUID playerId = UUID.randomUUID();
         UUID worldId = UUID.randomUUID();
@@ -219,6 +261,49 @@ class SqlStorageTest {
             assertEquals(List.of(active), storage.loadDeathMarkers());
             assertEquals(0, storage.maintenancePreview(now, 0).total());
             assertTrue(storage.verifyUninitialized().healthy());
+        }
+    }
+
+    @Test
+    void maintenancePreparationPreventsCachedProfilesFromRestoringPurgedMail() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-09T12:00:00Z");
+        PlayerNotification oldMail = new PlayerNotification(
+                UUID.randomUUID(),
+                NotificationType.MAIL,
+                now.minus(Duration.ofDays(2)),
+                null,
+                "Alex",
+                "Old mail",
+                false
+        );
+        ProfileSnapshot snapshot = new ProfileSnapshot(
+                playerId,
+                List.of(),
+                PlayerPreferences.DEFAULTS,
+                Set.of(),
+                List.of(oldMail),
+                "Before",
+                null,
+                0,
+                Set.of(),
+                Set.of()
+        );
+        try (SqlStorage storage = sqlite("maintenance-cache.db")) {
+            storage.save(snapshot);
+            try (ProfileRepository profiles = new ProfileRepository(storage, logger)) {
+                var cached = profiles.load(playerId);
+                profiles.prepareMaintenance(now, 1);
+                assertTrue(profiles.flush(Duration.ofSeconds(2)));
+
+                storage.maintain(now, 1);
+                assertTrue(storage.load(playerId).notifications().isEmpty());
+
+                cached.lastKnownName("After");
+                profiles.save(cached);
+                assertTrue(profiles.flush(Duration.ofSeconds(2)));
+                assertTrue(storage.load(playerId).notifications().isEmpty());
+            }
         }
     }
 
@@ -291,7 +376,7 @@ class SqlStorageTest {
                 now,
                 72_000,
                 Set.of(blockedId),
-                Set.of()
+                Set.of(sharedId)
         );
         BlockKey block = new BlockKey(worldId, 12, 72, -41);
         ContainerLockSnapshot lock = new ContainerLockSnapshot(

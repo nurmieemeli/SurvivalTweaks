@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,6 +27,49 @@ class StorageManagerTest {
     Path directory;
 
     private final Logger logger = Logger.getLogger(StorageManagerTest.class.getName());
+
+    @Test
+    void snapshotsAndBackupsWaitForPersistenceBarrier() throws IOException {
+        AtomicInteger flushes = new AtomicInteger();
+        try (StorageManager manager = StorageManager.open(
+                sqliteConfig("barrier.db"),
+                directory,
+                logger,
+                ignored -> UUID.randomUUID()
+        )) {
+            manager.persistenceBarrier(timeout -> flushes.incrementAndGet());
+
+            manager.exportSnapshot();
+            manager.exportPortable("barrier-test");
+            try (SqlStorage.SnapshotLease ignored = manager.acquireSnapshotLease()) {
+                assertEquals(3, flushes.get());
+            }
+        }
+    }
+
+    @Test
+    void failedPersistenceBarrierAbortsPortableExport() throws IOException {
+        try (StorageManager manager = StorageManager.open(
+                sqliteConfig("barrier-failure.db"),
+                directory,
+                logger,
+                ignored -> UUID.randomUUID()
+        )) {
+            manager.persistenceBarrier(timeout -> {
+                throw new IOException("pending writes could not be flushed");
+            });
+
+            IOException failure = assertThrows(
+                    IOException.class,
+                    () -> manager.exportPortable("barrier-failure")
+            );
+
+            assertTrue(failure.getMessage().contains("pending writes"));
+            assertFalse(Files.exists(
+                    directory.resolve("storage-exports").resolve("barrier-failure")
+            ));
+        }
+    }
 
     @Test
     void importsLegacyYamlOnceAndPinsTheDatabaseEndpoint() throws IOException {
@@ -125,6 +169,10 @@ class StorageManagerTest {
         }
 
         assertTrue(Files.isRegularFile(exported.file()));
+        try (var files = Files.list(exported.file().getParent())) {
+            assertTrue(files.noneMatch(path ->
+                    path.getFileName().toString().startsWith(".storage-export-")));
+        }
         StorageConfiguration portableConfiguration = new StorageConfiguration(
                 StorageBackend.SQLITE, exported.file(), "", 5432, "", "survivaltweaks",
                 "", "", false, "disable", 1, 5_000, 30, 30

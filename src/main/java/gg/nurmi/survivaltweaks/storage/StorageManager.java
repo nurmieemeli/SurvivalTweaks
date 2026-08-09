@@ -5,6 +5,8 @@ import org.bukkit.configuration.Configuration;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -16,6 +18,8 @@ import java.util.logging.Logger;
 
 public final class StorageManager implements AutoCloseable {
 
+    private static final Duration PERSISTENCE_FLUSH_TIMEOUT = Duration.ofSeconds(30);
+
     private final Path dataFolder;
     private final Logger logger;
     private final StorageConfiguration configuration;
@@ -23,6 +27,8 @@ public final class StorageManager implements AutoCloseable {
     private final SqlStorage storage;
     private final StorageStateStore.State state;
     private final ImportResult startupImport;
+    private volatile PersistenceBarrier persistenceBarrier = timeout -> {
+    };
 
     private StorageManager(
             Path dataFolder,
@@ -160,7 +166,14 @@ public final class StorageManager implements AutoCloseable {
     }
 
     public synchronized MaintenanceResult maintain(int mailPurgeInactiveDays) throws IOException {
-        Instant now = Instant.now();
+        return maintain(Instant.now(), mailPurgeInactiveDays);
+    }
+
+    public synchronized MaintenanceResult maintain(
+            Instant now,
+            int mailPurgeInactiveDays
+    ) throws IOException {
+        Objects.requireNonNull(now, "now");
         ExportResult safetyExport = exportPortable("maintenance");
         SqlStorage.MaintenanceResult result = storage.maintain(now, mailPurgeInactiveDays);
         SqlStorage.Verification verification = storage.verify();
@@ -174,6 +187,7 @@ public final class StorageManager implements AutoCloseable {
     }
 
     public StorageSnapshot exportSnapshot() throws IOException {
+        flushPendingWrites();
         return storage.exportSnapshot();
     }
 
@@ -189,6 +203,7 @@ public final class StorageManager implements AutoCloseable {
     }
 
     private ExportResult exportPortableTo(Path exports) throws IOException {
+        flushPendingWrites();
         StorageSnapshot snapshot = storage.exportSnapshot();
         String checksum = StorageChecksum.calculate(snapshot);
         Files.createDirectories(exports);
@@ -202,9 +217,10 @@ public final class StorageManager implements AutoCloseable {
                     "SurvivalTweaks-storage-" + timestamp + "-" + suffix++ + ".db"
             );
         }
+        Path temporary = Files.createTempFile(exports, ".storage-export-", ".tmp");
         StorageConfiguration portableConfiguration = new StorageConfiguration(
                 StorageBackend.SQLITE,
-                target,
+                temporary,
                 "",
                 5432,
                 "",
@@ -218,14 +234,21 @@ public final class StorageManager implements AutoCloseable {
                 30,
                 30
         );
-        try (SqlStorage portable = new SqlStorage(portableConfiguration, logger)) {
-            portable.replaceAll(snapshot, state.instanceId());
-            portable.checkpoint();
-            StorageSnapshot verification = portable.exportSnapshot();
-            if (!snapshot.counts().equals(verification.counts())
-                    || !checksum.equals(StorageChecksum.calculate(verification))) {
-                throw new IOException("Portable storage export verification failed");
+        try {
+            try (SqlStorage portable = new SqlStorage(portableConfiguration, logger)) {
+                portable.replaceAll(snapshot, state.instanceId());
+                portable.checkpoint();
+                StorageSnapshot verification = portable.exportSnapshot();
+                if (!snapshot.counts().equals(verification.counts())
+                        || !checksum.equals(StorageChecksum.calculate(verification))) {
+                    throw new IOException("Portable storage export verification failed");
+                }
             }
+            publishAtomically(temporary, target);
+        } finally {
+            Files.deleteIfExists(temporary);
+            Files.deleteIfExists(Path.of(temporary + "-wal"));
+            Files.deleteIfExists(Path.of(temporary + "-shm"));
         }
         return new ExportResult(target, snapshot.counts(), checksum);
     }
@@ -287,11 +310,16 @@ public final class StorageManager implements AutoCloseable {
     }
 
     public SqlStorage.SnapshotLease acquireSnapshotLease() throws IOException {
+        flushPendingWrites();
         if (configuration.backend() != StorageBackend.SQLITE) {
             return () -> {
             };
         }
         return storage.acquireSnapshotLease();
+    }
+
+    public void persistenceBarrier(PersistenceBarrier updatedBarrier) {
+        persistenceBarrier = Objects.requireNonNull(updatedBarrier, "updatedBarrier");
     }
 
     @Override
@@ -417,6 +445,18 @@ public final class StorageManager implements AutoCloseable {
         }
     }
 
+    private void flushPendingWrites() throws IOException {
+        persistenceBarrier.flush(PERSISTENCE_FLUSH_TIMEOUT);
+    }
+
+    private void publishAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException exception) {
+            Files.move(source, target);
+        }
+    }
+
     private static UUID existingOrNewInstance(SqlStorage storage) {
         try {
             return storage.instanceId();
@@ -506,7 +546,7 @@ public final class StorageManager implements AutoCloseable {
         if (!hasLegacy || (!storage.isEmpty() && !recoverUnpinned)) {
             return new ImportResult(
                     false,
-                    new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0, 0),
+                    new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                     "",
                     Instant.now()
             );
@@ -584,5 +624,11 @@ public final class StorageManager implements AutoCloseable {
             ExportResult safetyExport,
             Instant completedAt
     ) {
+    }
+
+    @FunctionalInterface
+    public interface PersistenceBarrier {
+
+        void flush(Duration timeout) throws IOException;
     }
 }

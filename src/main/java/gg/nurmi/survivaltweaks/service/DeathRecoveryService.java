@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -422,6 +423,19 @@ public final class DeathRecoveryService
     public boolean hasActiveMarker(UUID playerId) {
         return settings.current().deathRecoveryEnabled()
                 && activeMarker(playerId).isPresent();
+    }
+
+    public void prepareMaintenance(Instant now) {
+        Objects.requireNonNull(now, "now");
+        boolean changed = markers.values().removeIf(marker -> marker.expired(now));
+        if (changed) {
+            persist();
+            stopExpiryTaskIfIdle();
+        }
+    }
+
+    public boolean flush(Duration timeout) {
+        return writer.flush(timeout);
     }
 
     @Override

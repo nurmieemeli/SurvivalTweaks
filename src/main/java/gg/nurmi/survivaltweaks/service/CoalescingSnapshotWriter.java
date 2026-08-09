@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -70,6 +71,23 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
         monitor.queued(lane, 1);
         if (scheduled.compareAndSet(false, true)) {
             executor.execute(this::drain);
+        }
+    }
+
+    boolean flush(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout");
+        if (closing) {
+            return false;
+        }
+        Future<?> barrier = executor.submit(() -> {
+        });
+        try {
+            barrier.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (Exception exception) {
+            barrier.cancel(true);
+            logger.log(Level.WARNING, "Could not flush " + description + " before the deadline", exception);
+            return false;
         }
     }
 

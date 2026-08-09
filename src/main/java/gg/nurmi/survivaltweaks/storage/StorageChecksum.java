@@ -84,7 +84,12 @@ public final class StorageChecksum {
         profile.seenHints().stream().sorted(Comparator.comparing(Enum::name)).forEach(this::put);
         profile.notifications().forEach(notification ->
                 notification(profile.uniqueId(), notification));
+        put("mail-blocks");
+        put(profile.blockedMailSenders().size());
         profile.blockedMailSenders().stream().sorted().forEach(this::put);
+        put("profile-trusts");
+        put(profile.trustedPlayers().size());
+        profile.trustedPlayers().stream().sorted().forEach(this::put);
     }
 
     private void home(UUID playerId, Home home) {

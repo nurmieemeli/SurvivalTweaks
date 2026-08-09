@@ -16,12 +16,70 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProfileRepositoryTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void trustPreloadFailureStopsRepositoryConstruction() {
+        ProfileDataStore store = new ProfileDataStore() {
+            @Override
+            public Profile load(UUID uniqueId) {
+                return new Profile(uniqueId);
+            }
+
+            @Override
+            public java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts()
+                    throws IOException {
+                throw new IOException("database unavailable");
+            }
+
+            @Override
+            public void save(gg.nurmi.survivaltweaks.object.ProfileSnapshot snapshot) {
+            }
+        };
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> new ProfileRepository(store, Logger.getLogger("trust-preload-test"))
+        );
+    }
+
+    @Test
+    void loadingAProfileRepairsItsGlobalTrustIndex() {
+        UUID ownerId = UUID.randomUUID();
+        UUID trustedId = UUID.randomUUID();
+        ProfileDataStore store = new ProfileDataStore() {
+            @Override
+            public Profile load(UUID uniqueId) {
+                Profile profile = new Profile(uniqueId);
+                profile.trustPlayer(trustedId);
+                return profile;
+            }
+
+            @Override
+            public java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts() {
+                return java.util.Map.of();
+            }
+
+            @Override
+            public void save(gg.nurmi.survivaltweaks.object.ProfileSnapshot snapshot) {
+            }
+        };
+        ProfileRepository repository = new ProfileRepository(
+                store,
+                Logger.getLogger("trust-load-test")
+        );
+
+        repository.load(ownerId);
+
+        assertTrue(repository.isTrusted(ownerId, trustedId));
+        repository.close();
+    }
 
     @Test
     void transientSaveFailureRetriesWithoutAnotherMutation() {

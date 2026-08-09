@@ -22,6 +22,8 @@ import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.Material;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -40,6 +42,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -54,6 +60,7 @@ public final class SqlStorage implements
     public static final int SCHEMA_VERSION = 1;
     private static final String META_SCHEMA_VERSION = "schema-version";
     private static final String META_INSTANCE_ID = "instance-id";
+    private static final long LEASE_CHECK_SECONDS = 30;
 
     private final StorageConfiguration configuration;
     private final Logger logger;
@@ -62,6 +69,9 @@ public final class SqlStorage implements
     private Connection instanceLeaseConnection;
     private long postgresLeaseKey;
     private String mysqlLeaseName;
+    private ScheduledExecutorService leaseMonitor;
+    private ScheduledFuture<?> leaseCheck;
+    private volatile String leaseFailure = "";
 
     public SqlStorage(StorageConfiguration configuration, Logger logger) {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
@@ -145,6 +155,9 @@ public final class SqlStorage implements
         if (configuration.backend() == StorageBackend.SQLITE || instanceLeaseConnection != null) {
             return;
         }
+        if (!leaseFailure.isBlank()) {
+            throw new IOException("The database instance lease has failed: " + leaseFailure);
+        }
         Connection lease = null;
         try {
             lease = connection();
@@ -180,6 +193,7 @@ public final class SqlStorage implements
                 );
             }
             instanceLeaseConnection = lease;
+            startLeaseMonitor();
         } catch (SQLException | RuntimeException exception) {
             if (lease != null) {
                 try {
@@ -393,6 +407,18 @@ public final class SqlStorage implements
     }
 
     public Status status() {
+        if (!leaseFailure.isBlank()) {
+            return new Status(
+                    configuration.backend(),
+                    false,
+                    0,
+                    -1,
+                    0,
+                    0,
+                    0,
+                    "Database instance lease failed: " + leaseFailure
+            );
+        }
         long started = System.nanoTime();
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("SELECT 1");
@@ -488,6 +514,9 @@ public final class SqlStorage implements
 
     private Verification verify(boolean allowMissingInstanceId) {
         List<String> problems = new ArrayList<>();
+        if (!leaseFailure.isBlank()) {
+            problems.add("Database instance lease failed: " + leaseFailure);
+        }
         try (Connection connection = connection()) {
             for (String requiredQuery : requiredSchemaQueries()) {
                 try (Statement statement = connection.createStatement()) {
@@ -679,8 +708,102 @@ public final class SqlStorage implements
 
     @Override
     public synchronized void close() {
+        stopLeaseMonitor();
         releaseInstanceLease();
         dataSource.close();
+    }
+
+    private void startLeaseMonitor() {
+        if (leaseMonitor != null) {
+            return;
+        }
+        leaseMonitor = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "SurvivalTweaks-database-lease");
+            thread.setDaemon(false);
+            return thread;
+        });
+        leaseCheck = leaseMonitor.scheduleWithFixedDelay(
+                this::verifyInstanceLease,
+                LEASE_CHECK_SECONDS,
+                LEASE_CHECK_SECONDS,
+                TimeUnit.SECONDS
+        );
+    }
+
+    private synchronized void verifyInstanceLease() {
+        Connection lease = instanceLeaseConnection;
+        if (lease == null || !leaseFailure.isBlank()) {
+            return;
+        }
+        try {
+            boolean held;
+            if (configuration.backend() == StorageBackend.POSTGRESQL) {
+                try (PreparedStatement check = lease.prepareStatement(
+                        "SELECT pg_try_advisory_lock(?)"
+                )) {
+                    check.setLong(1, postgresLeaseKey);
+                    try (ResultSet result = check.executeQuery()) {
+                        held = result.next() && result.getBoolean(1);
+                    }
+                }
+                if (held) {
+                    try (PreparedStatement balance = lease.prepareStatement(
+                            "SELECT pg_advisory_unlock(?)"
+                    )) {
+                        balance.setLong(1, postgresLeaseKey);
+                        try (ResultSet result = balance.executeQuery()) {
+                            held = result.next() && result.getBoolean(1);
+                        }
+                    }
+                }
+            } else {
+                try (PreparedStatement check = lease.prepareStatement(
+                        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()"
+                )) {
+                    check.setString(1, mysqlLeaseName);
+                    try (ResultSet result = check.executeQuery()) {
+                        held = result.next() && result.getBoolean(1);
+                    }
+                }
+            }
+            if (!held) {
+                throw new SQLException("The database session no longer owns its singleton lock");
+            }
+        } catch (SQLException | RuntimeException exception) {
+            leaseFailure = exception.getClass().getSimpleName() + ": "
+                    + Objects.requireNonNullElse(exception.getMessage(), "lease check failed");
+            logger.log(
+                    Level.SEVERE,
+                    "Lost the SurvivalTweaks database instance lease; closing the pool to prevent concurrent writers",
+                    exception
+            );
+            instanceLeaseConnection = null;
+            try {
+                lease.close();
+            } catch (SQLException closeFailure) {
+                exception.addSuppressed(closeFailure);
+            }
+            dataSource.close();
+            if (leaseCheck != null) {
+                leaseCheck.cancel(false);
+                leaseCheck = null;
+            }
+            if (leaseMonitor != null) {
+                leaseMonitor.shutdown();
+                leaseMonitor = null;
+            }
+        }
+    }
+
+    private void stopLeaseMonitor() {
+        if (leaseCheck != null) {
+            leaseCheck.cancel(true);
+            leaseCheck = null;
+        }
+        if (leaseMonitor != null) {
+            leaseMonitor.shutdownNow();
+            leaseMonitor = null;
+        }
     }
 
     private void releaseInstanceLease() {
@@ -744,9 +867,51 @@ public final class SqlStorage implements
     }
 
     private Connection connection() throws SQLException {
+        if (!leaseFailure.isBlank()) {
+            throw new SQLException("Database instance lease failed: " + leaseFailure);
+        }
         Connection connection = dataSource.getConnection();
-        configureConnection(connection);
-        return connection;
+        try {
+            configureConnection(connection);
+            return withQueryTimeout(connection);
+        } catch (SQLException | RuntimeException exception) {
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                exception.addSuppressed(closeFailure);
+            }
+            throw exception;
+        }
+    }
+
+    private Connection withQueryTimeout(Connection delegate) {
+        if (configuration.backend() == StorageBackend.SQLITE) {
+            return delegate;
+        }
+        return (Connection) Proxy.newProxyInstance(
+                SqlStorage.class.getClassLoader(),
+                new Class<?>[]{Connection.class},
+                (proxy, method, arguments) -> {
+                    try {
+                        Object result = method.invoke(delegate, arguments);
+                        if (result instanceof Statement statement) {
+                            try {
+                                statement.setQueryTimeout(configuration.queryTimeoutSeconds());
+                            } catch (SQLException | RuntimeException exception) {
+                                try {
+                                    statement.close();
+                                } catch (SQLException closeFailure) {
+                                    exception.addSuppressed(closeFailure);
+                                }
+                                throw exception;
+                            }
+                        }
+                        return result;
+                    } catch (InvocationTargetException exception) {
+                        throw exception.getCause();
+                    }
+                }
+        );
     }
 
     private void configureConnection(Connection connection) throws SQLException {
