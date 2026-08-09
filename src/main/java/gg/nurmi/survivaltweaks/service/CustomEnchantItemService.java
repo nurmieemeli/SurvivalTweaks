@@ -128,15 +128,6 @@ public final class CustomEnchantItemService {
         return cleaned;
     }
 
-    public void refresh(ItemStack item, Audience audience) {
-        if (item == null || item.isEmpty() || !item.hasItemMeta()) {
-            return;
-        }
-        ItemMeta meta = item.getItemMeta();
-        refreshLore(meta, audience, item.getType() == Material.ENCHANTED_BOOK);
-        item.setItemMeta(meta);
-    }
-
     private void refreshLore(ItemMeta meta, Audience audience, boolean book) {
         List<Component> lore = new ArrayList<>();
         if (meta.hasLore() && meta.lore() != null) {

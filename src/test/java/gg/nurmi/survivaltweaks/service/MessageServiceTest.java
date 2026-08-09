@@ -14,6 +14,8 @@ import java.util.logging.Logger;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,6 +30,47 @@ class MessageServiceTest {
             Map.of("greeting", "Hei"),
             Logger.getAnonymousLogger()
     );
+
+    private static org.bukkit.configuration.file.YamlConfiguration finnishConfig() {
+        org.bukkit.configuration.file.YamlConfiguration config =
+                new org.bukkit.configuration.file.YamlConfiguration();
+        config.set("default-language", "FI");
+        return config;
+    }
+
+    @Test
+    void anUnsupportedDefaultLanguageIsRejectedRatherThanIgnored() {
+        org.bukkit.configuration.file.YamlConfiguration config =
+                new org.bukkit.configuration.file.YamlConfiguration();
+        config.set("default-language", "de");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> MessageService.finnishByDefaultForTesting(config)
+        );
+        assertTrue(MessageService.finnishByDefaultForTesting(finnishConfig()));
+    }
+
+    @Test
+    void textWithNoAudienceFollowsTheConfiguredDefaultLanguage() {
+        MessageService finnishServer = new MessageService(
+                Map.of("greeting", "Hello"),
+                Map.of("greeting", "Hei"),
+                Logger.getAnonymousLogger(),
+                true
+        );
+
+        // Loot and trade item lore, server list pings and console output have no
+        // audience to read a preference from.
+        assertEquals(Component.text("Hei"), finnishServer.component("greeting"));
+        assertEquals(Component.text("Hello"), messages.component("greeting"));
+
+        // A real player still overrides the server default in both directions.
+        assertEquals(
+                Component.text("Hello"),
+                finnishServer.component(player(Locale.forLanguageTag("en-GB")), "greeting")
+        );
+    }
 
     @Test
     void finnishLanguageUsesFinnishCatalog() {

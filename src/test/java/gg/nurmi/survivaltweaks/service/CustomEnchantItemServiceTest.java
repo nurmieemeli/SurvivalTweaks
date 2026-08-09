@@ -103,7 +103,9 @@ class CustomEnchantItemServiceTest {
                     return key.getKey().contains("tunneling") ? 1 : null;
                 });
 
-        service.refresh(item, null);
+        // Applying is the production path that rewrites the lore; the stubbed
+        // container reports the enchantment back as if the write landed.
+        service.apply(item, CustomEnchantment.TUNNELING, 1, null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Component>> lore = ArgumentCaptor.forClass(List.class);

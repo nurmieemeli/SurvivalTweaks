@@ -123,7 +123,7 @@ public final class ReloadService {
         PortableExportService.validate(candidateConfig);
         return new Prepared(
                 PluginSettings.validate(candidateConfig),
-                messages.prepareReload(),
+                messages.prepareReload(candidateConfig),
                 feedback.prepare(candidateConfig),
                 candidateConfig,
                 candidate.fingerprint()

@@ -9,6 +9,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -91,6 +92,7 @@ public final class MessageService {
     private final boolean migratedLegacyMessages;
     private volatile Function<UUID, LanguagePreference> languagePreference =
             ignored -> LanguagePreference.AUTO;
+    private volatile boolean finnishByDefault;
 
     public MessageService(JavaPlugin plugin, FileConfiguration config, Logger logger) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -104,6 +106,7 @@ public final class MessageService {
         );
         this.englishTemplates = loadTemplates(english);
         this.finnishTemplates = loadTemplates(finnish);
+        this.finnishByDefault = finnishByDefault(config);
     }
 
     MessageService(
@@ -111,6 +114,16 @@ public final class MessageService {
             Map<String, String> finnishTemplates,
             Logger logger
     ) {
+        this(englishTemplates, finnishTemplates, logger, false);
+    }
+
+    MessageService(
+            Map<String, String> englishTemplates,
+            Map<String, String> finnishTemplates,
+            Logger logger,
+            boolean finnishByDefault
+    ) {
+        this.finnishByDefault = finnishByDefault;
         this.plugin = null;
         this.logger = Objects.requireNonNull(logger, "logger");
         this.englishTemplates = Map.copyOf(englishTemplates);
@@ -194,7 +207,8 @@ public final class MessageService {
         languagePreference = Objects.requireNonNull(provider, "provider");
     }
 
-    public Prepared prepareReload() throws IOException, InvalidConfigurationException {
+    public Prepared prepareReload(FileConfiguration config)
+            throws IOException, InvalidConfigurationException {
         if (plugin == null) {
             throw new IllegalStateException("This message service is not attached to a plugin");
         }
@@ -202,16 +216,44 @@ public final class MessageService {
         Map<String, String> finnish = loadReloadCatalog("messages_fi.yml");
         validateTemplates(english, "messages_en.yml");
         validateTemplates(finnish, "messages_fi.yml");
-        return new Prepared(english, finnish);
+        return new Prepared(english, finnish, finnishByDefault(config));
     }
 
     public void apply(Prepared prepared) {
         englishTemplates = prepared.english;
         finnishTemplates = prepared.finnish;
+        finnishByDefault = prepared.finnishByDefault;
     }
 
     public Prepared snapshot() {
-        return new Prepared(englishTemplates, finnishTemplates);
+        return new Prepared(englishTemplates, finnishTemplates, finnishByDefault);
+    }
+
+    /**
+     * Whether text with no player to address is written in Finnish. Server list
+     * pings, pre-login kicks, console output, and lore baked into items handed
+     * out by loot tables or villager trades have no audience to read a language
+     * preference from, so they follow this instead of always falling back to
+     * English.
+     */
+    static boolean finnishByDefaultForTesting(Configuration config) {
+        return finnishByDefault(config);
+    }
+
+    private static boolean finnishByDefault(Configuration config) {
+        String configured = Objects
+                .requireNonNullElse(config.getString("default-language", "en"), "en")
+                .strip()
+                .toLowerCase(Locale.ROOT);
+        if (configured.equals("fi")) {
+            return true;
+        }
+        if (!configured.equals("en")) {
+            // Falling back silently would leave an operator believing they had
+            // switched the server language.
+            throw new IllegalArgumentException("default-language must be en or fi");
+        }
+        return false;
     }
 
     /**
@@ -224,7 +266,7 @@ public final class MessageService {
 
     private boolean readsFinnish(Audience audience) {
         if (!(audience instanceof Player player)) {
-            return false;
+            return finnishByDefault;
         }
         LanguagePreference preference = languagePreference.apply(player.getUniqueId());
         return preference == LanguagePreference.FINNISH
@@ -343,10 +385,16 @@ public final class MessageService {
 
         private final Map<String, String> english;
         private final Map<String, String> finnish;
+        private final boolean finnishByDefault;
 
-        private Prepared(Map<String, String> english, Map<String, String> finnish) {
+        private Prepared(
+                Map<String, String> english,
+                Map<String, String> finnish,
+                boolean finnishByDefault
+        ) {
             this.english = english;
             this.finnish = finnish;
+            this.finnishByDefault = finnishByDefault;
         }
     }
 
