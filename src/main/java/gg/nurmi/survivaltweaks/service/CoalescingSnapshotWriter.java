@@ -8,6 +8,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -17,16 +18,19 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
     private static final long INITIAL_RETRY_MILLIS = 100;
     private static final long MAX_RETRY_MILLIS = 2_000;
+    private static final long BARRIER_POLL_MILLIS = 2;
 
     private final ThrowingConsumer<T> saver;
     private final Logger logger;
     private final String description;
     private final PersistenceMonitor monitor;
     private final String lane;
-    private final AtomicReference<T> pending = new AtomicReference<>();
+    private final AtomicReference<Versioned<T>> pending = new AtomicReference<>();
     private final AtomicReference<T> latestRequested = new AtomicReference<>();
     private final AtomicBoolean scheduled = new AtomicBoolean();
+    private final AtomicLong submitted = new AtomicLong();
     private final ExecutorService executor;
+    private volatile long persisted;
     private volatile boolean closing;
 
     CoalescingSnapshotWriter(
@@ -67,26 +71,61 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
         if (snapshot.equals(previous)) {
             return;
         }
-        pending.set(snapshot);
+        Versioned<T> candidate = new Versioned<>(submitted.incrementAndGet(), snapshot);
+        pending.accumulateAndGet(candidate, (current, next) ->
+                current == null || current.sequence() < next.sequence() ? next : current);
         monitor.queued(lane, 1);
         if (scheduled.compareAndSet(false, true)) {
             executor.execute(this::drain);
         }
     }
 
+    /**
+     * Waits until everything submitted before this call has been written.
+     *
+     * <p>A submission publishes its snapshot before it schedules the drain, so
+     * an executor barrier on its own can overtake work that was already
+     * requested. Waiting on the submission sequence instead keeps the guarantee
+     * exact without making the caller wait for writes that arrive afterwards.
+     */
     boolean flush(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout");
         if (closing) {
             return false;
         }
-        Future<?> barrier = executor.submit(() -> {
-        });
+        long target = submitted.get();
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (persisted < target) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                logger.warning("Could not flush " + description + " before the deadline");
+                return false;
+            }
+            Future<?> barrier = executor.submit(() -> {
+            });
+            try {
+                barrier.get(remaining, TimeUnit.NANOSECONDS);
+            } catch (Exception exception) {
+                barrier.cancel(true);
+                logger.log(Level.WARNING, "Could not flush " + description + " before the deadline", exception);
+                return false;
+            }
+            // A submission publishes its snapshot before it schedules the drain,
+            // so the barrier can return through an idle executor with the work
+            // still unqueued. Pause rather than spinning on empty barriers.
+            if (persisted < target && !pauseBetweenBarriers()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean pauseBetweenBarriers() {
         try {
-            barrier.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            Thread.sleep(BARRIER_POLL_MILLIS);
             return true;
-        } catch (Exception exception) {
-            barrier.cancel(true);
-            logger.log(Level.WARNING, "Could not flush " + description + " before the deadline", exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
             return false;
         }
     }
@@ -113,20 +152,25 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
     private void drain() {
         int failures = 0;
         while (true) {
-            T snapshot;
-            while ((snapshot = pending.getAndSet(null)) != null) {
+            Versioned<T> entry;
+            while ((entry = pending.getAndSet(null)) != null) {
                 monitor.started(lane, pending.get() == null ? 0 : 1);
                 try {
-                    saver.accept(snapshot);
+                    saver.accept(entry.value());
+                    persisted = Math.max(persisted, entry.sequence());
                     failures = 0;
                     monitor.succeeded(lane, pending.get() == null ? 0 : 1);
                 } catch (IOException exception) {
                     logger.log(Level.SEVERE, "Could not save " + description, exception);
-                    if (latestRequested.get() == snapshot) {
-                        pending.compareAndSet(null, snapshot);
+                    if (latestRequested.get() == entry.value()) {
+                        pending.compareAndSet(null, entry);
                     }
                     monitor.failed(lane, pending.get() == null ? 0 : 1, exception);
                     if (!pauseBeforeRetry(++failures)) {
+                        // Leaving the lane marked as scheduled would make every
+                        // later submission skip starting a drain, silently
+                        // stranding the queue for the rest of the run.
+                        scheduled.set(false);
                         return;
                     }
                 }
@@ -151,6 +195,10 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    /** A queued snapshot together with the submission it came from. */
+    private record Versioned<T>(long sequence, T value) {
     }
 
     @FunctionalInterface

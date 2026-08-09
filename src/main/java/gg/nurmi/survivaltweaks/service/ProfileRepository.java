@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -27,17 +28,20 @@ public final class ProfileRepository implements AutoCloseable {
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
     private static final long INITIAL_RETRY_MILLIS = 100;
     private static final long MAX_RETRY_MILLIS = 2_000;
+    private static final long BARRIER_POLL_MILLIS = 2;
 
     private final ProfileDataStore store;
     private final Logger logger;
     private final PersistenceMonitor monitor;
     private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> latestRequested = new ConcurrentHashMap<>();
-    private final ConcurrentMap<UUID, ProfileSnapshot> pending = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, Versioned> pending = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, EvictionCandidate> evictionCandidates = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, Set<UUID>> globalTrusts = new ConcurrentHashMap<>();
     private final Set<UUID> scheduled = ConcurrentHashMap.newKeySet();
+    private final AtomicLong submitted = new AtomicLong();
     private final ExecutorService writer;
+    private volatile long persisted;
     private boolean closing;
 
     public ProfileRepository(ProfileDataStore store, Logger logger) {
@@ -152,20 +156,47 @@ public final class ProfileRepository implements AutoCloseable {
         }
     }
 
+    /**
+     * Waits until every profile queued before this call has been written. An
+     * enqueue publishes its snapshot before it schedules the drain, so an
+     * executor barrier alone can overtake work that was already requested;
+     * waiting on the enqueue sequence keeps the guarantee exact without also
+     * waiting for profiles queued after the flush began.
+     */
     public boolean flush(Duration timeout) {
         if (closing) {
             return false;
         }
-        Future<?> barrier = writer.submit(() -> {
-        });
-        try {
-            barrier.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            return true;
-        } catch (Exception exception) {
-            barrier.cancel(true);
-            logger.log(Level.WARNING, "Could not flush profile data before the deadline", exception);
-            return false;
+        long target = submitted.get();
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (persisted < target) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                logger.warning("Could not flush profile data before the deadline");
+                return false;
+            }
+            Future<?> barrier = writer.submit(() -> {
+            });
+            try {
+                barrier.get(remaining, TimeUnit.NANOSECONDS);
+            } catch (Exception exception) {
+                barrier.cancel(true);
+                logger.log(Level.WARNING, "Could not flush profile data before the deadline", exception);
+                return false;
+            }
+            // An enqueue publishes its snapshot before it schedules the drain,
+            // so the barrier can return through an idle writer with the work
+            // still unqueued. Pause rather than spinning on empty barriers.
+            if (persisted < target) {
+                try {
+                    Thread.sleep(BARRIER_POLL_MILLIS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
         }
+        return true;
     }
 
     @Override
@@ -210,7 +241,9 @@ public final class ProfileRepository implements AutoCloseable {
             return false;
         }
 
-        pending.put(snapshot.uniqueId(), snapshot);
+        Versioned candidate = new Versioned(submitted.incrementAndGet(), snapshot);
+        pending.merge(snapshot.uniqueId(), candidate, (current, next) ->
+                current.sequence() < next.sequence() ? next : current);
         monitor.queued("profiles", pending.size());
         if (scheduled.add(snapshot.uniqueId())) {
             writer.execute(() -> drain(snapshot.uniqueId()));
@@ -221,17 +254,18 @@ public final class ProfileRepository implements AutoCloseable {
     private void drain(UUID uniqueId) {
         int failures = 0;
         while (true) {
-            ProfileSnapshot snapshot;
-            while ((snapshot = pending.remove(uniqueId)) != null) {
+            Versioned entry;
+            while ((entry = pending.remove(uniqueId)) != null) {
                 monitor.started("profiles", pending.size());
                 try {
-                    store.save(snapshot);
+                    store.save(entry.snapshot());
+                    persisted = Math.max(persisted, entry.sequence());
                     failures = 0;
                     monitor.succeeded("profiles", pending.size());
                 } catch (IOException exception) {
                     logger.log(Level.SEVERE, "Could not save profile " + uniqueId, exception);
-                    if (latestRequested.get(uniqueId) == snapshot) {
-                        pending.putIfAbsent(uniqueId, snapshot);
+                    if (latestRequested.get(uniqueId) == entry.snapshot()) {
+                        pending.putIfAbsent(uniqueId, entry);
                     }
                     monitor.failed("profiles", pending.size(), exception);
                     if (!pauseBeforeRetry(++failures)) {
@@ -279,5 +313,9 @@ public final class ProfileRepository implements AutoCloseable {
     }
 
     private record EvictionCandidate(Profile profile, ProfileSnapshot snapshot) {
+    }
+
+    /** A queued profile snapshot together with the enqueue it came from. */
+    private record Versioned(long sequence, ProfileSnapshot snapshot) {
     }
 }
