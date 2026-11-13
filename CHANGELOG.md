@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.26.0 - 2026-11-13
+
+### Changed
+
+- Requires Paper 26.3 and Java 25 or newer.
+- Updated the SQLite, PostgreSQL, and MySQL drivers, along with the test and
+  build dependencies.
+
+### Fixed
+
+- Language choices take effect after the database commits. A normal stop
+  preserves pending choices, and the server retries recovery after the database
+  or recovery file becomes accessible.
+- Profile flushes wait for all writes queued before them. A failed profile
+  save no longer holds up retries for other players.
+- Backups reject incomplete SQLite checkpoints and corrupt ZIP entries.
+  Restoring a backup also restores its pending language changes or clears a
+  newer recovery file.
+- Player menus enforce the corresponding command permissions and defer
+  inventory transitions until the next tick.
+- Cancelled block events leave container locks and tree-felling state intact.
+  Lock notifications load offline recipient profiles off the server thread.
+
 ## 2.25.0 - 2026-08-09
 
 ### Added
