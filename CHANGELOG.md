@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.26.1 - 2026-11-13
+
+### Fixed
+
+- Config edits are validated before saving, and storage settings require storage
+  permission. The database password cannot be read through the config command.
+- Maintenance exports data before purging it. Interrupted restores roll back
+  before the next startup backup, and oversized backups leave previous archives
+  intact.
+- Delayed lock notifications update the current player profile. Recovered
+  language choices become visible as soon as they commit, even while recovery
+  file cleanup retries. Malformed entries are preserved for inspection while
+  valid entries still replay.
+- Teleport requests respect player visibility, cancelled block breaks stop area
+  enchantments, and unsafe personal respawns fall back to Paper.
+- Tree felling and fast leaf decay spread block discovery across server ticks.
+
 ## 2.26.0 - 2026-11-13
 
 ### Changed
