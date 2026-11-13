@@ -82,6 +82,9 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             OfflinePlayer target,
             Consumer<Player> back
     ) {
+        if (!messages.requirePermission(viewer, "survivaltweaks.command.stats")) {
+            return;
+        }
         if (!settings.current().statisticsEnabled()) {
             messages.send(viewer, "statistics.disabled");
             return;
@@ -101,6 +104,9 @@ public final class StatisticsJournalController implements Listener, CommandExecu
                     : statistics.snapshot(target);
             server.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
+                if (!messages.requirePermission(viewer, "survivaltweaks.command.stats")) {
+                    return;
+                }
 
                 PlayerStatisticsService.Snapshot snapshot = offlineSnapshot == null
                         ? statistics.snapshot(target)
@@ -225,8 +231,10 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         if (event.getWhoClicked() instanceof Player player
                 && player.getUniqueId().equals(holder.viewerId())
                 && event.getRawSlot() == BACK) {
-            feedback.play(player, FeedbackService.UI_CLICK);
-            holder.back().accept(player);
+            SurvivalTweaksMenu.afterClick(plugin, event, player, () -> {
+                feedback.play(player, FeedbackService.UI_CLICK);
+                holder.back().accept(player);
+            });
         }
     }
 

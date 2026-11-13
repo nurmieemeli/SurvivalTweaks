@@ -10,8 +10,10 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
@@ -31,6 +33,7 @@ public final class NotificationCenterController implements Listener {
     private static final int CLEAR_READ_SLOT = 48;
     private static final int BACK_SLOT = 49;
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final MessageService messages;
@@ -39,12 +42,14 @@ public final class NotificationCenterController implements Listener {
     private Consumer<Player> back = Player::closeInventory;
 
     public NotificationCenterController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             MessageService messages,
             FeedbackService feedback,
             Clock clock
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.messages = messages;
@@ -57,7 +62,10 @@ public final class NotificationCenterController implements Listener {
     }
 
     public void open(Player player) {
-        List<PlayerNotification> notifications = profiles.load(player.getUniqueId()).notifications();
+        boolean showMail = player.hasPermission("survivaltweaks.command.mail");
+        List<PlayerNotification> notifications = profiles.load(player.getUniqueId()).notifications().stream()
+                .filter(notification -> showMail || notification.type() != NotificationType.MAIL)
+                .toList();
         long unread = notifications.stream().filter(value -> !value.read()).count();
         NotificationsHolder holder = new NotificationsHolder(
                 player.getUniqueId(),
@@ -125,13 +133,18 @@ public final class NotificationCenterController implements Listener {
             return;
         }
         int slot = event.getRawSlot();
+        ClickType click = event.getClick();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot, click));
+    }
+
+    private void handleClick(Player player, NotificationsHolder holder, int slot, ClickType click) {
         var profile = profiles.load(player.getUniqueId());
         if (slot == BACK_SLOT) {
             back.accept(player);
             return;
         }
         if (slot == CLEAR_READ_SLOT) {
-            profile.clearReadNotifications();
+            profile.clearReadNotifications(player.hasPermission("survivaltweaks.command.mail"));
             profiles.save(profile);
             feedback.play(player, FeedbackService.UI_CLICK);
             open(player);
@@ -140,8 +153,13 @@ public final class NotificationCenterController implements Listener {
         if (slot < 0 || slot >= holder.notifications().size()) {
             return;
         }
-        UUID notificationId = holder.notifications().get(slot).id();
-        if (event.isShiftClick()) {
+        PlayerNotification selected = holder.notifications().get(slot);
+        if (selected.type() == NotificationType.MAIL
+                && !messages.requirePermission(player, "survivaltweaks.command.mail")) {
+            return;
+        }
+        UUID notificationId = selected.id();
+        if (click.isShiftClick()) {
             profile.removeNotification(notificationId);
         } else {
             profile.markNotificationRead(notificationId);

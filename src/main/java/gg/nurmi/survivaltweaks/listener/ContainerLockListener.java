@@ -29,11 +29,13 @@ import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryAction;
+import org.bukkit.plugin.Plugin;
 
 import java.util.List;
 import java.util.Set;
 import java.time.Clock;
 import java.util.UUID;
+import java.util.logging.Level;
 
 public final class ContainerLockListener implements Listener {
 
@@ -45,6 +47,7 @@ public final class ContainerLockListener implements Listener {
     private final Clock clock;
     private final NotificationService notifications;
     private final ProfileRepository profiles;
+    private final Plugin plugin;
 
     public ContainerLockListener(
             ContainerBlockResolver resolver,
@@ -54,7 +57,8 @@ public final class ContainerLockListener implements Listener {
             SettingsService settings,
             Clock clock,
             NotificationService notifications,
-            ProfileRepository profiles
+            ProfileRepository profiles,
+            Plugin plugin
     ) {
         this.resolver = resolver;
         this.locks = locks;
@@ -64,6 +68,7 @@ public final class ContainerLockListener implements Listener {
         this.clock = clock;
         this.notifications = notifications;
         this.profiles = profiles;
+        this.plugin = plugin;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -85,7 +90,7 @@ public final class ContainerLockListener implements Listener {
             event.setCancelled(true);
             messages.send(player, "lock.denied-open");
             feedback.play(player, FeedbackService.LOCK_DENIED);
-            selectedLocks.forEach(lock -> notifications.notify(
+            selectedLocks.forEach(lock -> notifyOwner(
                     lock.ownerId(),
                     NotificationType.LOCK_ACCESS_DENIED,
                     player.getName(),
@@ -148,11 +153,22 @@ public final class ContainerLockListener implements Listener {
             event.setCancelled(true);
             messages.send(player, "lock.denied-break");
             feedback.play(player, FeedbackService.LOCK_DENIED);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onAcceptedBreak(BlockBreakEvent event) {
+        Set<ContainerLock> connected = locks.locksFor(resolver.blocksFor(event.getBlock()));
+        if (connected.size() != 1) {
             return;
         }
-
+        ContainerLock lock = connected.iterator().next();
+        Player player = event.getPlayer();
+        if (!lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION))) {
+            return;
+        }
         if (!player.getUniqueId().equals(lock.ownerId())) {
-            notifications.notify(
+            notifyOwner(
                     lock.ownerId(),
                     NotificationType.LOCK_ADMIN_CHANGED,
                     player.getName(),
@@ -184,12 +200,25 @@ public final class ContainerLockListener implements Listener {
             event.setCancelled(true);
             messages.send(player, "lock.denied-attach");
             feedback.play(player, FeedbackService.LOCK_DENIED);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onAcceptedPlace(BlockPlaceEvent event) {
+        if (!event.canBuild()) {
             return;
         }
-
-        if (locks.addBlocks(lock, connected)) {
+        Set<BlockKey> connected = resolver.blocksFor(event.getBlockPlaced());
+        Set<ContainerLock> existing = locks.locksFor(connected);
+        if (existing.size() != 1) {
+            return;
+        }
+        ContainerLock lock = existing.iterator().next();
+        Player player = event.getPlayer();
+        if (lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION))
+                && locks.addBlocks(lock, connected)) {
             if (!player.getUniqueId().equals(lock.ownerId())) {
-                notifications.notify(
+                notifyOwner(
                         lock.ownerId(),
                         NotificationType.LOCK_ADMIN_CHANGED,
                         player.getName(),
@@ -198,11 +227,16 @@ public final class ContainerLockListener implements Listener {
             }
             messages.send(player, "lock.extended");
             feedback.play(player, FeedbackService.LOCK_CREATED);
-        } else {
-            event.setCancelled(true);
-            messages.send(player, "lock.conflict");
-            feedback.play(player, FeedbackService.LOCK_DENIED);
         }
+    }
+
+    private void notifyOwner(UUID ownerId, NotificationType type, String actor, String detail) {
+        notifications.notifyAsync(ownerId, type, actor, detail,
+                plugin.getServer().getScheduler().getMainThreadExecutor(plugin))
+                .exceptionally(failure -> {
+                    plugin.getLogger().log(Level.WARNING, "Could not save container lock notification", failure);
+                    return false;
+                });
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

@@ -331,6 +331,9 @@ public final class DeathRecoveryService
     }
 
     public boolean openStatus(Player player) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.deathlocation")) {
+            return false;
+        }
         if (!settings.current().deathRecoveryEnabled()) {
             messages.send(player, "death-recovery.disabled");
             return false;

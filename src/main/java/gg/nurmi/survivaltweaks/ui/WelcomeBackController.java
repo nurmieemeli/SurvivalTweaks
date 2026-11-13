@@ -98,7 +98,8 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
 
     public boolean playerJoined(Player player, PlayerSessionService.Session session) {
         Instant lastSeen = session.previousSeen().orElse(null);
-        if (!settings.current().welcomeBackEnabled()
+        if (!player.hasPermission("survivaltweaks.command.welcome")
+                || !settings.current().welcomeBackEnabled()
                 || !shouldShow(
                 !session.firstJoin(),
                 lastSeen,
@@ -116,7 +117,8 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
     }
 
     private void present(Player player) {
-        if (!player.isOnline() || !settings.current().welcomeBackEnabled()) {
+        if (!player.isOnline() || !player.hasPermission("survivaltweaks.command.welcome")
+                || !settings.current().welcomeBackEnabled()) {
             return;
         }
         if (settings.current().welcomeBackAutoOpen()) {
@@ -144,6 +146,9 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
     }
 
     public void open(Player player) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.welcome")) {
+            return;
+        }
         var profile = profiles.load(player.getUniqueId());
         long unread = profile.unreadNotificationCount();
         long unreadMail = profile.unreadMailCount();
@@ -242,13 +247,22 @@ public final class WelcomeBackController implements Listener, CommandExecutor {
                 || !player.getUniqueId().equals(holder.ownerId())) {
             return;
         }
-        switch (event.getRawSlot()) {
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, slot));
+    }
+
+    private void handleClick(Player player, int slot) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.welcome")) {
+            return;
+        }
+        switch (slot) {
             case NOTIFICATIONS_SLOT -> notificationCenter.open(player);
             case MAIL_SLOT -> mailbox.open(player);
             case TELEPORTS_SLOT -> teleportInbox.open(player);
             case DEATH_SLOT -> {
-                player.closeInventory();
-                deathRecovery.openStatus(player);
+                if (deathRecovery.openStatus(player)) {
+                    player.closeInventory();
+                }
             }
             case BACK_SLOT -> back.accept(player);
             default -> {

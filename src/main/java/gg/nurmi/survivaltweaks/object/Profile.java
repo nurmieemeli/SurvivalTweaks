@@ -11,12 +11,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public final class Profile {
 
     private final UUID uniqueId;
     private final Map<String, Home> homes = new LinkedHashMap<>();
-    private PlayerPreferences preferences = PlayerPreferences.DEFAULTS;
+    private volatile PlayerPreferences preferences = PlayerPreferences.DEFAULTS;
+    private PendingLanguage pendingLanguage;
     private final LinkedHashSet<OnboardingHint> seenHints = new LinkedHashSet<>();
     private final ArrayList<PlayerNotification> notifications = new ArrayList<>();
     private final LinkedHashSet<UUID> blockedMailSenders = new LinkedHashSet<>();
@@ -89,6 +91,32 @@ public final class Profile {
         preferences = Objects.requireNonNull(updatedPreferences, "updatedPreferences");
     }
 
+    public synchronized Optional<CompletableFuture<Void>> stageLanguage(LanguagePreference language) {
+        if (pendingLanguage != null) {
+            return Optional.empty();
+        }
+        CompletableFuture<Void> saved = new CompletableFuture<>();
+        pendingLanguage = new PendingLanguage(Objects.requireNonNull(language, "language"), saved);
+        return Optional.of(saved);
+    }
+
+    public synchronized Optional<LanguagePreference> pendingLanguage() {
+        return pendingLanguage == null ? Optional.empty() : Optional.of(pendingLanguage.language());
+    }
+
+    public void confirmSavedLanguage(LanguagePreference language) {
+        PendingLanguage saved;
+        synchronized (this) {
+            saved = pendingLanguage;
+            if (saved == null || saved.language() != language) {
+                return;
+            }
+            preferences = preferences.withLanguage(language);
+            pendingLanguage = null;
+        }
+        saved.completion().complete(null);
+    }
+
     public boolean hintSeen(OnboardingHint hint) {
         return seenHints.contains(hint);
     }
@@ -137,9 +165,10 @@ public final class Profile {
         return notifications.removeIf(notification -> notification.id().equals(notificationId));
     }
 
-    public int clearReadNotifications() {
+    public int clearReadNotifications(boolean includeMail) {
         int before = notifications.size();
-        notifications.removeIf(PlayerNotification::read);
+        notifications.removeIf(notification -> notification.read()
+                && (includeMail || notification.type() != NotificationType.MAIL));
         return before - notifications.size();
     }
 
@@ -236,11 +265,11 @@ public final class Profile {
         return trustedPlayers.contains(playerId);
     }
 
-    public ProfileSnapshot snapshot() {
+    public synchronized ProfileSnapshot snapshot() {
         return new ProfileSnapshot(
                 uniqueId,
                 homes(),
-                preferences,
+                pendingLanguage == null ? preferences : preferences.withLanguage(pendingLanguage.language()),
                 seenHints,
                 notifications,
                 lastKnownName,
@@ -262,5 +291,8 @@ public final class Profile {
     private static String key(String name) {
         Objects.requireNonNull(name, "name");
         return name.toLowerCase(Locale.ROOT);
+    }
+
+    private record PendingLanguage(LanguagePreference language, CompletableFuture<Void> completion) {
     }
 }

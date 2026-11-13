@@ -9,6 +9,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -37,6 +38,7 @@ public final class JourneyMenuController implements Listener {
     private static final int VANILLA_GUIDE = 13;
     private static final int BACK = 22;
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final VanillaGuideController vanillaGuide;
@@ -45,12 +47,14 @@ public final class JourneyMenuController implements Listener {
     private Consumer<Player> back = Player::closeInventory;
 
     public JourneyMenuController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             VanillaGuideController vanillaGuide,
             MessageService messages,
             FeedbackService feedback
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.vanillaGuide = vanillaGuide;
@@ -114,10 +118,15 @@ public final class JourneyMenuController implements Listener {
                 || !player.getUniqueId().equals(holder.ownerId())) {
             return;
         }
-        if (event.getRawSlot() == BACK) {
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot));
+    }
+
+    private void handleClick(Player player, JourneyHolder holder, int slot) {
+        if (slot == BACK) {
             feedback.play(player, FeedbackService.UI_CLICK);
             back.accept(player);
-        } else if (event.getRawSlot() == VANILLA_GUIDE) {
+        } else if (slot == VANILLA_GUIDE) {
             feedback.play(player, FeedbackService.UI_CLICK);
             vanillaGuide.open(player);
         }

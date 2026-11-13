@@ -100,6 +100,9 @@ public final class LockControlPanelController implements Listener {
     }
 
     public void open(Player player, ContainerLock lock) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
+            return;
+        }
         if (!lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION))) {
             messages.send(player, "lock.not-owner");
             return;
@@ -145,6 +148,14 @@ public final class LockControlPanelController implements Listener {
                 || !player.getUniqueId().equals(panel.viewerId())) {
             return;
         }
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, panel, slot));
+    }
+
+    private void handleClick(Player player, LockPanel panel, int slot) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
+            return;
+        }
         Optional<ContainerLock> selected = locks.lock(panel.lockId());
         if (selected.isEmpty()) {
             player.closeInventory();
@@ -158,9 +169,9 @@ public final class LockControlPanelController implements Listener {
             return;
         }
         if (panel.action() != null) {
-            candidateClick(player, lock, panel, event.getRawSlot());
+            candidateClick(player, lock, panel, slot);
         } else {
-            mainClick(player, lock, panel, event.getRawSlot());
+            mainClick(player, lock, panel, slot);
         }
     }
 
@@ -178,6 +189,9 @@ public final class LockControlPanelController implements Listener {
         }
         if (slot == RENAME_SLOT) {
             prompts.request(player, "ui.lock-panel.rename-prompt", (responding, text) -> {
+                if (!messages.requirePermission(responding, "survivaltweaks.command.lock")) {
+                    return;
+                }
                 if (!locks.contains(lock) || !lock.canManage(
                         responding.getUniqueId(),
                         responding.hasPermission(LockCommand.ADMIN_PERMISSION)
@@ -255,6 +269,9 @@ public final class LockControlPanelController implements Listener {
     }
 
     private void candidateClick(Player player, ContainerLock lock, LockPanel panel, int slot) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
+            return;
+        }
         if (slot == CLOSE_SLOT) {
             open(player, lock);
             return;
@@ -292,6 +309,9 @@ public final class LockControlPanelController implements Listener {
             return;
         }
         Runnable transfer = () -> {
+            if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
+                return;
+            }
             if (locks.contains(lock)
                     && lock.canManage(
                             player.getUniqueId(),
@@ -589,6 +609,9 @@ public final class LockControlPanelController implements Listener {
 
     private void searchPlayer(Player player, ContainerLock lock, CandidateAction action) {
         prompts.request(player, "ui.lock-panel.search-prompt", (responding, text) -> {
+            if (!messages.requirePermission(responding, "survivaltweaks.command.lock")) {
+                return;
+            }
             if (!locks.contains(lock) || !lock.canManage(
                     responding.getUniqueId(),
                     responding.hasPermission(LockCommand.ADMIN_PERMISSION)

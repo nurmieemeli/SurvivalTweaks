@@ -28,6 +28,7 @@ format:
 # Bukkit säilyttää yhden palvelinkohtaisen merkkijonon komentoa kohti, joten
 # nämä luetaan vain englanninkielisestä luettelosta.
 command:
+  no-permission: "<red>Sinulla ei ole oikeutta tehdä tätä.</red>"
   usage:
     afk: "/afk"
     mail: "/mail [inbox|send|block|unblock] [pelaaja] [viesti]"

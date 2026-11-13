@@ -19,14 +19,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CoalescingSnapshotWriterTest {
 
     @Test
-    void transientFailureRetriesWithoutAnotherSubmission() throws Exception {
+    void transientFailureRetriesAfterAnEqualSubmission() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch fail = new CountDownLatch(1);
         CountDownLatch saved = new CountDownLatch(1);
         CoalescingSnapshotWriter<String> writer = new CoalescingSnapshotWriter<>(
                 "snapshot-retry-test",
                 "retry test state",
                 value -> {
                     if (attempts.incrementAndGet() == 1) {
+                        writing.countDown();
+                        try {
+                            assertTrue(fail.await(5, TimeUnit.SECONDS));
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException(exception);
+                        }
                         throw new IOException("temporary outage");
                     }
                     saved.countDown();
@@ -34,7 +43,13 @@ class CoalescingSnapshotWriterTest {
                 Logger.getLogger(CoalescingSnapshotWriterTest.class.getName())
         );
 
-        writer.submit("only-submission");
+        try {
+            writer.submit(new String("snapshot"));
+            assertTrue(writing.await(3, TimeUnit.SECONDS));
+            writer.submit(new String("snapshot"));
+        } finally {
+            fail.countDown();
+        }
 
         assertTrue(saved.await(3, TimeUnit.SECONDS));
         writer.close();

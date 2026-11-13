@@ -17,18 +17,25 @@ import gg.nurmi.survivaltweaks.object.PlayerNotification;
 import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
+import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
+import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import org.bukkit.Material;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,10 +46,150 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SqlStorageTest {
 
+    private static final UUID FINNISH_PLAYER = new UUID(0, 1);
+    private static final UUID ENGLISH_PLAYER = new UUID(0, 2);
+    private static final String RECOVERY_DATABASE = "language-recovery.db";
+
     @TempDir
     Path directory;
 
     private final Logger logger = Logger.getLogger(SqlStorageTest.class.getName());
+
+    @Test
+    void forcedExitAfterOneLanguageCommitReplaysOnlyTheRemainingPlayer() throws Exception {
+        Path recovery = directory.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
+        Files.writeString(recovery, FINNISH_PLAYER + "=FINNISH\n" + ENGLISH_PLAYER + "=ENGLISH\n");
+        try (SqlStorage storage = sqlite(RECOVERY_DATABASE);
+             var connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(RECOVERY_DATABASE));
+             var statement = connection.createStatement()) {
+            storage.save(storage.load(FINNISH_PLAYER).snapshot());
+            storage.save(storage.load(ENGLISH_PLAYER).snapshot());
+            statement.executeUpdate("""
+                    CREATE TRIGGER delay_english BEFORE UPDATE OF language ON st_profiles
+                    WHEN NEW.player_id = '%s' AND NEW.language = 'ENGLISH'
+                    BEGIN SELECT RAISE(ABORT, 'hold second recovery write'); END
+                    """.formatted(ENGLISH_PLAYER));
+        }
+
+        Process interrupted = startLanguageRecovery("interrupt");
+        try {
+            assertTrue(await(() -> {
+                String entries = Files.readString(recovery);
+                return entries.contains(ENGLISH_PLAYER + "=ENGLISH") && !entries.contains(FINNISH_PLAYER.toString());
+            }), () -> processLog("interrupt"));
+            assertTrue(interrupted.isAlive(), () -> processLog("interrupt"));
+        } finally {
+            interrupted.destroyForcibly();
+            assertTrue(interrupted.waitFor(10, TimeUnit.SECONDS));
+        }
+
+        try (SqlStorage storage = sqlite(RECOVERY_DATABASE);
+             var connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(RECOVERY_DATABASE));
+             var statement = connection.createStatement()) {
+            assertEquals(LanguagePreference.FINNISH, storage.load(FINNISH_PLAYER).preferences().language());
+            assertEquals(LanguagePreference.AUTO, storage.load(ENGLISH_PLAYER).preferences().language());
+            statement.executeUpdate("DROP TRIGGER delay_english");
+        }
+
+        Process restarted = startLanguageRecovery("restart");
+        try {
+            assertTrue(restarted.waitFor(20, TimeUnit.SECONDS), () -> processLog("restart"));
+            assertEquals(0, restarted.exitValue(), () -> processLog("restart"));
+        } finally {
+            if (restarted.isAlive()) {
+                restarted.destroyForcibly();
+                assertTrue(restarted.waitFor(10, TimeUnit.SECONDS));
+            }
+        }
+        assertFalse(Files.exists(recovery));
+        try (SqlStorage storage = sqlite(RECOVERY_DATABASE)) {
+            assertEquals(LanguagePreference.FINNISH, storage.load(FINNISH_PLAYER).preferences().language());
+            assertEquals(LanguagePreference.ENGLISH, storage.load(ENGLISH_PLAYER).preferences().language());
+        }
+    }
+
+    private Process startLanguageRecovery(String phase) throws IOException {
+        return new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"),
+                LanguageRecoveryProcess.class.getName(), directory.toString(), phase
+        ).redirectErrorStream(true).redirectOutput(directory.resolve(phase + ".log").toFile()).start();
+    }
+
+    private String processLog(String phase) {
+        try {
+            return Files.readString(directory.resolve(phase + ".log"));
+        } catch (IOException exception) {
+            return exception.toString();
+        }
+    }
+
+    private static boolean await(java.util.concurrent.Callable<Boolean> condition) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.call()) {
+                return true;
+            }
+            Thread.sleep(25);
+        }
+        return false;
+    }
+
+    public static class LanguageRecoveryProcess {
+
+        public static void main(String[] args) throws Exception {
+            Path directory = Path.of(args[0]);
+            Path recovery = directory.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
+            Logger logger = Logger.getAnonymousLogger();
+            logger.setLevel(Level.OFF);
+            try (SqlStorage storage = sqlite(directory.resolve(RECOVERY_DATABASE), logger);
+                 ProfileRepository repository = new ProfileRepository(
+                         storage, logger, new PersistenceMonitor(), recovery)) {
+                repository.retryPendingLanguages();
+                if (args[1].equals("interrupt")) {
+                    new CountDownLatch(1).await();
+                }
+                if (!await(() -> Files.notExists(recovery)) || !repository.flush(Duration.ofSeconds(5))) {
+                    throw new IllegalStateException("Language recovery did not finish");
+                }
+                PlayerExperienceService experience = new PlayerExperienceService(repository);
+                if (experience.preferences(FINNISH_PLAYER).language() != LanguagePreference.FINNISH
+                        || experience.preferences(ENGLISH_PLAYER).language() != LanguagePreference.ENGLISH) {
+                    throw new IllegalStateException("Wrong language after restart");
+                }
+            }
+        }
+    }
+
+    @Test
+    void refusesAFileSnapshotWhileAReaderPreventsTheWalCheckpoint() throws Exception {
+        String filename = "busy-checkpoint.db";
+        try (SqlStorage storage = sqlite(filename);
+             var reader = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(filename));
+             var statement = reader.createStatement()) {
+            UUID playerId = UUID.randomUUID();
+            var profile = storage.load(playerId);
+            profile.lastKnownName("before");
+            storage.save(profile.snapshot());
+            storage.checkpoint();
+            reader.setAutoCommit(false);
+            try (var result = statement.executeQuery("SELECT count(*) FROM st_profiles")) {
+                assertTrue(result.next());
+            }
+            profile.lastKnownName("after");
+            storage.save(profile.snapshot());
+
+            Path database = directory.resolve(filename);
+            assertThrows(SqlStorage.CheckpointUnavailableException.class,
+                    () -> SqlStorage.checkpointBeforeStartupBackup(database));
+            assertThrows(IOException.class, storage::acquireSnapshotLease);
+            reader.rollback();
+            SqlStorage.checkpointBeforeStartupBackup(database);
+            try (var lease = storage.acquireSnapshotLease()) {
+                assertEquals("after", storage.load(playerId).lastKnownName());
+            }
+        }
+    }
 
     @Test
     void replacementOnlySpawnStateIsNotEmptyAndIsCounted() throws IOException {
@@ -308,10 +455,14 @@ class SqlStorageTest {
     }
 
     private SqlStorage sqlite(String filename) {
+        return sqlite(directory.resolve(filename), logger);
+    }
+
+    private static SqlStorage sqlite(Path database, Logger logger) {
         return new SqlStorage(
                 new StorageConfiguration(
                         StorageBackend.SQLITE,
-                        directory.resolve(filename),
+                        database,
                         "",
                         5432,
                         "",

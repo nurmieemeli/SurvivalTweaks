@@ -12,6 +12,7 @@ import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
@@ -30,6 +31,7 @@ class BackupServiceTest {
         Files.writeString(dataFolder.resolve("config.yml"), "home:\n  max-amount: 3\n");
         Files.writeString(dataFolder.resolve("locked-containers.yml"), "locks: []\n");
         Files.writeString(dataFolder.resolve("new-player-spawns.yml"), "assignments: []\n");
+        Files.writeString(dataFolder.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME), "pending");
         Files.createDirectories(dataFolder.resolve("userdata"));
         Files.writeString(dataFolder.resolve("userdata/player.yml"), "schema-version: 4\n");
         Files.createDirectories(dataFolder.resolve("backups"));
@@ -48,14 +50,15 @@ class BackupServiceTest {
                             "config.yml",
                             "locked-containers.yml",
                             "new-player-spawns.yml",
-                            "userdata/player.yml"
+                            "userdata/player.yml",
+                            ProfileRepository.PENDING_LANGUAGES_FILENAME
                     ),
                     entries
             );
             assertTrue(entries.stream().noneMatch(entry -> entry.startsWith("backups/")));
         }
         assertTrue(verification.valid());
-        assertEquals(4, verification.entries());
+        assertEquals(5, verification.entries());
         assertEquals(64, verification.sha256().length());
         assertEquals(2, backups.archives().size());
     }
@@ -88,6 +91,8 @@ class BackupServiceTest {
 
         Files.writeString(dataFolder.resolve("config.yml"), "current: true\n");
         Files.writeString(dataFolder.resolve("death-markers.yml"), "current: true\n");
+        Path pendingLanguages = dataFolder.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
+        Files.writeString(pendingLanguages, "newer language change");
         Files.writeString(dataFolder.resolve("userdata/player.yml"), "current: true\n");
         Files.writeString(dataFolder.resolve("userdata/extra.yml"), "current: true\n");
 
@@ -103,7 +108,32 @@ class BackupServiceTest {
         assertEquals("snapshot: true\n", Files.readString(dataFolder.resolve("userdata/player.yml")));
         assertFalse(Files.exists(dataFolder.resolve("userdata/extra.yml")));
         assertFalse(Files.exists(dataFolder.resolve("death-markers.yml")));
+        assertFalse(Files.exists(pendingLanguages));
         assertFalse(backups.hasPendingRestore());
+    }
+
+    @Test
+    void rejectsAnArchiveWithCorruptedEntryData() throws IOException {
+        Path archive = dataFolder.resolve("corrupt.zip");
+        byte[] payload = {1, 2, 3};
+        CRC32 crc = new CRC32();
+        crc.update(payload);
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+            ZipEntry entry = new ZipEntry("config.yml");
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(payload.length);
+            entry.setCrc(crc.getValue());
+            zip.putNextEntry(entry);
+            zip.write(payload);
+        }
+        assertTrue(BackupService.verifyArchive(archive).valid());
+
+        byte[] bytes = Files.readAllBytes(archive);
+        int payloadStart = 30 + "config.yml".length();
+        assertEquals(payload[0], bytes[payloadStart]);
+        bytes[payloadStart]++;
+        Files.write(archive, bytes);
+        assertFalse(BackupService.verifyArchive(archive).valid());
     }
 
     @Test

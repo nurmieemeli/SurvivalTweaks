@@ -12,6 +12,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -40,6 +41,7 @@ public final class PlayerHubController implements Listener {
     private static final int WELCOME_BACK = 25;
     private static final int CLOSE = 26;
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final HomeMenuController homes;
@@ -59,6 +61,7 @@ public final class PlayerHubController implements Listener {
     private final OnboardingService onboarding;
 
     public PlayerHubController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             HomeMenuController homes,
@@ -77,6 +80,7 @@ public final class PlayerHubController implements Listener {
             FeedbackService feedback,
             OnboardingService onboarding
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.homes = homes;
@@ -197,12 +201,18 @@ public final class PlayerHubController implements Listener {
                 || !player.getUniqueId().equals(holder.ownerId())) {
             return;
         }
-        switch (event.getRawSlot()) {
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, slot));
+    }
+
+    private void handleClick(Player player, int slot) {
+        switch (slot) {
             case HOMES -> homes.open(player, profiles.load(player.getUniqueId()).homes());
             case TELEPORTS -> teleports.open(player);
             case DEATH -> {
-                player.closeInventory();
-                deathRecovery.openStatus(player);
+                if (deathRecovery.openStatus(player)) {
+                    player.closeInventory();
+                }
             }
             case STATISTICS -> statistics.open(player, player);
             case LOCKS -> locks.open(player);

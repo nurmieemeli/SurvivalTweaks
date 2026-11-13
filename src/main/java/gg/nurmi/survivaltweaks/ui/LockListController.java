@@ -11,6 +11,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -31,6 +32,7 @@ public final class LockListController implements Listener {
     private static final int BACK = 49;
     private static final int NEXT = 53;
 
+    private final Plugin plugin;
     private final Server server;
     private final ContainerLockService locks;
     private final LockControlPanelController panels;
@@ -39,12 +41,14 @@ public final class LockListController implements Listener {
     private Consumer<Player> back = Player::closeInventory;
 
     public LockListController(
+            Plugin plugin,
             Server server,
             ContainerLockService locks,
             LockControlPanelController panels,
             MessageService messages,
             FeedbackService feedback
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.locks = locks;
         this.panels = panels;
@@ -61,6 +65,9 @@ public final class LockListController implements Listener {
     }
 
     private void open(Player player, int page) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
+            return;
+        }
         List<ContainerLock> managed = player.hasPermission(LockCommand.ADMIN_PERMISSION)
                 ? locks.allLocks()
                 : locks.locksForOwner(player.getUniqueId());
@@ -143,6 +150,10 @@ public final class LockListController implements Listener {
             return;
         }
         int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot));
+    }
+
+    private void handleClick(Player player, LockListHolder holder, int slot) {
         if (slot == BACK) {
             back.accept(player);
         } else if (slot == PREVIOUS && holder.page() > 0) {

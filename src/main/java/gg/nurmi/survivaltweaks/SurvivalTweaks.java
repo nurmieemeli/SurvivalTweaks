@@ -139,13 +139,14 @@ public final class SurvivalTweaks extends JavaPlugin {
         backups.databaseFilename(
                 getConfig().getString("storage.sqlite.file", "survivaltweaks.db")
         );
+        backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
         try {
             if (backups.hasPendingRestore()) {
                 backups.create("pre-restore");
                 backups.applyPendingRestore();
                 reloadConfig();
             } else {
-                backups.create("startup");
+                backups.createStartupBackup();
             }
         } catch (IOException exception) {
             throw new IllegalStateException(
@@ -209,7 +210,10 @@ public final class SurvivalTweaks extends JavaPlugin {
                 backups,
                 messages
         );
-        profiles = new ProfileRepository(storageManager.store(), getLogger(), persistenceMonitor);
+        profiles = new ProfileRepository(
+                storageManager.store(), getLogger(), persistenceMonitor,
+                getDataFolder().toPath().resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME)
+        );
         playerSessions = new PlayerSessionService(profiles, clock);
         PlayerExperienceService experience = new PlayerExperienceService(profiles);
         messages.languagePreference(playerId -> experience.preferences(playerId).language());
@@ -317,6 +321,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         TextPromptService prompts = new TextPromptService(this, messages);
         HomeMenuController homeMenu = new HomeMenuController(
+                this,
                 getServer(),
                 profiles,
                 messages,
@@ -392,6 +397,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 settings
         );
         TeleportInboxController inbox = new TeleportInboxController(
+                this,
                 getServer(),
                 teleportRequests,
                 teleportAccept,
@@ -401,7 +407,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         );
         teleportAccept.inbox(inbox);
         PreferencesMenuController preferences = new PreferencesMenuController(
-                getServer(),
+                this,
                 experience,
                 messages,
                 feedback
@@ -411,6 +417,7 @@ public final class SurvivalTweaks extends JavaPlugin {
             mentions.preferenceChanged(player);
         });
         NotificationCenterController notificationCenter = new NotificationCenterController(
+                this,
                 getServer(),
                 profiles,
                 messages,
@@ -418,6 +425,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock
         );
         MailboxController mailbox = new MailboxController(
+                this,
                 getServer(),
                 profiles,
                 mail,
@@ -448,6 +456,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock
         );
         LockListController lockList = new LockListController(
+                this,
                 getServer(),
                 containerLocks,
                 lockPanel,
@@ -455,6 +464,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback
         );
         VanillaGuideController vanillaGuide = new VanillaGuideController(
+                this,
                 getServer(),
                 settings,
                 profiles,
@@ -462,6 +472,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback
         );
         JourneyMenuController journeyMenu = new JourneyMenuController(
+                this,
                 getServer(),
                 profiles,
                 vanillaGuide,
@@ -484,6 +495,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock
         );
         PlayerHubController hub = new PlayerHubController(
+                this,
                 getServer(),
                 profiles,
                 homeMenu,
@@ -584,6 +596,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         newPlayerSpawns.start();
         playerList.start();
         sleepVotes.start();
+        profiles.retryPendingLanguages();
 
         getLogger().info("SurvivalTweaks enabled with " + initialSettings.maxHomes() + " homes per player.");
     }
@@ -750,7 +763,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                         settings,
                         clock,
                         notifications,
-                        profiles
+                        profiles,
+                        this
                 ),
                 this
         );

@@ -13,9 +13,11 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
@@ -34,6 +36,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
 
     private static final int CLOSE_SLOT = 49;
 
+    private final Plugin plugin;
     private final Server server;
     private final TeleportRequestService requests;
     private final TeleportAcceptCommand actions;
@@ -43,6 +46,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
     private Consumer<Player> back = Player::closeInventory;
 
     public TeleportInboxController(
+            Plugin plugin,
             Server server,
             TeleportRequestService requests,
             TeleportAcceptCommand actions,
@@ -50,6 +54,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
             FeedbackService feedback,
             Clock clock
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.requests = requests;
         this.actions = actions;
@@ -63,6 +68,9 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
     }
 
     public boolean open(Player player) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.teleportaccept")) {
+            return false;
+        }
         List<TeleportRequest> incoming = requests.incomingRequests(player.getUniqueId(), clock.instant());
         if (incoming.isEmpty()) {
             messages.send(player, "teleport.accept.none");
@@ -143,6 +151,11 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
             return;
         }
         int slot = event.getRawSlot();
+        ClickType click = event.getClick();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, inbox, slot, click));
+    }
+
+    private void handleClick(Player player, Inbox inbox, int slot, ClickType click) {
         if (slot == CLOSE_SLOT) {
             back.accept(player);
             return;
@@ -151,7 +164,10 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
             return;
         }
         TeleportRequest request = inbox.requests().get(slot);
-        if (event.isRightClick()) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.teleportaccept")) {
+            return;
+        }
+        if (click.isRightClick()) {
             actions.declineRequest(player, request);
         } else {
             actions.acceptRequest(player, request);

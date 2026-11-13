@@ -2,12 +2,15 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.object.PlayerNotification;
+import gg.nurmi.survivaltweaks.object.Profile;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 public final class NotificationService {
 
@@ -23,7 +26,15 @@ public final class NotificationService {
     }
 
     public boolean notify(UUID playerId, NotificationType type, String actor, String detail) {
-        return notify(playerId, type, null, actor, detail, true);
+        return notify(profiles.load(playerId), type, null, actor, detail, true);
+    }
+
+    public CompletableFuture<Boolean> notifyAsync(
+            UUID playerId, NotificationType type, String actor, String detail, Executor mainThread
+    ) {
+        return profiles.loadAsync(playerId).thenApplyAsync(
+                profile -> notify(profile, type, null, actor, detail, true), mainThread
+        );
     }
 
     public boolean mail(
@@ -33,7 +44,7 @@ public final class NotificationService {
             String message
     ) {
         return notify(
-                playerId,
+                profiles.load(playerId),
                 NotificationType.MAIL,
                 senderId,
                 senderName,
@@ -43,14 +54,13 @@ public final class NotificationService {
     }
 
     private boolean notify(
-            UUID playerId,
+            Profile profile,
             NotificationType type,
             UUID actorId,
             String actor,
             String detail,
             boolean deduplicate
     ) {
-        var profile = profiles.load(playerId);
         Instant now = clock.instant();
         boolean duplicate = deduplicate && profile.notifications().stream().anyMatch(notification ->
                 !notification.read()

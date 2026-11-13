@@ -88,24 +88,16 @@ public class TreeFellerService implements Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
-        if (isLog(event.getBlockPlaced().getType())) {
+        if (event.canBuild() && isLog(event.getBlockPlaced().getType())) {
             markPlayerPlaced(event.getBlockPlaced());
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         Block block = event.getBlock();
         
-        if (fellingPlayers.contains(player.getUniqueId())) {
-            removePlayerPlaced(block);
-            return;
-        }
-        if (jobs.containsKey(player.getUniqueId())) {
-            return;
-        }
-
         if (!isLog(block.getType())) {
             return;
         }
@@ -113,7 +105,9 @@ public class TreeFellerService implements Listener, AutoCloseable {
         boolean wasPlaced = isPlayerPlaced(block);
         removePlayerPlaced(block);
 
-        if (!player.isSneaking()
+        if (fellingPlayers.contains(player.getUniqueId())
+                || jobs.containsKey(player.getUniqueId())
+                || !player.isSneaking()
                 || enchantments == null
                 || !enchantments.has(
                         player.getInventory().getItemInMainHand(),
@@ -190,9 +184,7 @@ public class TreeFellerService implements Listener, AutoCloseable {
         UUID playerId = player.getUniqueId();
         jobs.put(playerId, new FellingJob(new ArrayDeque<>(logsToBreak)));
         jobOrder.addLast(playerId);
-        if (jobTask == null) {
-            processJobs();
-        }
+        scheduleJobs();
     }
 
     private void processJobs() {

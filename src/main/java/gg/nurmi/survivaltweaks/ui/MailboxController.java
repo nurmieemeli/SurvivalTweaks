@@ -12,8 +12,10 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
@@ -32,6 +34,7 @@ public final class MailboxController implements Listener {
     private static final int CLEAR_READ_SLOT = 48;
     private static final int BACK_SLOT = 49;
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final MailService mail;
@@ -42,6 +45,7 @@ public final class MailboxController implements Listener {
     private Consumer<Player> back = Player::closeInventory;
 
     public MailboxController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             MailService mail,
@@ -50,6 +54,7 @@ public final class MailboxController implements Listener {
             FeedbackService feedback,
             Clock clock
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.mail = mail;
@@ -64,6 +69,9 @@ public final class MailboxController implements Listener {
     }
 
     public void compose(Player sender, OfflinePlayer recipient) {
+        if (!messages.requirePermission(sender, "survivaltweaks.command.mail")) {
+            return;
+        }
         if (recipient == null) {
             messages.send(sender, "mail.result.unknown-player");
             return;
@@ -71,11 +79,18 @@ public final class MailboxController implements Listener {
         prompts.request(
                 sender,
                 "mail.prompt",
-                (responding, text) -> mail.sendWithFeedbackAsync(responding, recipient, text)
+                (responding, text) -> {
+                    if (messages.requirePermission(responding, "survivaltweaks.command.mail")) {
+                        mail.sendWithFeedbackAsync(responding, recipient, text);
+                    }
+                }
         );
     }
 
     public void open(Player player) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.mail")) {
+            return;
+        }
         List<PlayerNotification> letters = profiles.load(player.getUniqueId()).notifications().stream()
                 .filter(notification -> notification.type() == NotificationType.MAIL)
                 .limit(45)
@@ -144,6 +159,14 @@ public final class MailboxController implements Listener {
             return;
         }
         int slot = event.getRawSlot();
+        ClickType click = event.getClick();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot, click));
+    }
+
+    private void handleClick(Player player, MailboxHolder holder, int slot, ClickType click) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.mail")) {
+            return;
+        }
         var profile = profiles.load(player.getUniqueId());
         if (slot == BACK_SLOT) {
             back.accept(player);
@@ -160,7 +183,7 @@ public final class MailboxController implements Listener {
             return;
         }
         PlayerNotification letter = holder.letters().get(slot);
-        if (event.isShiftClick() && event.isRightClick() && letter.actorId() != null) {
+        if (click.isShiftClick() && click.isRightClick() && letter.actorId() != null) {
             OfflinePlayer sender = server.getOfflinePlayer(letter.actorId());
             mail.block(player, sender);
             profile.markNotificationRead(letter.id());
@@ -170,10 +193,10 @@ public final class MailboxController implements Listener {
                     "mail.blocked",
                     Placeholder.unparsed("player", letter.actor())
             );
-        } else if (event.isShiftClick()) {
+        } else if (click.isShiftClick()) {
             profile.removeNotification(letter.id());
             profiles.save(profile);
-        } else if (event.isRightClick() && letter.actorId() != null) {
+        } else if (click.isRightClick() && letter.actorId() != null) {
             profile.markNotificationRead(letter.id());
             profiles.save(profile);
             compose(player, server.getOfflinePlayer(letter.actorId()));

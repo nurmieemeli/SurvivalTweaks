@@ -13,6 +13,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -31,6 +32,7 @@ public final class VanillaGuideController implements Listener, CommandExecutor {
     private static final int[] SLOTS = {10, 11, 12, 13, 14, 15, 16};
     private static final int BACK = 22;
 
+    private final Plugin plugin;
     private final Server server;
     private final SettingsService settings;
     private final ProfileRepository profiles;
@@ -39,12 +41,14 @@ public final class VanillaGuideController implements Listener, CommandExecutor {
     private Consumer<Player> back = Player::closeInventory;
 
     public VanillaGuideController(
+            Plugin plugin,
             Server server,
             SettingsService settings,
             ProfileRepository profiles,
             MessageService messages,
             FeedbackService feedback
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.settings = settings;
         this.profiles = profiles;
@@ -57,6 +61,9 @@ public final class VanillaGuideController implements Listener, CommandExecutor {
     }
 
     public boolean open(Player player) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.guide")) {
+            return false;
+        }
         if (!settings.current().journeyEnabled() || !settings.current().vanillaGuideEnabled()) {
             messages.send(player, "vanilla-guide.disabled");
             return false;
@@ -146,8 +153,10 @@ public final class VanillaGuideController implements Listener, CommandExecutor {
             return;
         }
         if (event.getRawSlot() == BACK) {
-            feedback.play(player, FeedbackService.UI_CLICK);
-            back.accept(player);
+            SurvivalTweaksMenu.afterClick(plugin, event, player, () -> {
+                feedback.play(player, FeedbackService.UI_CLICK);
+                back.accept(player);
+            });
         }
     }
 

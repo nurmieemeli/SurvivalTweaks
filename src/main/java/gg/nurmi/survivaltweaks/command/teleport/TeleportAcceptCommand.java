@@ -129,6 +129,9 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
     }
 
     public void acceptRequest(Player recipient, TeleportRequest request) {
+        if (!messages.requirePermission(recipient, "survivaltweaks.command.teleportaccept")) {
+            return;
+        }
         if (!request.recipientId().equals(recipient.getUniqueId())
                 || !requests.incomingRequests(recipient.getUniqueId(), clock.instant()).contains(request)) {
             messages.send(recipient, "teleport.accept.none");
@@ -177,6 +180,9 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
     }
 
     public void declineRequest(Player recipient, TeleportRequest request) {
+        if (!messages.requirePermission(recipient, "survivaltweaks.command.teleportaccept")) {
+            return;
+        }
         if (!request.recipientId().equals(recipient.getUniqueId()) || !requests.consume(request)) {
             messages.send(recipient, "teleport.accept.none");
             return;

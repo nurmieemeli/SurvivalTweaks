@@ -131,6 +131,14 @@ public final class MessageService {
         this.migratedLegacyMessages = false;
     }
 
+    public boolean requirePermission(Player player, String permission) {
+        if (player.hasPermission(permission)) {
+            return true;
+        }
+        send(player, "command.no-permission");
+        return false;
+    }
+
     public void send(Audience audience, String key, TagResolver... placeholders) {
         Component rendered = component(audience, key, placeholders);
         RecoveryAction recovery = RECOVERY_ACTIONS.get(key);

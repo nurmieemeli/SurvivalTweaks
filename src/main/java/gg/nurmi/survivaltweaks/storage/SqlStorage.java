@@ -20,10 +20,13 @@ import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.Material;
+import org.sqlite.JDBC;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -40,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -701,11 +705,40 @@ public final class SqlStorage implements
         if (configuration.backend() != StorageBackend.SQLITE) {
             return;
         }
-        try (Connection connection = connection();
-             Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA wal_checkpoint(FULL)");
+        try (Connection connection = connection()) {
+            checkpoint(connection);
         } catch (SQLException exception) {
             throw io("Could not checkpoint SQLite storage", exception);
+        }
+    }
+
+    public static void checkpointBeforeStartupBackup(Path database) throws IOException {
+        if (!Files.isRegularFile(database) || Files.isSymbolicLink(database)
+                || !Files.exists(database.resolveSibling(database.getFileName() + "-wal"))) {
+            return;
+        }
+        Properties settings = new Properties();
+        settings.setProperty("busy_timeout", "0");
+        try (Connection connection = new JDBC().connect("jdbc:sqlite:" + database, settings)) {
+            checkpoint(connection);
+        } catch (SQLException exception) {
+            throw new CheckpointUnavailableException(exception);
+        }
+    }
+
+    private static void checkpoint(Connection connection) throws SQLException, CheckpointUnavailableException {
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("PRAGMA wal_checkpoint(FULL)")) {
+            if (!result.next() || result.getInt(1) != 0 || result.getInt(2) != result.getInt(3)) {
+                throw new CheckpointUnavailableException(null);
+            }
+        }
+    }
+
+    public static final class CheckpointUnavailableException extends IOException {
+
+        private CheckpointUnavailableException(SQLException cause) {
+            super("SQLite WAL checkpoint did not finish", cause);
         }
     }
 

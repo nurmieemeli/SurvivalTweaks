@@ -16,6 +16,7 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -37,6 +38,7 @@ public final class PreferencesMenuController implements Listener {
     private static final int PUBLIC_PROFILE = 24;
     private static final int MAIL = 25;
 
+    private final Plugin plugin;
     private final Server server;
     private final PlayerExperienceService experience;
     private final MessageService messages;
@@ -46,12 +48,13 @@ public final class PreferencesMenuController implements Listener {
     };
 
     public PreferencesMenuController(
-            Server server,
+            Plugin plugin,
             PlayerExperienceService experience,
             MessageService messages,
             FeedbackService feedback
     ) {
-        this.server = server;
+        this.plugin = plugin;
+        this.server = plugin.getServer();
         this.experience = experience;
         this.messages = messages;
         this.feedback = feedback;
@@ -172,8 +175,19 @@ public final class PreferencesMenuController implements Listener {
             return;
         }
         int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, slot));
+    }
+
+    private void handleClick(Player player, int slot) {
         if (slot == BACK) {
             back.accept(player);
+            return;
+        }
+        if (slot == LANGUAGE) {
+            UUID playerId = player.getUniqueId();
+            experience.cycleLanguage(playerId).ifPresent(saved -> saved.thenRunAsync(
+                    () -> refreshLanguage(playerId), server.getScheduler().getMainThreadExecutor(plugin)
+            ));
             return;
         }
         PlayerPreferences current = experience.preferences(player);
@@ -206,14 +220,24 @@ public final class PreferencesMenuController implements Listener {
             );
         } else if (slot == MAIL) {
             experience.update(player, value -> value.withMail(!current.mailEnabled()));
-        } else if (slot == LANGUAGE) {
-            experience.update(player, value -> value.withLanguage(current.language().next()));
         } else {
             return;
         }
         changed.accept(player);
         feedback.play(player, FeedbackService.UI_CLICK);
         open(player);
+    }
+
+    private void refreshLanguage(UUID playerId) {
+        Player player = server.getPlayer(playerId);
+        if (player == null) {
+            return;
+        }
+        changed.accept(player);
+        if (player.getOpenInventory().getTopInventory().getHolder(false) instanceof PreferencesHolder) {
+            feedback.play(player, FeedbackService.UI_CLICK);
+            open(player);
+        }
     }
 
     @EventHandler

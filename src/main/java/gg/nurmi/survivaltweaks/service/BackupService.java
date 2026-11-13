@@ -1,9 +1,12 @@
 package gg.nurmi.survivaltweaks.service;
 
+import gg.nurmi.survivaltweaks.storage.SqlStorage;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -26,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
@@ -46,7 +50,8 @@ public final class BackupService {
             "death-markers.yml",
             "new-player-spawns.yml",
             "storage-state.yml",
-            "storage-migration.yml"
+            "storage-migration.yml",
+            ProfileRepository.PENDING_LANGUAGES_FILENAME
     );
     private static final String PENDING_RESTORE_FILE = ".restore-pending.zip";
     private static final int MAX_ARCHIVE_ENTRIES = 100_000;
@@ -102,6 +107,27 @@ public final class BackupService {
             logger.info("Created SurvivalTweaks safety backup " + target.getFileName());
             return Optional.of(target);
         }
+    }
+
+    public void createStartupBackup() throws IOException {
+        try {
+            create("startup");
+        } catch (SqlStorage.CheckpointUnavailableException exception) {
+            logger.warning("Skipped startup backup: " + exception.getMessage());
+        } catch (FileSystemException exception) {
+            Path recovery = dataFolder.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
+            if (!recovery.toString().equals(exception.getFile())) {
+                throw exception;
+            }
+            logger.warning("Skipped startup backup because the language recovery file was unavailable: "
+                    + exception.getMessage());
+        }
+    }
+
+    public synchronized SnapshotLease acquireStartupSnapshotLease() throws IOException {
+        SqlStorage.checkpointBeforeStartupBackup(dataFolder.resolve(databaseFilename));
+        return () -> {
+        };
     }
 
     public synchronized void snapshotLeaseFactory(SnapshotLeaseFactory updatedFactory) {
@@ -277,6 +303,8 @@ public final class BackupService {
                 if (!names.add(name)) {
                     return Verification.invalid("Archive contains duplicate path '" + name + "'");
                 }
+                CRC32 crc = new CRC32();
+                long entryBytes = 0;
                 try (InputStream input = zip.getInputStream(entry)) {
                     int read;
                     while ((read = input.read(buffer)) >= 0) {
@@ -285,10 +313,15 @@ public final class BackupService {
                             continue;
                         }
                         totalBytes += read;
+                        entryBytes += read;
+                        crc.update(buffer, 0, read);
                         if (totalBytes > MAX_ARCHIVE_BYTES) {
                             return Verification.invalid("Archive expands beyond the 512 MiB safety limit");
                         }
                     }
+                }
+                if (entryBytes != entry.getSize() || crc.getValue() != entry.getCrc()) {
+                    return Verification.invalid("Archive entry '" + name + "' failed its size or CRC check");
                 }
             }
         } catch (CancellationException exception) {

@@ -5,7 +5,6 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -18,7 +17,6 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
     private static final long INITIAL_RETRY_MILLIS = 100;
     private static final long MAX_RETRY_MILLIS = 2_000;
-    private static final long BARRIER_POLL_MILLIS = 2;
 
     private final ThrowingConsumer<T> saver;
     private final Logger logger;
@@ -62,15 +60,15 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
         });
     }
 
-    void submit(T snapshot) {
+    synchronized void submit(T snapshot) {
         Objects.requireNonNull(snapshot, "snapshot");
         if (closing) {
             throw new IllegalStateException(description + " writer is closing");
         }
-        T previous = latestRequested.getAndSet(snapshot);
-        if (snapshot.equals(previous)) {
+        if (snapshot.equals(latestRequested.get())) {
             return;
         }
+        latestRequested.set(snapshot);
         Versioned<T> candidate = new Versioned<>(submitted.incrementAndGet(), snapshot);
         pending.accumulateAndGet(candidate, (current, next) ->
                 current == null || current.sequence() < next.sequence() ? next : current);
@@ -88,55 +86,36 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
      * requested. Waiting on the submission sequence instead keeps the guarantee
      * exact without making the caller wait for writes that arrive afterwards.
      */
-    boolean flush(Duration timeout) {
+    synchronized boolean flush(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout");
-        if (closing) {
-            return false;
-        }
         long target = submitted.get();
         long deadline = System.nanoTime() + timeout.toNanos();
-        while (persisted < target) {
+        while (!closing && persisted < target) {
             long remaining = deadline - System.nanoTime();
             if (remaining <= 0) {
                 logger.warning("Could not flush " + description + " before the deadline");
                 return false;
             }
-            Future<?> barrier = executor.submit(() -> {
-            });
             try {
-                barrier.get(remaining, TimeUnit.NANOSECONDS);
-            } catch (Exception exception) {
-                barrier.cancel(true);
-                logger.log(Level.WARNING, "Could not flush " + description + " before the deadline", exception);
-                return false;
-            }
-            // A submission publishes its snapshot before it schedules the drain,
-            // so the barrier can return through an idle executor with the work
-            // still unqueued. Pause rather than spinning on empty barriers.
-            if (persisted < target && !pauseBetweenBarriers()) {
+                TimeUnit.NANOSECONDS.timedWait(this, remaining);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
                 return false;
             }
         }
-        return true;
-    }
-
-    private boolean pauseBetweenBarriers() {
-        try {
-            Thread.sleep(BARRIER_POLL_MILLIS);
-            return true;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
+        return !closing;
     }
 
     @Override
     public void close() {
-        if (closing) {
-            return;
+        synchronized (this) {
+            if (closing) {
+                return;
+            }
+            closing = true;
+            executor.shutdown();
+            notifyAll();
         }
-        closing = true;
-        executor.shutdown();
         try {
             if (!executor.awaitTermination(SHUTDOWN_TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
                 logger.warning("Timed out while waiting for " + description + " to finish saving.");
@@ -157,7 +136,10 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
                 monitor.started(lane, pending.get() == null ? 0 : 1);
                 try {
                     saver.accept(entry.value());
-                    persisted = Math.max(persisted, entry.sequence());
+                    synchronized (this) {
+                        persisted = entry.sequence();
+                        notifyAll();
+                    }
                     failures = 0;
                     monitor.succeeded(lane, pending.get() == null ? 0 : 1);
                 } catch (IOException exception) {

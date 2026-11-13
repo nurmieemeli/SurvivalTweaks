@@ -28,6 +28,7 @@ format:
 # Bukkit holds one server-wide string per command, so these are read from this
 # catalog only; per-player usage text comes from the <command>.usage keys.
 command:
+  no-permission: "<red>You do not have permission to do that.</red>"
   usage:
     afk: "/afk"
     mail: "/mail [inbox|send|block|unblock] [player] [message]"

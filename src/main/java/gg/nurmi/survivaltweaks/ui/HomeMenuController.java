@@ -10,9 +10,11 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -27,6 +29,7 @@ import org.bukkit.Material;
 
 public final class HomeMenuController implements Listener {
 
+    private final Plugin plugin;
     private final Server server;
     private final ProfileRepository profiles;
     private final MessageService messages;
@@ -50,6 +53,7 @@ public final class HomeMenuController implements Listener {
     );
 
     public HomeMenuController(
+            Plugin plugin,
             Server server,
             ProfileRepository profiles,
             MessageService messages,
@@ -59,6 +63,7 @@ public final class HomeMenuController implements Listener {
             TextPromptService prompts,
             ConfirmationDialogService dialogs
     ) {
+        this.plugin = plugin;
         this.server = server;
         this.profiles = profiles;
         this.messages = messages;
@@ -74,6 +79,9 @@ public final class HomeMenuController implements Listener {
     }
 
     public boolean open(Player player, List<Home> homes) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
+            return false;
+        }
         if (!settings.current().homeMenuEnabled()) {
             return false;
         }
@@ -82,6 +90,9 @@ public final class HomeMenuController implements Listener {
     }
 
     public void teleport(Player player, Home home) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
+            return;
+        }
         Optional<Location> destination = home.resolve(server);
         if (destination.isEmpty()) {
             messages.send(
@@ -129,6 +140,14 @@ public final class HomeMenuController implements Listener {
         }
 
         int slot = event.getRawSlot();
+        ClickType click = event.getClick();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, menu, slot, click));
+    }
+
+    private void handleClick(Player player, HomeMenu menu, int slot, ClickType click) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
+            return;
+        }
         if (slot == HomeMenu.CLOSE_SLOT) {
             feedback.play(player, FeedbackService.UI_CLICK);
             back.accept(player);
@@ -149,9 +168,9 @@ public final class HomeMenuController implements Listener {
                 .flatMap(home -> profiles.load(player.getUniqueId()).home(home.name()));
         if (selected.isPresent()) {
             feedback.play(player, FeedbackService.UI_CLICK);
-            if (event.isShiftClick()) {
+            if (click.isShiftClick()) {
                 reorder(player, menu, selected.orElseThrow());
-            } else if (event.isRightClick()) {
+            } else if (click.isRightClick()) {
                 openEditor(player, selected.orElseThrow());
             } else {
                 player.closeInventory();
@@ -182,6 +201,14 @@ public final class HomeMenuController implements Listener {
                 || !player.getUniqueId().equals(editor.ownerId())) {
             return;
         }
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleEditorClick(player, editor, slot));
+    }
+
+    private void handleEditorClick(Player player, HomeCustomizationMenu editor, int slot) {
+        if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
+            return;
+        }
         var profile = profiles.load(player.getUniqueId());
         Optional<Home> selected = profile.home(editor.homeName());
         if (selected.isEmpty()) {
@@ -189,7 +216,6 @@ public final class HomeMenuController implements Listener {
             return;
         }
         Home home = selected.orElseThrow();
-        int slot = event.getRawSlot();
         if (slot == HomeCustomizationMenu.BACK_SLOT) {
             open(player, profile.homes());
             return;
@@ -221,6 +247,9 @@ public final class HomeMenuController implements Listener {
             return;
         }
         if (slot == HomeCustomizationMenu.UPDATE_LOCATION_SLOT) {
+            if (!messages.requirePermission(player, "survivaltweaks.command.sethome")) {
+                return;
+            }
             Home updated = home.withLocation(player.getLocation());
             update(profile, updated);
             messages.send(player, "ui.home-editor.location-updated");
@@ -230,6 +259,9 @@ public final class HomeMenuController implements Listener {
         }
         if (slot == HomeCustomizationMenu.RENAME_SLOT) {
             prompts.request(player, "ui.home-editor.rename-prompt", (responding, text) -> {
+                if (!messages.requirePermission(responding, "survivaltweaks.command.home")) {
+                    return;
+                }
                 String updatedName = text.strip();
                 if (updatedName.isBlank() || updatedName.length() > 16) {
                     messages.send(responding, "ui.home-editor.invalid-name");
@@ -252,6 +284,9 @@ public final class HomeMenuController implements Listener {
         }
         if (slot == HomeCustomizationMenu.DESCRIPTION_SLOT) {
             prompts.request(player, "ui.home-editor.description-prompt", (responding, text) -> {
+                if (!messages.requirePermission(responding, "survivaltweaks.command.home")) {
+                    return;
+                }
                 if (text.length() > 80) {
                     messages.send(responding, "ui.text-prompt.too-long");
                     return;
@@ -271,7 +306,13 @@ public final class HomeMenuController implements Listener {
             return;
         }
         if (slot == HomeCustomizationMenu.DELETE_SLOT) {
+            if (!messages.requirePermission(player, "survivaltweaks.command.deletehome")) {
+                return;
+            }
             Runnable delete = () -> {
+                if (!messages.requirePermission(player, "survivaltweaks.command.deletehome")) {
+                    return;
+                }
                 var current = profiles.load(player.getUniqueId());
                 if (current.removeHome(home.name())) {
                     profiles.save(current);

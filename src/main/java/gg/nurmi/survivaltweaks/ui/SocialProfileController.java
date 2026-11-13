@@ -85,6 +85,9 @@ public final class SocialProfileController implements Listener, CommandExecutor,
     }
 
     public void open(Player viewer, OfflinePlayer target) {
+        if (!messages.requirePermission(viewer, "survivaltweaks.command.profile")) {
+            return;
+        }
         if (!settings.current().playerProfilesEnabled()) {
             messages.send(viewer, "profile.disabled");
             return;
@@ -96,6 +99,9 @@ public final class SocialProfileController implements Listener, CommandExecutor,
         profiles.loadAsync(target.getUniqueId()).thenAccept(targetProfile -> {
             server.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
+                if (!messages.requirePermission(viewer, "survivaltweaks.command.profile")) {
+                    return;
+                }
                 
                 boolean own = viewer.getUniqueId().equals(target.getUniqueId());
                 if (!own
@@ -275,19 +281,27 @@ public final class SocialProfileController implements Listener, CommandExecutor,
                 || !viewer.getUniqueId().equals(holder.viewerId())) {
             return;
         }
-        if (event.getRawSlot() == BACK_SLOT) {
+        int slot = event.getRawSlot();
+        SurvivalTweaksMenu.afterClick(plugin, event, viewer, () -> handleClick(viewer, holder, slot));
+    }
+
+    private void handleClick(Player viewer, ProfileHolder holder, int slot) {
+        if (!messages.requirePermission(viewer, "survivaltweaks.command.profile")) {
+            return;
+        }
+        if (slot == BACK_SLOT) {
             back.accept(viewer);
-        } else if (event.getRawSlot() == STATISTICS_SLOT) {
+        } else if (slot == STATISTICS_SLOT) {
             OfflinePlayer target = server.getOfflinePlayer(holder.targetId());
             statistics.open(
                     viewer,
                     target,
                     player -> open(player, server.getOfflinePlayer(holder.targetId()))
             );
-        } else if (event.getRawSlot() == MAIL_SLOT
+        } else if (slot == MAIL_SLOT
                 && !viewer.getUniqueId().equals(holder.targetId())) {
             mailbox.compose(viewer, server.getOfflinePlayer(holder.targetId()));
-        } else if (event.getRawSlot() == TELEPORT_SLOT) {
+        } else if (slot == TELEPORT_SLOT) {
             Player target = server.getPlayer(holder.targetId());
             if (target != null && viewer.canSee(target)) {
                 viewer.closeInventory();
