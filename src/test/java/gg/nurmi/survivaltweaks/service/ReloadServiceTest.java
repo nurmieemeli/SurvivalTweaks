@@ -2,6 +2,8 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import org.bukkit.Server;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -26,7 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -149,6 +153,52 @@ class ReloadServiceTest {
         assertEquals(2, callbackCalls.get());
         assertSame(initialConfig, rolledBackConfig.get());
         verify(plugin, never()).reloadConfig();
+    }
+
+    @Test
+    void configSetPublishesOnlyAValidatedEditAndRejectsConcurrentEdits() throws Exception {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        JavaPlugin plugin = plugin();
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        AtomicReference<Runnable> prepare = new AtomicReference<>();
+        AtomicReference<Runnable> apply = new AtomicReference<>();
+        when(scheduler.runTaskAsynchronously(eq(plugin), any(Runnable.class))).thenAnswer(call -> {
+            prepare.set(call.getArgument(1));
+            return null;
+        });
+        when(scheduler.runTask(eq(plugin), any(Runnable.class))).thenAnswer(call -> {
+            apply.set(call.getArgument(1));
+            return null;
+        });
+        YamlConfiguration initial = bundledConfig();
+        when(plugin.getConfig()).thenReturn(initial);
+        SettingsService settings = new SettingsService(PluginSettings.validate(initial));
+        ReloadService reloads = new ReloadService(plugin, settings,
+                new MessageService(plugin, initial, plugin.getLogger()),
+                new FeedbackService(initial, plugin.getLogger()), updated -> {});
+        Path config = dataFolder.resolve("config.yml");
+        String original = Files.readString(config);
+        AtomicReference<ReloadService.Result> result = new AtomicReference<>();
+
+        assertTrue(reloads.setConfigAsync("home.max-amount", -1, result::set));
+        assertFalse(reloads.setConfigAsync("home.max-amount", 8, result::set));
+        prepare.get().run();
+        apply.get().run();
+        assertFalse(result.get().successful());
+        assertEquals(original, Files.readString(config));
+
+        assertTrue(reloads.setConfigAsync("home.max-amount", 8, result::set));
+        prepare.get().run();
+        assertEquals(original, Files.readString(config));
+        apply.get().run();
+        assertTrue(result.get().successful());
+        assertEquals(8, settings.current().maxHomes());
+        assertEquals(8, YamlConfiguration.loadConfiguration(config.toFile()).getInt("home.max-amount"));
     }
 
     private JavaPlugin plugin() {

@@ -21,17 +21,14 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Queue;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.Map;
 
 public class TreeFellerService implements Listener, AutoCloseable {
 
@@ -97,7 +94,7 @@ public class TreeFellerService implements Listener, AutoCloseable {
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         Block block = event.getBlock();
-        
+
         if (!isLog(block.getType())) {
             return;
         }
@@ -126,65 +123,39 @@ public class TreeFellerService implements Listener, AutoCloseable {
         }
 
         PluginSettings currentSettings = settings.current();
-        fellTree(block, player, currentSettings);
+        UUID playerId = player.getUniqueId();
+        jobs.put(playerId, new FellingJob(block, currentSettings.treeFellerMaxBlocks()));
+        jobOrder.addLast(playerId);
+        scheduleJobs();
     }
 
-    private void fellTree(Block startBlock, Player player, PluginSettings settings) {
-        Material logType = startBlock.getType();
-        Queue<Block> queue = new LinkedList<>();
-        Set<Block> visited = new HashSet<>();
-        List<Block> logsToBreak = new ArrayList<>();
-
-        queue.add(startBlock);
-        visited.add(startBlock);
-
-        boolean hasNaturalLeaves = false;
-
-        while (!queue.isEmpty() && logsToBreak.size() < settings.treeFellerMaxBlocks()) {
-            Block current = queue.poll();
-            logsToBreak.add(current);
-
-            // Search 3x3x3 around
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dz = -1; dz <= 1; dz++) {
-                        if (dx == 0 && dy == 0 && dz == 0) continue;
-
-                        Block neighbor = current.getRelative(dx, dy, dz);
-                        if (visited.contains(neighbor)) continue;
-
-                        if (neighbor.getType() == logType) {
-                            visited.add(neighbor);
-                            if (!isPlayerPlaced(neighbor)) {
-                                queue.add(neighbor);
-                            }
-                        } else if (Tag.LEAVES.isTagged(neighbor.getType())) {
-                            BlockData data = neighbor.getBlockData();
-                            if (data instanceof Leaves leaves) {
-                                if (!leaves.isPersistent()) {
-                                    hasNaturalLeaves = true;
-                                }
-                            }
+    private void discover(FellingJob job) {
+        Block current = job.search.removeFirst();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    Block neighbor = current.getRelative(dx, dy, dz);
+                    if (!neighbor.getWorld().isChunkLoaded(neighbor.getX() >> 4, neighbor.getZ() >> 4)
+                            || !job.visited.add(neighbor)) {
+                        continue;
+                    }
+                    if (neighbor.getType() == job.logType && !isPlayerPlaced(neighbor)) {
+                        if (job.logs.size() < job.maxLogs - 1) {
+                            job.search.addLast(neighbor);
+                            job.logs.add(neighbor);
+                        }
+                    } else if (Tag.LEAVES.isTagged(neighbor.getType())) {
+                        BlockData data = neighbor.getBlockData();
+                        if (data instanceof Leaves leaves && !leaves.isPersistent()) {
+                            job.hasNaturalLeaves = true;
                         }
                     }
                 }
             }
         }
-
-        if (!hasNaturalLeaves) {
-            return;
-        }
-
-        logsToBreak.sort((b1, b2) -> Integer.compare(b2.getY(), b1.getY()));
-
-        logsToBreak.remove(startBlock);
-        if (logsToBreak.isEmpty()) {
-            return;
-        }
-        UUID playerId = player.getUniqueId();
-        jobs.put(playerId, new FellingJob(new ArrayDeque<>(logsToBreak)));
-        jobOrder.addLast(playerId);
-        scheduleJobs();
     }
 
     private void processJobs() {
@@ -196,7 +167,9 @@ public class TreeFellerService implements Listener, AutoCloseable {
             UUID playerId = jobOrder.removeFirst();
             FellingJob job = jobs.get(playerId);
             Player player = plugin.getServer().getPlayer(playerId);
-            if (job == null || player == null || !player.isOnline()) {
+            if (job == null || player == null || !player.isOnline()
+                    || !player.getWorld().equals(job.origin.getWorld())
+                    || !enchantments.has(player.getInventory().getItemInMainHand(), CustomEnchantment.FELLING)) {
                 jobs.remove(playerId);
                 continue;
             }
@@ -206,16 +179,31 @@ public class TreeFellerService implements Listener, AutoCloseable {
                 scheduleJobs();
                 return;
             }
-            Block log = job.logs().poll();
-            fellingPlayers.add(playerId);
-            try {
-                if (player.breakBlock(log)) {
-                    job.broken++;
+            if (!job.search.isEmpty()) {
+                discover(job);
+                if (job.search.isEmpty()) {
+                    if (!job.hasNaturalLeaves || job.logs.isEmpty()) {
+                        jobs.remove(playerId);
+                        continue;
+                    }
+                    job.logs.sort((left, right) -> Integer.compare(left.getY(), right.getY()));
                 }
-            } finally {
-                fellingPlayers.remove(playerId);
+                jobOrder.addLast(playerId);
+                continue;
             }
-            if (!job.logs().isEmpty()) {
+            Block log = job.logs.removeLast();
+            if (log.getWorld().isChunkLoaded(log.getX() >> 4, log.getZ() >> 4)
+                    && log.getType() == job.logType && !isPlayerPlaced(log)) {
+                fellingPlayers.add(playerId);
+                try {
+                    if (player.breakBlock(log)) {
+                        job.broken++;
+                    }
+                } finally {
+                    fellingPlayers.remove(playerId);
+                }
+            }
+            if (!job.logs.isEmpty()) {
                 jobOrder.addLast(playerId);
                 continue;
             }
@@ -257,7 +245,7 @@ public class TreeFellerService implements Listener, AutoCloseable {
     }
 
     public Workload workload() {
-        int blocks = jobs.values().stream().mapToInt(job -> job.logs().size()).sum();
+        int blocks = jobs.values().stream().mapToInt(job -> job.logs.size()).sum();
         return new Workload(jobs.size(), blocks);
     }
 
@@ -337,15 +325,21 @@ public class TreeFellerService implements Listener, AutoCloseable {
     }
 
     private static final class FellingJob {
-        private final Queue<Block> logs;
+        private final Block origin;
+        private final Material logType;
+        private final int maxLogs;
+        private final ArrayDeque<Block> search = new ArrayDeque<>();
+        private final Set<Block> visited = new HashSet<>();
+        private final ArrayList<Block> logs = new ArrayList<>();
+        private boolean hasNaturalLeaves;
         private int broken;
 
-        private FellingJob(Queue<Block> logs) {
-            this.logs = logs;
-        }
-
-        private Queue<Block> logs() {
-            return logs;
+        private FellingJob(Block origin, int maxLogs) {
+            this.origin = origin;
+            this.logType = origin.getType();
+            this.maxLogs = maxLogs;
+            search.add(origin);
+            visited.add(origin);
         }
     }
 

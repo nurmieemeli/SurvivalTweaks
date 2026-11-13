@@ -200,8 +200,16 @@ public final class StorageManager implements AutoCloseable {
             Instant now,
             int mailPurgeInactiveDays
     ) throws IOException {
+        return maintain(now, mailPurgeInactiveDays, () -> {});
+    }
+
+    public synchronized MaintenanceResult maintain(
+            Instant now, int mailPurgeInactiveDays, MaintenancePreparation preparation
+    ) throws IOException {
         Objects.requireNonNull(now, "now");
         ExportResult safetyExport = exportPortable("maintenance");
+        preparation.prepare();
+        flushPendingWrites();
         SqlStorage.MaintenanceResult result = storage.maintain(now, mailPurgeInactiveDays);
         SqlStorage.Verification verification = storage.verify();
         if (!verification.healthy()) {
@@ -658,5 +666,10 @@ public final class StorageManager implements AutoCloseable {
     public interface PersistenceBarrier {
 
         void flush(Duration timeout) throws IOException;
+    }
+
+    @FunctionalInterface
+    public interface MaintenancePreparation {
+        void prepare() throws IOException;
     }
 }

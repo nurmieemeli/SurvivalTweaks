@@ -228,6 +228,35 @@ class ProfileRepositoryTest {
     }
 
     @Test
+    void malformedRecoveryPreservesOriginalAndReplaysOtherEntries() throws Exception {
+        Logger logger = Logger.getAnonymousLogger();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        Path recovery = directory.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
+        String damaged = first + "=FINNISH\n" + "broken=\\uZZZZ\n"
+                + "invalid-uuid=FINNISH\n" + second + "=ENGLISH\n";
+        Files.writeString(recovery, damaged);
+        ProfileStore store = new ProfileStore(directory.resolve("profiles"), logger);
+
+        try (ProfileRepository repository = new ProfileRepository(store, logger, new PersistenceMonitor(), recovery)) {
+            repository.retryPendingLanguages();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (Files.exists(recovery) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertFalse(Files.exists(recovery));
+            assertTrue(repository.languageRecoveryReady());
+            assertEquals(LanguagePreference.FINNISH, store.load(first).preferences().language());
+            assertEquals(LanguagePreference.ENGLISH, store.load(second).preferences().language());
+            try (var files = Files.list(directory)) {
+                Path original = files.filter(path -> path.getFileName().toString().startsWith("pending-languages-invalid-"))
+                        .findFirst().orElseThrow();
+                assertEquals(damaged, Files.readString(original));
+            }
+        }
+    }
+
+    @Test
     void loadingAProfileRepairsItsGlobalTrustIndex() {
         UUID ownerId = UUID.randomUUID();
         UUID trustedId = UUID.randomUUID();

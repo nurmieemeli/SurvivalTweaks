@@ -10,8 +10,9 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
@@ -20,10 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 class NotificationServiceTest {
 
@@ -31,27 +28,33 @@ class NotificationServiceTest {
     Path directory;
 
     @Test
-    void loadsAnOfflineRecipientAsynchronouslyAndUpdatesOnTheProvidedExecutor() throws Exception {
-        ProfileRepository profiles = mock(ProfileRepository.class);
-        Profile recipient = new Profile(UUID.randomUUID());
-        CompletableFuture<Profile> loaded = new CompletableFuture<>();
-        when(profiles.loadAsync(recipient.uniqueId())).thenReturn(loaded);
-        var mainThread = new LinkedBlockingQueue<Runnable>();
-        NotificationService notifications = new NotificationService(profiles, Clock.systemUTC());
+    void queuedNotificationUsesTheCurrentProfileAfterEviction() throws Exception {
+        Logger logger = Logger.getAnonymousLogger();
+        ProfileStore store = new ProfileStore(directory, logger);
+        UUID recipientId = UUID.randomUUID();
+        try (ProfileRepository profiles = new ProfileRepository(store, logger)) {
+            Profile detached = profiles.load(recipientId);
+            var mainThread = new LinkedBlockingQueue<Runnable>();
+            NotificationService notifications = new NotificationService(profiles, Clock.systemUTC());
 
-        var notified = notifications.notifyAsync(recipient.uniqueId(), NotificationType.LOCK_ACCESS_DENIED,
-                "Alex", "Chest", mainThread::add);
-        assertFalse(notified.isDone());
-        loaded.complete(recipient);
-        Runnable update = mainThread.poll(1, TimeUnit.SECONDS);
-        assertNotNull(update);
-        assertTrue(recipient.notifications().isEmpty());
-        update.run();
+            var notified = notifications.notifyAsync(recipientId, NotificationType.LOCK_ACCESS_DENIED,
+                    "Alex", "Chest", mainThread::add);
+            Runnable update = mainThread.poll(5, TimeUnit.SECONDS);
+            assertNotNull(update);
+            assertTrue(detached.notifications().isEmpty());
+            profiles.evictOffline(List.of());
+            Profile current = profiles.load(recipientId);
+            current.lastKnownName("NewName");
+            profiles.save(current);
+            update.run();
 
-        assertTrue(notified.get(1, TimeUnit.SECONDS));
-        assertEquals(1, recipient.notifications().size());
-        verify(profiles).save(recipient);
-        verify(profiles, never()).load(recipient.uniqueId());
+            assertTrue(notified.get(5, TimeUnit.SECONDS));
+            assertTrue(profiles.flush(Duration.ofSeconds(5)));
+            assertTrue(detached.notifications().isEmpty());
+            assertEquals(1, current.notifications().size());
+            assertEquals("NewName", store.load(recipientId).lastKnownName());
+            assertEquals(1, store.load(recipientId).notifications().size());
+        }
     }
 
     @Test

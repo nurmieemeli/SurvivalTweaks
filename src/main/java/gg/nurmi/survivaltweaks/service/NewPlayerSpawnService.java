@@ -215,7 +215,9 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     private Location findSafeRespawnLocation(World world, NewPlayerSpawnLocation spawnLoc) {
         Location base = spawnLoc.toLocation(world);
-        if (isSafeSpawnLocation(world, base.getBlockX(), base.getBlockY(), base.getBlockZ())) {
+        Location borderProbe = base.clone();
+        if (world.isChunkLoaded(base.getBlockX() >> 4, base.getBlockZ() >> 4)
+                && isSafeExact(world, base.getBlockX(), base.getBlockY(), base.getBlockZ(), borderProbe)) {
             return base;
         }
         for (int r = 1; r <= 16; r++) {
@@ -230,7 +232,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                         continue;
                     }
                     int y = world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
-                    if (isSafeSpawnLocation(world, x, y + 1, z)) {
+                    if (isSafeExact(world, x, y + 1, z, borderProbe)) {
                         return new Location(
                                 world,
                                 x + 0.5,
@@ -243,14 +245,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 }
             }
         }
-        return base;
-    }
-
-    private boolean isSafeSpawnLocation(World world, int x, int y, int z) {
-        Block feet = world.getBlockAt(x, y, z);
-        Block head = world.getBlockAt(x, y + 1, z);
-        Block ground = world.getBlockAt(x, y - 1, z);
-        return feet.isPassable() && head.isPassable() && ground.getType().isSolid() && !DANGEROUS_GROUND.contains(ground.getType());
+        return null;
     }
 
     public void reconfigure() {

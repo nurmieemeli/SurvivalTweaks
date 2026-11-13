@@ -45,6 +45,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 public final class SurvivalTweaksCommand implements CommandExecutor, TabCompleter {
@@ -488,7 +492,17 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         }
         String action = arguments[1];
         String path = arguments[2];
+        if (path.isBlank() || path.startsWith(".") || path.endsWith(".") || path.contains("..")) {
+            messages.send(sender, "admin.usage");
+            return true;
+        }
+        boolean storagePath = path.equals("storage") || path.startsWith("storage.");
+        boolean password = path.equals("storage.remote.password");
         if (action.equalsIgnoreCase("get")) {
+            if (password || (storagePath && !sender.hasPermission(STORAGE_PERMISSION))) {
+                messages.send(sender, "admin.no-permission");
+                return true;
+            }
             Object value = plugin.getConfig().get(path);
             String display = value == null ? "null" : value.toString();
             messages.send(sender, "admin.config.get", 
@@ -496,6 +510,10 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     Placeholder.unparsed("value", display));
             return true;
         } else if (action.equalsIgnoreCase("set")) {
+            if (storagePath && !sender.hasPermission(STORAGE_PERMISSION)) {
+                messages.send(sender, "admin.no-permission");
+                return true;
+            }
             if (arguments.length < 4) {
                 messages.send(sender, "admin.usage");
                 return true;
@@ -515,26 +533,17 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     }
                 }
             }
-            boolean previouslySet = plugin.getConfig().contains(path, true);
-            Object previousValue = plugin.getConfig().get(path);
-            plugin.getConfig().set(path, parsedValue);
-            plugin.saveConfig();
-
-            reloads.reloadAsync(result -> {
+            if (!reloads.setConfigAsync(path, password ? valueStr : parsedValue, result -> {
                 if (result.successful()) {
                     messages.send(sender, "admin.config.set-success",
                             Placeholder.unparsed("path", path),
-                            Placeholder.unparsed("value", valueStr));
+                            Placeholder.unparsed("value", password ? "********" : valueStr));
                     return;
                 }
-                // A rejected reload leaves the running server on its previous
-                // settings, but the value is already on disk. Take it back out,
-                // or config.yml would keep a value this build refuses to load
-                // and the plugin would fail to enable at the next restart.
-                plugin.getConfig().set(path, previouslySet ? previousValue : null);
-                plugin.saveConfig();
                 messages.send(sender, "admin.reload-failed", Placeholder.unparsed("reason", result.reason()));
-            });
+            })) {
+                messages.send(sender, "admin.reload-already-running");
+            }
             return true;
         }
         return true;
@@ -804,8 +813,28 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             Instant maintenanceAt = Instant.now();
             runStorageOperation(
                     sender,
-                    () -> persistence.prepareMaintenance(maintenanceAt, purgeDays),
-                    () -> storage.maintain(maintenanceAt, purgeDays),
+                    () -> storage.maintain(maintenanceAt, purgeDays, () -> {
+                        Future<Void> preparation = plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
+                            if (!maintenance.status().maintenanceMode()
+                                    || !plugin.getServer().getOnlinePlayers().isEmpty()) {
+                                throw new IllegalStateException("Maintenance requires maintenance mode and an empty server");
+                            }
+                            persistence.prepareMaintenance(maintenanceAt, purgeDays);
+                            return null;
+                        });
+                        try {
+                            preparation.get(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException exception) {
+                            preparation.cancel(false);
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Maintenance preparation was interrupted", exception);
+                        } catch (TimeoutException exception) {
+                            preparation.cancel(false);
+                            throw new IOException("Timed out preparing cached data for maintenance", exception);
+                        } catch (ExecutionException exception) {
+                            throw new IOException("Could not prepare cached data for maintenance", exception.getCause());
+                        }
+                    }),
                     result -> {
                         messages.send(
                                 sender,
@@ -931,35 +960,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             CheckedSupplier<T> operation,
             Consumer<T> completion
     ) {
-        runStorageOperation(sender, () -> {
-        }, operation, completion);
-    }
-
-    private <T> void runStorageOperation(
-            CommandSender sender,
-            Runnable preparation,
-            CheckedSupplier<T> operation,
-            Consumer<T> completion
-    ) {
         if (!storageOperation.compareAndSet(false, true)) {
             messages.send(sender, "admin.storage.busy");
-            return;
-        }
-        try {
-            preparation.run();
-        } catch (RuntimeException exception) {
-            storageOperation.set(false);
-            messages.send(
-                    sender,
-                    "admin.storage.failed",
-                    Placeholder.unparsed(
-                            "reason",
-                            Objects.requireNonNullElse(
-                                    exception.getMessage(),
-                                    exception.getClass().getSimpleName()
-                            )
-                    )
-            );
             return;
         }
         messages.send(sender, "admin.storage.working");

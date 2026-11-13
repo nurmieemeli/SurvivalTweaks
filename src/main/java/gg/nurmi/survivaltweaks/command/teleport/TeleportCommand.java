@@ -78,7 +78,7 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
         }
 
         Player target = server.getPlayer(arguments[0]);
-        if (target == null) {
+        if (target == null || !player.canSee(target)) {
             messages.send(player, "teleport.player-not-found", Placeholder.unparsed("player", arguments[0]));
             return true;
         }
@@ -96,7 +96,8 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
                     player,
                     () -> {
                         Player currentTarget = server.getPlayer(target.getUniqueId());
-                        return currentTarget == null ? null : currentTarget.getLocation();
+                        return currentTarget == null || !player.canSee(currentTarget)
+                                ? null : currentTarget.getLocation();
                     },
                     messages.component(
                             player,
@@ -157,6 +158,7 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
         String prefix = arguments[0].toLowerCase(Locale.ROOT);
         return server.getOnlinePlayers().stream()
                 .filter(candidate -> !candidate.getUniqueId().equals(player.getUniqueId()))
+                .filter(player::canSee)
                 .map(Player::getName)
                 .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
                 .sorted()

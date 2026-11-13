@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
@@ -54,6 +55,8 @@ public final class BackupService {
             ProfileRepository.PENDING_LANGUAGES_FILENAME
     );
     private static final String PENDING_RESTORE_FILE = ".restore-pending.zip";
+    private static final String RESTORE_ROLLBACK = ".restore-rollback";
+    private static final String ABSENT_PATHS = ".absent-paths";
     private static final int MAX_ARCHIVE_ENTRIES = 100_000;
     private static final long MAX_ARCHIVE_BYTES = 512L * 1024L * 1024L;
 
@@ -112,7 +115,7 @@ public final class BackupService {
     public void createStartupBackup() throws IOException {
         try {
             create("startup");
-        } catch (SqlStorage.CheckpointUnavailableException exception) {
+        } catch (SqlStorage.CheckpointUnavailableException | ArchiveLimitException exception) {
             logger.warning("Skipped startup backup: " + exception.getMessage());
         } catch (FileSystemException exception) {
             Path recovery = dataFolder.resolve(ProfileRepository.PENDING_LANGUAGES_FILENAME);
@@ -207,6 +210,7 @@ public final class BackupService {
     }
 
     public synchronized RestoreResult applyPendingRestore() throws IOException {
+        recoverInterruptedRestore();
         Path pending = pendingRestorePath();
         if (Files.notExists(pending)) {
             return RestoreResult.NONE;
@@ -216,44 +220,39 @@ public final class BackupService {
             throw new IOException("Pending backup verification failed: " + verification.problem());
         }
 
+        List<String> managedPaths = managedPaths(pending);
         Path staging = Files.createTempDirectory(dataFolder, ".restore-stage-");
-        Path rollback = Files.createTempDirectory(dataFolder, ".restore-rollback-");
-        List<String> managedPaths = new ArrayList<>(ROOT_FILES);
-        for (String database : databaseEntries(pending)) {
-            managedPaths.add(database);
-            // A SQLite sidecar only belongs to the exact database file it was
-            // written for. Backups hold a checkpointed database and no sidecars,
-            // so any left over from an unclean shutdown must move aside with the
-            // database they came from; pairing one with a restored file risks
-            // corruption or replaying transactions the restore was meant to undo.
-            managedPaths.addAll(databaseSidecars(database));
-        }
-        managedPaths.add("userdata");
-        List<String> touchedPaths = new ArrayList<>();
-        boolean preserveRollback = false;
+        Path rollback = dataFolder.resolve(RESTORE_ROLLBACK);
         try {
             extractManagedArchive(pending, staging);
+            List<String> absent = managedPaths.stream()
+                    .filter(path -> Files.notExists(dataFolder.resolve(path), LinkOption.NOFOLLOW_LINKS))
+                    .toList();
+            Path prepared = Files.createTempDirectory(dataFolder, ".restore-prepare-");
+            try {
+                Files.write(prepared.resolve(ABSENT_PATHS), absent);
+                movePath(prepared, rollback);
+            } finally {
+                cleanupTemporary(prepared);
+            }
             for (String managed : managedPaths) {
                 Path current = dataFolder.resolve(managed);
                 Path previous = rollback.resolve(managed);
-                if (Files.exists(current)) {
+                if (!absent.contains(managed)) {
                     Files.createDirectories(previous.getParent());
                     movePath(current, previous);
-                    touchedPaths.add(managed);
                 }
                 Path restored = staging.resolve(managed);
                 if (Files.exists(restored)) {
                     Files.createDirectories(current.getParent());
                     movePath(restored, current);
-                    if (!touchedPaths.contains(managed)) {
-                        touchedPaths.add(managed);
-                    }
                 }
             }
+            Files.delete(pending);
         } catch (Exception restoreFailure) {
-            IOException rollbackFailure = rollback(touchedPaths, rollback);
-            if (rollbackFailure != null) {
-                preserveRollback = true;
+            try {
+                recoverInterruptedRestore();
+            } catch (IOException rollbackFailure) {
                 restoreFailure.addSuppressed(rollbackFailure);
             }
             if (restoreFailure instanceof IOException ioException) {
@@ -262,17 +261,54 @@ public final class BackupService {
             throw new IOException("Could not apply pending backup restore", restoreFailure);
         } finally {
             cleanupTemporary(staging);
-            if (preserveRollback) {
-                logger.severe("Preserved incomplete restore rollback data at " + rollback);
-            } else {
-                cleanupTemporary(rollback);
-            }
         }
 
-        Files.delete(pending);
+        discardRollback(rollback);
         logger.warning("Applied staged backup restore containing "
                 + verification.entries() + " files; normal startup will now continue.");
         return RestoreResult.APPLIED;
+    }
+
+    public synchronized void recoverInterruptedRestore() throws IOException {
+        Path rollback = dataFolder.resolve(RESTORE_ROLLBACK);
+        if (Files.notExists(rollback)) {
+            return;
+        }
+        Path pending = pendingRestorePath();
+        if (!Files.notExists(pending)) {
+            Set<String> absent = Set.copyOf(Files.readAllLines(rollback.resolve(ABSENT_PATHS)));
+            for (String managed : managedPaths(pending)) {
+                Path previous = rollback.resolve(managed);
+                Path current = dataFolder.resolve(managed);
+                if (!Files.notExists(previous, LinkOption.NOFOLLOW_LINKS)) {
+                    deleteRecursively(current);
+                    movePath(previous, current);
+                } else if (absent.contains(managed)) {
+                    deleteRecursively(current);
+                }
+            }
+            logger.warning("Rolled back an interrupted backup restore. The staged archive is still pending.");
+        }
+        discardRollback(rollback);
+    }
+
+    private void discardRollback(Path rollback) throws IOException {
+        Path cleanup = Files.createTempDirectory(dataFolder, ".restore-cleanup-");
+        try {
+            movePath(rollback, cleanup.resolve("rollback"));
+        } finally {
+            cleanupTemporary(cleanup);
+        }
+    }
+
+    private List<String> managedPaths(Path archive) throws IOException {
+        List<String> paths = new ArrayList<>(ROOT_FILES);
+        for (String database : databaseEntries(archive)) {
+            paths.add(database);
+            paths.addAll(databaseSidecars(database));
+        }
+        paths.add("userdata");
+        return paths;
     }
 
     static Verification verifyArchive(Path archive) {
@@ -372,11 +408,18 @@ public final class BackupService {
     }
 
     private void writeArchive(Path archive, List<Path> sources) throws IOException {
+        if (sources.size() > MAX_ARCHIVE_ENTRIES) {
+            throw new ArchiveLimitException("Archive contains too many files");
+        }
+        long totalBytes = 0;
         try (OutputStream output = Files.newOutputStream(archive);
              ZipOutputStream zip = new ZipOutputStream(output)) {
             byte[] buffer = new byte[16_384];
             for (Path source : sources) {
                 String entryName = dataFolder.relativize(source).toString().replace('\\', '/');
+                if (!validManagedEntry(entryName)) {
+                    throw new IOException("Archive contains unsupported path '" + entryName + "'");
+                }
                 ZipEntry entry = new ZipEntry(entryName);
                 entry.setTime(Files.getLastModifiedTime(source).toMillis());
                 zip.putNextEntry(entry);
@@ -384,6 +427,10 @@ public final class BackupService {
                     int read;
                     while ((read = input.read(buffer)) >= 0) {
                         if (read > 0) {
+                            totalBytes += read;
+                            if (totalBytes > MAX_ARCHIVE_BYTES) {
+                                throw new ArchiveLimitException("Archive expands beyond the 512 MiB safety limit");
+                            }
                             zip.write(buffer, 0, read);
                         }
                     }
@@ -500,27 +547,6 @@ public final class BackupService {
                 }
             }
         }
-    }
-
-    private IOException rollback(List<String> managedPaths, Path rollback) {
-        IOException failure = null;
-        for (String managed : managedPaths) {
-            Path current = dataFolder.resolve(managed);
-            Path previous = rollback.resolve(managed);
-            try {
-                deleteRecursively(current);
-                if (Files.exists(previous)) {
-                    Files.createDirectories(current.getParent());
-                    movePath(previous, current);
-                }
-            } catch (IOException exception) {
-                if (failure == null) {
-                    failure = new IOException("Could not roll back a failed restore");
-                }
-                failure.addSuppressed(exception);
-            }
-        }
-        return failure;
     }
 
     private void movePath(Path source, Path target) throws IOException {
@@ -682,6 +708,12 @@ public final class BackupService {
 
         @Override
         void close();
+    }
+
+    private static final class ArchiveLimitException extends IOException {
+        private ArchiveLimitException(String message) {
+            super(message);
+        }
     }
 
     private static final class ArchiveInspectionException extends RuntimeException {

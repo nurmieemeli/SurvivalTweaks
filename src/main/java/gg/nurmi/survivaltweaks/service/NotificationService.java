@@ -33,7 +33,8 @@ public final class NotificationService {
             UUID playerId, NotificationType type, String actor, String detail, Executor mainThread
     ) {
         return profiles.loadAsync(playerId).thenApplyAsync(
-                profile -> notify(profile, type, null, actor, detail, true), mainThread
+                profile -> profiles.withCurrent(profile, current -> notify(current, type, null, actor, detail, true)),
+                mainThread
         );
     }
 

@@ -113,6 +113,38 @@ class BackupServiceTest {
     }
 
     @Test
+    void rollsBackPartialRestoreBeforeTakingAnotherSafetyBackup() throws IOException {
+        Path config = dataFolder.resolve("config.yml");
+        Path locks = dataFolder.resolve("locked-containers.yml");
+        Files.writeString(config, "snapshot-config");
+        Files.writeString(locks, "snapshot-locks");
+        BackupService backups = service(10);
+        Path archive = backups.create("manual").orElseThrow();
+        backups.stageRestore(archive.getFileName().toString());
+
+        Path rollback = Files.createDirectory(dataFolder.resolve(".restore-rollback"));
+        Files.writeString(rollback.resolve(".absent-paths"), "locked-containers.yml\n");
+        Files.writeString(rollback.resolve("config.yml"), "original-config");
+        Files.writeString(dataFolder.resolve("messages_en.yml"), "original-messages");
+
+        backups.recoverInterruptedRestore();
+        assertEquals("original-config", Files.readString(config));
+        assertEquals("original-messages", Files.readString(dataFolder.resolve("messages_en.yml")));
+        assertFalse(Files.exists(locks));
+        assertFalse(Files.exists(rollback));
+        assertTrue(backups.hasPendingRestore());
+
+        Path safety = backups.create("pre-restore").orElseThrow();
+        try (ZipFile zip = new ZipFile(safety.toFile())) {
+            assertEquals("original-config", new String(zip.getInputStream(zip.getEntry("config.yml")).readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+        }
+        assertEquals(BackupService.RestoreResult.APPLIED, backups.applyPendingRestore());
+        assertEquals("snapshot-config", Files.readString(config));
+        assertEquals("snapshot-locks", Files.readString(locks));
+    }
+
+    @Test
     void rejectsAnArchiveWithCorruptedEntryData() throws IOException {
         Path archive = dataFolder.resolve("corrupt.zip");
         byte[] payload = {1, 2, 3};

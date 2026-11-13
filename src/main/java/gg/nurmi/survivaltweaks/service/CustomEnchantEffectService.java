@@ -87,8 +87,11 @@ public final class CustomEnchantEffectService implements Listener {
         this.headFactory = Objects.requireNonNull(headFactory, "headFactory");
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
+        if (event.isCancelled()) {
+            return;
+        }
         Player player = event.getPlayer();
         if (!player.isSneaking() || areaMining.contains(player.getUniqueId())) {
             return;
@@ -98,11 +101,11 @@ public final class CustomEnchantEffectService implements Listener {
         Block origin = event.getBlock();
         Vector direction = player.getEyeLocation().getDirection().clone();
         if (items.has(tool, CustomEnchantment.TUNNELING)) {
-            schedulePlane(player, origin, direction, CustomEnchantment.TUNNELING);
+            schedulePlane(event, direction, CustomEnchantment.TUNNELING);
         } else if (items.has(tool, CustomEnchantment.EXCAVATION)) {
-            schedulePlane(player, origin, direction, CustomEnchantment.EXCAVATION);
+            schedulePlane(event, direction, CustomEnchantment.EXCAVATION);
         } else if (items.has(tool, CustomEnchantment.CULTIVATION) && mature(origin)) {
-            scheduleCultivation(player, origin);
+            scheduleCultivation(event);
         }
     }
 
@@ -171,17 +174,18 @@ public final class CustomEnchantEffectService implements Listener {
     }
 
     private void schedulePlane(
-            Player player,
-            Block origin,
+            BlockBreakEvent event,
             Vector direction,
             CustomEnchantment enchantment
     ) {
+        Player player = event.getPlayer();
+        Block origin = event.getBlock();
         int x = origin.getX();
         int y = origin.getY();
         int z = origin.getZ();
         UUID worldId = origin.getWorld().getUID();
         plugin.getServer().getScheduler().runTask(plugin, () -> {
-            if (!player.isOnline()
+            if (event.isCancelled() || !player.isOnline()
                     || !player.isSneaking()
                     || !player.getWorld().getUID().equals(worldId)) {
                 return;
@@ -246,14 +250,16 @@ public final class CustomEnchantEffectService implements Listener {
                 && !(block.getState(false) instanceof TileState);
     }
 
-    private void scheduleCultivation(Player player, Block origin) {
+    private void scheduleCultivation(BlockBreakEvent event) {
+        Player player = event.getPlayer();
+        Block origin = event.getBlock();
         int x = origin.getX();
         int y = origin.getY();
         int z = origin.getZ();
         Material originType = origin.getType();
         UUID worldId = origin.getWorld().getUID();
         plugin.getServer().getScheduler().runTask(plugin, () -> {
-            if (!player.isOnline()
+            if (event.isCancelled() || !player.isOnline()
                     || !player.isSneaking()
                     || !player.getWorld().getUID().equals(worldId)
                     || !items.has(

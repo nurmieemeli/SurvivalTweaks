@@ -44,7 +44,7 @@ public final class PlayerExperienceService {
     }
 
     public Optional<CompletableFuture<Void>> cycleLanguage(UUID playerId) {
-        if (!profiles.languageRecoveryReady()) {
+        if (!profiles.languageRecoveryReady() || profiles.languageRecoveryPending(playerId)) {
             return Optional.empty();
         }
         var profile = profiles.load(playerId);

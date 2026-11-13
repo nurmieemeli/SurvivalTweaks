@@ -16,7 +16,9 @@ import org.bukkit.event.block.LeavesDecayEvent;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
@@ -37,9 +39,12 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
     private final SettingsService settings;
     private final TickWorkBudget workBudget;
     private final TaskFailureIsolation failures;
+    private final Queue<Discovery> discovery = new ArrayDeque<>();
+    private final Map<Block, Integer> discovered = new HashMap<>();
     private final Queue<Block> decayQueue = new ArrayDeque<>();
     private final Set<Block> queuedLeaves = new HashSet<>();
     private BukkitTask batchTask;
+    private boolean decayNext;
 
     public FastLeafDecayService(SurvivalTweaks plugin, SettingsService settings) {
         this(plugin, settings, null, null);
@@ -80,46 +85,47 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
     }
 
     private void enqueueCanopy(Block center, int radius) {
-        Queue<SearchNode> search = new ArrayDeque<>();
-        Set<Block> visited = new HashSet<>();
+        discovery.add(new Discovery(center, radius, true));
+    }
 
-        for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
-                for (int z = -1; z <= 1; z++) {
-                    if (x == 0 && y == 0 && z == 0) {
-                        continue;
-                    }
-                    Block neighbor = center.getRelative(x, y, z);
-                    if (isNaturalLeaf(neighbor)) {
-                        search.add(new SearchNode(neighbor, 1));
-                    }
-                }
-            }
+    private void discover(Discovery node) {
+        Block block = node.block();
+        int radius = node.remaining();
+        if (!isLoaded(block)) {
+            return;
         }
-
-        while (!search.isEmpty()) {
-            SearchNode node = search.poll();
-            Block leaf = node.block();
-            if (!visited.add(leaf)) {
-                continue;
-            }
-            if (queuedLeaves.add(leaf)) {
-                decayQueue.add(leaf);
-            }
-            if (node.distance() >= radius) {
-                continue;
-            }
-            for (BlockFace face : SEARCH_FACES) {
-                Block neighbor = leaf.getRelative(face);
-                if (isNaturalLeaf(neighbor) && !visited.contains(neighbor)) {
-                    search.add(new SearchNode(neighbor, node.distance() + 1));
+        if (node.center()) {
+            for (int x = -1; x <= 1; x++) {
+                for (int y = -1; y <= 1; y++) {
+                    for (int z = -1; z <= 1; z++) {
+                        if (x != 0 || y != 0 || z != 0) {
+                            discoverLeaf(block.getRelative(x, y, z), radius);
+                        }
+                    }
                 }
+            }
+            return;
+        }
+        if (queuedLeaves.add(block)) {
+            decayQueue.add(block);
+        }
+        if (radius > 1) {
+            for (BlockFace face : SEARCH_FACES) {
+                discoverLeaf(block.getRelative(face), radius - 1);
             }
         }
     }
 
+    private void discoverLeaf(Block block, int remaining) {
+        if (discovered.getOrDefault(block, 0) < remaining
+                && isLoaded(block) && isNaturalLeaf(block)) {
+            discovered.put(block, remaining);
+            discovery.add(new Discovery(block, remaining, false));
+        }
+    }
+
     private void scheduleBatch(int delayTicks) {
-        if (batchTask != null || decayQueue.isEmpty()) {
+        if (batchTask != null || (discovery.isEmpty() && decayQueue.isEmpty())) {
             return;
         }
         Runnable batch = () -> processBatch(delayTicks);
@@ -133,6 +139,8 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
     private void processBatch(int delayTicks) {
         batchTask = null;
         if (!settings.current().fastLeafDecayEnabled()) {
+            discovery.clear();
+            discovered.clear();
             decayQueue.clear();
             queuedLeaves.clear();
             return;
@@ -140,24 +148,37 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
 
         int processed = 0;
         boolean budgetExhausted = false;
-        while (processed < LEAVES_PER_BATCH && !decayQueue.isEmpty()) {
+        while (processed < LEAVES_PER_BATCH && (!discovery.isEmpty() || !decayQueue.isEmpty())) {
             if (workBudget != null
                     && !workBudget.tryAcquire(TickWorkBudget.Lane.LEAF_DECAY, 1)) {
                 budgetExhausted = true;
                 break;
             }
-            Block leaf = decayQueue.poll();
+            processed++;
+            if (!discovery.isEmpty() && (!decayNext || decayQueue.isEmpty())) {
+                discover(discovery.remove());
+                decayNext = true;
+                if (discovery.isEmpty()) {
+                    discovered.clear();
+                }
+                continue;
+            }
+            decayNext = false;
+            Block leaf = decayQueue.remove();
             queuedLeaves.remove(leaf);
-            if (isNaturalLeaf(leaf) && !hasSupportingLog(leaf)) {
+            if (isLoaded(leaf) && isNaturalLeaf(leaf) && !hasSupportingLog(leaf)) {
                 leaf.breakNaturally();
                 enqueueCanopy(leaf, 1);
             }
-            processed++;
         }
 
-        if (!decayQueue.isEmpty()) {
+        if (!discovery.isEmpty() || !decayQueue.isEmpty()) {
             scheduleBatch(budgetExhausted ? 1 : delayTicks);
         }
+    }
+
+    private boolean isLoaded(Block block) {
+        return block.getWorld().isChunkLoaded(block.getX() >> 4, block.getZ() >> 4);
     }
 
     boolean isNaturalLeaf(Block block) {
@@ -186,7 +207,7 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
             SearchNode node = search.poll();
             for (BlockFace face : SEARCH_FACES) {
                 Block neighbor = node.block().getRelative(face);
-                if (Tag.LOGS.isTagged(neighbor.getType())) {
+                if (!isLoaded(neighbor) || Tag.LOGS.isTagged(neighbor.getType())) {
                     return true;
                 }
                 int nextDistance = node.distance() + 1;
@@ -206,12 +227,17 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
             batchTask.cancel();
             batchTask = null;
         }
+        discovery.clear();
+        discovered.clear();
         decayQueue.clear();
         queuedLeaves.clear();
     }
 
     public int queuedLeaves() {
-        return decayQueue.size();
+        return decayQueue.size() + discovery.size();
+    }
+
+    private record Discovery(Block block, int remaining, boolean center) {
     }
 
     private record SearchNode(Block block, int distance) {

@@ -6,7 +6,9 @@ import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import gg.nurmi.survivaltweaks.storage.ProfileDataStore;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -26,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -41,7 +44,8 @@ public final class ProfileRepository implements AutoCloseable {
     private final Logger logger;
     private final PersistenceMonitor monitor;
     private final Path pendingLanguagesFile;
-    private final Map<UUID, LanguagePreference> languageRecovery = new HashMap<>();
+    private final ConcurrentMap<UUID, LanguagePreference> languageRecovery = new ConcurrentHashMap<>();
+    private final Set<UUID> cleanupScheduled = new HashSet<>();
     private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, ProfileSnapshot> latestRequested = new ConcurrentHashMap<>();
     private final Object queue = new Object();
@@ -104,6 +108,10 @@ public final class ProfileRepository implements AutoCloseable {
         return languageRecoveryReady;
     }
 
+    boolean languageRecoveryPending(UUID playerId) {
+        return languageRecovery.containsKey(playerId);
+    }
+
     private void recoverPendingLanguages(boolean logFailure) {
         if (closing || languageRecoveryReady) {
             return;
@@ -148,44 +156,67 @@ public final class ProfileRepository implements AutoCloseable {
         }
     }
 
-    public Profile load(UUID uniqueId) {
-        Profile cached = profiles.get(uniqueId);
-        if (cached != null) {
-            evictionCandidates.remove(uniqueId);
-            return cached;
+    private Profile cachedProfile(UUID uniqueId) {
+        Profile cached;
+        while ((cached = profiles.get(uniqueId)) != null) {
+            synchronized (cached) {
+                if (profiles.get(uniqueId) == cached) {
+                    evictionCandidates.remove(uniqueId);
+                    return cached;
+                }
+            }
         }
 
+        return null;
+    }
+
+    public Profile load(UUID uniqueId) {
+        Profile cached = cachedProfile(uniqueId);
+        if (cached != null) {
+            return cached;
+        }
         Profile loaded = store.load(uniqueId);
         synchronized (loaded) {
             Profile existing = profiles.putIfAbsent(uniqueId, loaded);
-            if (existing != null) {
-                evictionCandidates.remove(uniqueId);
-                return existing;
+            if (existing == null) {
+                ProfileSnapshot initial = loaded.snapshot();
+                globalTrusts.put(uniqueId, loaded.trustedPlayers());
+                if (loaded.migrationRequired()) {
+                    enqueueIfChanged(loaded, initial);
+                } else {
+                    latestRequested.put(uniqueId, initial);
+                }
+                return loaded;
             }
-
-            ProfileSnapshot initial = loaded.snapshot();
-            globalTrusts.put(uniqueId, loaded.trustedPlayers());
-            if (loaded.migrationRequired()) {
-                enqueueIfChanged(loaded, initial);
-            } else {
-                latestRequested.put(uniqueId, initial);
-            }
-            return loaded;
         }
+        return load(uniqueId);
     }
 
     public CompletableFuture<Profile> loadAsync(UUID uniqueId) {
-        Profile cached = profiles.get(uniqueId);
-        if (cached != null) {
-            evictionCandidates.remove(uniqueId);
-            return CompletableFuture.completedFuture(cached);
+        Profile cached = cachedProfile(uniqueId);
+        return cached == null ? CompletableFuture.supplyAsync(() -> load(uniqueId))
+                : CompletableFuture.completedFuture(cached);
+    }
+
+    <T> T withCurrent(Profile loaded, Function<Profile, T> action) {
+        UUID playerId = loaded.uniqueId();
+        Profile current = loaded;
+        while (true) {
+            synchronized (current) {
+                if (profiles.get(playerId) == current) {
+                    evictionCandidates.remove(playerId);
+                    return action.apply(current);
+                }
+            }
+            current = load(playerId);
         }
-        return CompletableFuture.supplyAsync(() -> load(uniqueId));
     }
 
     public void save(Profile profile) {
         synchronized (profile) {
-            profiles.putIfAbsent(profile.uniqueId(), profile);
+            if (profiles.get(profile.uniqueId()) != profile) {
+                throw new IllegalStateException("Cannot save a stale profile: " + profile.uniqueId());
+            }
             evictionCandidates.remove(profile.uniqueId());
             globalTrusts.put(profile.uniqueId(), profile.trustedPlayers());
             enqueueIfChanged(profile, profile.snapshot());
@@ -195,7 +226,9 @@ public final class ProfileRepository implements AutoCloseable {
     public void saveAll() {
         profiles.values().forEach(profile -> {
             synchronized (profile) {
-                enqueueIfChanged(profile, profile.snapshot());
+                if (profiles.get(profile.uniqueId()) == profile) {
+                    enqueueIfChanged(profile, profile.snapshot());
+                }
             }
         });
     }
@@ -207,8 +240,10 @@ public final class ProfileRepository implements AutoCloseable {
         }
         Instant cutoff = now.minus(Duration.ofDays(mailPurgeInactiveDays));
         profiles.values().forEach(profile -> {
-            if (profile.removeMailBefore(cutoff) > 0) {
-                save(profile);
+            synchronized (profile) {
+                if (profiles.get(profile.uniqueId()) == profile && profile.removeMailBefore(cutoff) > 0) {
+                    save(profile);
+                }
             }
         });
     }
@@ -230,6 +265,9 @@ public final class ProfileRepository implements AutoCloseable {
         Profile profile = profiles.get(uniqueId);
         if (profile != null) {
             synchronized (profile) {
+                if (profiles.get(uniqueId) != profile) {
+                    return;
+                }
                 ProfileSnapshot snapshot = profile.snapshot();
                 EvictionCandidate candidate = new EvictionCandidate(profile, snapshot);
                 evictionCandidates.put(uniqueId, candidate);
@@ -314,16 +352,39 @@ public final class ProfileRepository implements AutoCloseable {
     }
 
     private Map<UUID, LanguagePreference> readPendingLanguages() throws IOException {
-        Properties saved = new Properties();
-        try (var reader = Files.newBufferedReader(pendingLanguagesFile)) {
-            saved.load(reader);
+        byte[] contents;
+        try {
+            contents = Files.readAllBytes(pendingLanguagesFile);
         } catch (NoSuchFileException exception) {
             return Map.of();
         }
 
         Map<UUID, LanguagePreference> languages = new HashMap<>();
-        for (String playerId : saved.stringPropertyNames()) {
-            languages.put(UUID.fromString(playerId), LanguagePreference.valueOf(saved.getProperty(playerId)));
+        Properties property = new Properties();
+        boolean malformed = false;
+        // The journal writer emits one complete property per line.
+        for (String line : new String(contents, StandardCharsets.UTF_8).lines().toList()) {
+            property.clear();
+            try {
+                property.load(new StringReader(line));
+                for (String playerId : property.stringPropertyNames()) {
+                    UUID id = UUID.fromString(playerId);
+                    if (!id.toString().equalsIgnoreCase(playerId)) {
+                        throw new IllegalArgumentException("Invalid player UUID");
+                    }
+                    languages.put(id, LanguagePreference.valueOf(property.getProperty(playerId)));
+                }
+            } catch (IllegalArgumentException exception) {
+                malformed = true;
+            }
+        }
+        if (malformed) {
+            Path original = Files.createTempFile(pendingLanguagesFile.toAbsolutePath().getParent(),
+                    "pending-languages-invalid-", ".properties");
+            Files.write(original, contents);
+            logger.warning("Preserved malformed language recovery data at " + original
+                    + "; recovering valid entries.");
+            writePendingLanguages(languages);
         }
         return languages;
     }
@@ -360,6 +421,24 @@ public final class ProfileRepository implements AutoCloseable {
             languageRecovery.remove(playerId);
         }
         logger.info("Recovered pending language change for " + playerId + ".");
+    }
+
+    private void retireRecoveredLanguage(UUID playerId, LanguagePreference language, boolean logFailure) {
+        try {
+            finishLanguageRecovery(playerId, language);
+            cleanupScheduled.remove(playerId);
+        } catch (IOException exception) {
+            if (logFailure) {
+                logger.log(Level.WARNING, "Could not remove the committed language recovery entry for "
+                        + playerId + ". Retrying cleanup.", exception);
+            }
+            synchronized (queue) {
+                if (!closing) {
+                    writer.schedule(() -> retireRecoveredLanguage(playerId, language, false),
+                            MAX_RETRY_MILLIS, TimeUnit.MILLISECONDS);
+                }
+            }
+        }
     }
 
     private void writePendingLanguages(Map<UUID, LanguagePreference> languages) throws IOException {
@@ -436,12 +515,16 @@ public final class ProfileRepository implements AutoCloseable {
         Exception failure = null;
         try {
             store.save(entry.snapshot());
-            LanguagePreference language = entry.snapshot().preferences().language();
-            finishLanguageRecovery(uniqueId, language);
-            entry.profile().confirmSavedLanguage(language);
         } catch (IOException | RuntimeException exception) {
             failure = exception;
             logger.log(Level.SEVERE, "Could not save profile " + uniqueId, exception);
+        }
+        if (failure == null) {
+            LanguagePreference language = entry.snapshot().preferences().language();
+            entry.profile().confirmSavedLanguage(language);
+            if (languageRecovery.get(uniqueId) == language && cleanupScheduled.add(uniqueId)) {
+                retireRecoveredLanguage(uniqueId, language, true);
+            }
         }
         synchronized (queue) {
             if (failure == null) {

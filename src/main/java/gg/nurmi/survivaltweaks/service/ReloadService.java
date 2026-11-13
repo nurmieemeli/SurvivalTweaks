@@ -8,10 +8,12 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Objects;
@@ -73,15 +75,28 @@ public final class ReloadService {
         this.afterApply = afterApply;
     }
 
-    public synchronized Result reload() {
+    public Result reload() {
+        if (!reloading.compareAndSet(false, true)) {
+            return Result.failure("A reload is already running");
+        }
         try {
-            return apply(prepare());
+            return apply(prepare(config -> {}), false);
         } catch (Exception exception) {
             return rejected(exception);
+        } finally {
+            reloading.set(false);
         }
     }
 
     public boolean reloadAsync(Consumer<Result> completion) {
+        return reloadAsync(config -> {}, false, completion);
+    }
+
+    public boolean setConfigAsync(String path, Object value, Consumer<Result> completion) {
+        return reloadAsync(config -> config.set(path, value), true, completion);
+    }
+
+    private boolean reloadAsync(Consumer<YamlConfiguration> edit, boolean publish, Consumer<Result> completion) {
         Objects.requireNonNull(completion, "completion");
         if (!reloading.compareAndSet(false, true)) {
             return false;
@@ -89,7 +104,7 @@ public final class ReloadService {
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             Prepared prepared;
             try {
-                prepared = prepare();
+                prepared = prepare(edit);
             } catch (Exception exception) {
                 Result result = rejected(exception);
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -101,7 +116,7 @@ public final class ReloadService {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 Result result;
                 try {
-                    result = apply(prepared);
+                    result = apply(prepared, publish);
                 } catch (Exception exception) {
                     result = rejected(exception);
                 }
@@ -112,12 +127,13 @@ public final class ReloadService {
         return true;
     }
 
-    private Prepared prepare() throws Exception {
+    private Prepared prepare(Consumer<YamlConfiguration> edit) throws Exception {
         if (backups != null) {
             backups.create("reload");
         }
         Candidate candidate = loadCandidateConfig();
         YamlConfiguration candidateConfig = candidate.configuration();
+        edit.accept(candidateConfig);
         ConfigMigrationService.requireCurrent(candidateConfig);
         StorageConfiguration.load(candidateConfig, plugin.getDataFolder().toPath());
         PortableExportService.validate(candidateConfig);
@@ -130,7 +146,7 @@ public final class ReloadService {
         );
     }
 
-    private Result apply(Prepared prepared) {
+    private Result apply(Prepared prepared, boolean publish) throws IOException {
         if (!prepared.configFingerprint().equals(configFingerprint(configPath()))) {
             throw new IllegalStateException(
                     "config.yml changed while reload validation was running; retry the command"
@@ -145,8 +161,11 @@ public final class ReloadService {
             messages.apply(prepared.messages());
             feedback.apply(prepared.feedback());
             afterApply.accept(prepared.settings(), prepared.configuration());
+            if (publish) {
+                publishConfig(prepared);
+            }
             plugin.reloadConfig();
-        } catch (RuntimeException applyFailure) {
+        } catch (RuntimeException | IOException applyFailure) {
             settings.apply(previousSettings);
             messages.apply(previousMessages);
             feedback.apply(previousFeedback);
@@ -159,6 +178,20 @@ public final class ReloadService {
         }
         plugin.getLogger().info("Reloaded configuration and language catalogs.");
         return Result.success();
+    }
+
+    private void publishConfig(Prepared prepared) throws IOException {
+        Path path = configPath();
+        Path temporary = Files.createTempFile(path.getParent(), ".config-", ".tmp");
+        try {
+            prepared.configuration().save(temporary.toFile());
+            if (!prepared.configFingerprint().equals(configFingerprint(path))) {
+                throw new IllegalStateException("config.yml changed while reload validation was running; retry the command");
+            }
+            Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     private Result rejected(Exception exception) {

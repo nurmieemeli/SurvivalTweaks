@@ -139,7 +139,7 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
         }
 
         Player requestingPlayer = server.getPlayer(request.senderId());
-        if (requestingPlayer == null) {
+        if (requestingPlayer == null || !requestingPlayer.canSee(recipient)) {
             requests.consume(request);
             messages.send(recipient, "teleport.accept.sender-offline");
             feedback.play(recipient, FeedbackService.TELEPORT_CANCELLED);
@@ -150,7 +150,8 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
                 requestingPlayer,
                 () -> {
                     Player currentRecipient = server.getPlayer(request.recipientId());
-                    return currentRecipient == null ? null : currentRecipient.getLocation();
+                    return currentRecipient == null || !requestingPlayer.canSee(currentRecipient)
+                            ? null : currentRecipient.getLocation();
                 },
                 messages.component(
                         requestingPlayer,

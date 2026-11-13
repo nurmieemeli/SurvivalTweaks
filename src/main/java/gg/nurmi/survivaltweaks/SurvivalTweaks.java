@@ -134,13 +134,14 @@ public final class SurvivalTweaks extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
         backups = new BackupService(getDataFolder().toPath(), clock, getLogger());
-        backups.databaseFilename(
-                getConfig().getString("storage.sqlite.file", "survivaltweaks.db")
-        );
-        backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
         try {
+            backups.recoverInterruptedRestore();
+            saveDefaultConfig();
+            backups.databaseFilename(
+                    getConfig().getString("storage.sqlite.file", "survivaltweaks.db")
+            );
+            backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
             if (backups.hasPendingRestore()) {
                 backups.create("pre-restore");
                 backups.applyPendingRestore();
