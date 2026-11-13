@@ -20,7 +20,7 @@ server.
 3. Select a Java 25 SDK.
 4. Import the Maven project and run `mvn clean verify`.
 
-SurvivalTweaks targets Paper 26.2. Do not commit IntelliJ workspace files,
+SurvivalTweaks targets Paper 26.3. Do not commit IntelliJ workspace files,
 compiler output, test servers, logs, dumps, or downloaded server binaries.
 
 ## Project expectations

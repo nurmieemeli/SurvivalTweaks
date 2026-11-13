@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: survivaltweaks_test
           POSTGRES_USER: survivaltweaks
@@ -30,7 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       mysql:
-        image: mysql:8.4
+        image: mysql:9.7
         env:
           MYSQL_DATABASE: survivaltweaks_test
           MYSQL_USER: survivaltweaks
@@ -45,9 +45,9 @@ jobs:
           --health-retries 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
       - name: Set up Java 25
-        uses: actions/setup-java@v5.6.0
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: '25'
@@ -76,7 +76,7 @@ jobs:
           test -n "$jar"
           sha256sum "$jar" > "$jar.sha256"
       - name: Upload verified build
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: SurvivalTweaks-${{ github.sha }}
           path: |
@@ -93,7 +93,7 @@ jobs:
       contents: write
     steps:
       - name: Download verified build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: SurvivalTweaks-${{ github.sha }}
           path: release

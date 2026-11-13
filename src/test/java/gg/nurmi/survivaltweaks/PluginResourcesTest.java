@@ -36,7 +36,7 @@ class PluginResourcesTest {
     void pluginDescriptorContainsTheExpectedCommandsAndApiVersion() {
         YamlConfiguration descriptor = resource("plugin.yml");
 
-        assertEquals("26.2", descriptor.getString("api-version"));
+        assertEquals("26.3", descriptor.getString("api-version"));
         assertEquals(
                 "survivaltweaks.command.teleport",
                 descriptor.getString("commands.teleport.permission")

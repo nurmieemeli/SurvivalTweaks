@@ -10,7 +10,7 @@ Describe the player-visible or operator-visible result.
 
 - [ ] `mvn --batch-mode --no-transfer-progress clean verify`
 - [ ] `pwsh ./.github/scripts/paper-smoke.ps1`
-- [ ] Tested relevant behavior on Paper 26.2
+- [ ] Tested relevant behavior on Paper 26.3
 
 ## Compatibility and performance
 

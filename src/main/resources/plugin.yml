@@ -2,7 +2,7 @@ name: SurvivalTweaks
 version: '${project.version}'
 main: gg.nurmi.survivaltweaks.SurvivalTweaks
 website: https://github.com/nurmieemeli/SurvivalTweaks
-api-version: '26.2'
+api-version: '26.3'
 
 # Command descriptions and usage strings are deliberately absent. Bukkit stores
 # one server-wide string per command and cannot localize them, so SurvivalTweaks

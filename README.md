@@ -7,7 +7,7 @@
 <p>
   <a href="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml"><img src="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml/badge.svg" alt="Build and release"></a>
   <a href="https://github.com/nurmieemeli/SurvivalTweaks/releases/latest"><img src="https://img.shields.io/github/v/release/nurmieemeli/SurvivalTweaks" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Paper-26.2-3faffa" alt="Paper 26.2">
+  <img src="https://img.shields.io/badge/Paper-26.3-3faffa" alt="Paper 26.3">
   <img src="https://img.shields.io/badge/Java-25-f89820" alt="Java 25">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/nurmieemeli/SurvivalTweaks" alt="MIT license"></a>
 </p>
@@ -47,7 +47,7 @@ defaults are introduced.
 
 | Component | Requirement |
 | --- | --- |
-| Server | Paper 26.2 |
+| Server | Paper 26.3 |
 | Java | 25 or newer |
 | Optional source build | Maven 3.9 or newer |
 
@@ -283,7 +283,7 @@ and other local state are intentionally excluded from version control.
 ## Release quality
 
 Every push and pull request runs the complete Maven test suite and a
-checksum-pinned Paper 26.2 smoke test covering startup, configuration reload,
+checksum-pinned Paper 26.3 smoke test covering startup, configuration reload,
 completed diagnostics, and clean shutdown. Recurring runtime subsystems isolate
 and report failures so one cosmetic task cannot silently disable its later runs.
 CI retains the verified JAR and SHA-256 as

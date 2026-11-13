@@ -1,7 +1,10 @@
 $ErrorActionPreference = "Stop"
 
-$paperUrl = "https://fill-data.papermc.io/v1/objects/3ab7536642d04c504a06fe43174b8a94f8c5f25d5847d4672212413f6e54b906/paper-26.2-87.jar"
-$paperSha256 = "3AB7536642D04C504A06FE43174B8A94F8C5F25D5847D4672212413F6E54B906"
+$paperVersion = "26.3"
+$paperBuild = 249
+$paperSha256 = "4C734AEB4DA98845934AF1E5481F0DF7C80AD3CA50D272319FFE2B0E8A187C8A"
+$paperFilename = "paper-$paperVersion-$paperBuild.jar"
+$paperUrl = "https://fill-data.papermc.io/v1/objects/$($paperSha256.ToLowerInvariant())/$paperFilename"
 $repository = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $runnerTemporary = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $smokeRoot = Join-Path $runnerTemporary "survivaltweaks-paper-smoke"
@@ -20,7 +23,7 @@ $pluginJar = $jars[0]
 $version = [regex]::Match($pluginJar.Name, "^SurvivalTweaks-(.+)\.jar$").Groups[1].Value
 Copy-Item -LiteralPath $pluginJar.FullName -Destination (Join-Path $smokeRoot "plugins/$($pluginJar.Name)")
 
-$paperJar = Join-Path $smokeRoot "paper-26.2-87.jar"
+$paperJar = Join-Path $smokeRoot $paperFilename
 Invoke-WebRequest -Uri $paperUrl -OutFile $paperJar
 $actualPaperSha256 = (Get-FileHash -LiteralPath $paperJar -Algorithm SHA256).Hash
 if ($actualPaperSha256 -ne $paperSha256) {
@@ -95,7 +98,7 @@ $startInfo.WorkingDirectory = $smokeRoot
 $startInfo.UseShellExecute = $false
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
-$startInfo.Arguments = "-Xms512M -Xmx1G -jar paper-26.2-87.jar --nogui"
+$startInfo.Arguments = "-Xms512M -Xmx1G -jar $paperFilename --nogui"
 
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
@@ -177,4 +180,4 @@ if (($standardOutput + "`n" + $standardError) -match "(?im)\b(SEVERE|ERROR)\b|Ex
     throw "Paper smoke-test logs contain an exception or error-level entry. Logs: $smokeRoot"
 }
 
-Write-Host "Paper 26.2 build 87 smoke test passed for SurvivalTweaks $version."
+Write-Host "Paper $paperVersion build $paperBuild smoke test passed for SurvivalTweaks $version."
