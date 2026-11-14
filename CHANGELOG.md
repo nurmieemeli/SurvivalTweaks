@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.26.2 - 2026-11-14
+
+### Fixed
+
+- PostgreSQL and MySQL leases use the database namespace and retain the legacy
+  lock for upgrades. Startup requires the identity of a pinned database and
+  accepts a matching SQLite backup restored to a different directory.
+- Storage migration uses the reloaded destination settings. A restart after
+  interrupted staging reopens the original database and clears the request.
+  Reload and startup enforce the same SQLite filename rules.
+- Restores reject ZIP paths that differ only by case. If current data exceeds
+  the ZIP limit, a restore saves a verified copy of the files first. Config
+  reloads can proceed past the ZIP limit with a warning in the server log.
+  Backup tab completion no longer waits for disk work.
+- Queued mail and profile views respect current blocks and privacy settings.
+  Teleports recheck shared-home access and visibility after loading chunks.
+  Join and quit messages and TAB counts respect vanish, and cancelled chat
+  does not trigger mentions.
+- Fast leaf decay respects protection plugins. Current-format offline
+  statistics load in one pass, and snapshot writers retry unexpected save
+  failures.
+
 ## 2.26.1 - 2026-11-13
 
 ### Fixed
