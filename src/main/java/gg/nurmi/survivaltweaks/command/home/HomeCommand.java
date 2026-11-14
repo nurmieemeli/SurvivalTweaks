@@ -116,7 +116,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
     /**
      * Resolves a name the same way the trust and mail commands do. {@code
      * Server#getOfflinePlayer(String)} is unusable here for two reasons: it can
-     * contact Mojang's API from the server thread, and it never returns null —
+     * contact Mojang's API from the server thread, and it never returns null â€”
      * it invents a profile for a name that has never played, so a typo would be
      * accepted as a real invite rather than rejected.
      */
@@ -152,7 +152,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         }
 
         Home updated = homeOpt.orElseThrow().invite(target.getUniqueId());
-        ownerProfile.addHome(updated);
+        ownerProfile.updateHome(updated);
         profiles.save(ownerProfile);
 
         messages.send(owner, "home.invited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
@@ -179,7 +179,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         }
 
         Home updated = homeOpt.orElseThrow().uninvite(target.getUniqueId());
-        ownerProfile.addHome(updated);
+        ownerProfile.updateHome(updated);
         profiles.save(ownerProfile);
 
         messages.send(owner, "home.uninvited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
@@ -200,11 +200,11 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        profiles.loadAsync(owner.getUniqueId()).thenAcceptAsync(ownerProfile -> {
+        profiles.loadAsync(owner.getUniqueId()).thenAccept(loaded -> {
             server.getScheduler().runTask(plugin, () -> {
                 if (!visitor.isOnline()) return;
                 
-                Optional<Home> homeOpt = ownerProfile.home(homeName);
+                Optional<Home> homeOpt = profiles.load(owner.getUniqueId()).home(homeName);
                 if (homeOpt.isEmpty()) {
                     messages.send(visitor, "home.not-found", Placeholder.unparsed("home", homeName));
                     return;
@@ -216,7 +216,11 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
 
-                homeMenu.teleport(visitor, home);
+                homeMenu.teleport(visitor, home, () -> profiles.load(owner.getUniqueId()).home(homeName)
+                        .filter(current -> current.isSharedWith(visitor.getUniqueId())
+                                || owner.getUniqueId().equals(visitor.getUniqueId()))
+                        .filter(current -> current.resolve(server).equals(home.resolve(server)))
+                        .isPresent());
             });
         });
     }

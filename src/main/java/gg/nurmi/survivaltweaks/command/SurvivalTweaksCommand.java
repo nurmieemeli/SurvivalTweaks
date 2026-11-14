@@ -19,6 +19,7 @@ import gg.nurmi.survivaltweaks.service.TaskFailureIsolation;
 import gg.nurmi.survivaltweaks.service.TickWorkBudget;
 import gg.nurmi.survivaltweaks.service.TreeFellerService;
 import gg.nurmi.survivaltweaks.storage.StorageBackend;
+import gg.nurmi.survivaltweaks.storage.StorageConfiguration;
 import gg.nurmi.survivaltweaks.storage.StorageManager;
 import gg.nurmi.survivaltweaks.storage.SqlStorage;
 import gg.nurmi.survivaltweaks.ui.PlayerHubController;
@@ -380,19 +381,6 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 return List.of("list", "create", "verify", "restore").stream()
                         .filter(option -> option.startsWith(prefix))
                         .toList();
-            }
-            if (arguments.length == 3
-                    && (arguments[1].equalsIgnoreCase("verify")
-                    || arguments[1].equalsIgnoreCase("restore"))) {
-                String prefix = arguments[2].toLowerCase(Locale.ROOT);
-                try {
-                    return backups.archives().stream()
-                            .map(BackupService.ArchiveInfo::filename)
-                            .filter(filename -> filename.toLowerCase(Locale.ROOT).startsWith(prefix))
-                            .toList();
-                } catch (IOException exception) {
-                    return List.of();
-                }
             }
             if (arguments.length == 4
                     && arguments[1].equalsIgnoreCase("restore")
@@ -879,8 +867,15 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     return true;
                 }
             }
+            StorageConfiguration configured;
+            try {
+                configured = StorageConfiguration.load(plugin.getConfig(), storage.dataFolder());
+            } catch (IllegalArgumentException exception) {
+                messages.send(sender, "admin.storage.failed", Placeholder.unparsed("reason", exception.getMessage()));
+                return true;
+            }
             if (arguments[1].equalsIgnoreCase("test")) {
-                runStorageOperation(sender, () -> storage.testBackend(target), result ->
+                runStorageOperation(sender, () -> storage.testBackend(configured.forBackend(target)), result ->
                         messages.send(
                                 sender,
                                 "admin.storage.test-success",
@@ -911,7 +906,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     );
                     return true;
                 }
-                runStorageOperation(sender, () -> storage.stageMigration(target), migration -> {
+                runStorageOperation(sender, () -> storage.stageMigration(configured, target), migration -> {
                     plugin.getConfig().set("storage.backend", target.key());
                     plugin.saveConfig();
                     messages.send(

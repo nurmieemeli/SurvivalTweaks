@@ -39,9 +39,10 @@ before accepting the import. The YAML originals remain untouched as a manual
 rollback source.
 
 The active engine, endpoint fingerprint, and random server-instance UUID are
-pinned in `storage-state.yml`. Changing `storage.backend`, the SQLite filename,
-or a remote endpoint (including the PostgreSQL schema) by hand is rejected
-after initialization. A remote outage
+pinned in `storage-state.yml`. Changing the backend or remote endpoint
+requires a staged migration. An existing SQLite file can be reopened at a new
+path when its database instance ID matches the pinned ID. Startup rejects a
+missing or unrecognized pinned database. A remote outage
 also fails startup: SurvivalTweaks never silently falls back to SQLite, because
 doing so could create two divergent copies of player data.
 
@@ -96,7 +97,9 @@ the primary defence.
 3. Reload is only a validator; it does not switch the live store. Run
    `/survivaltweaks storage test <backend>`.
 4. Run `/survivaltweaks storage migrate <backend>`. This records a migration
-   plan and updates `storage.backend`, but does not move live data.
+   plan and updates `storage.backend`. The data moves on restart. If shutdown
+   interrupts staging before the config is saved, startup keeps the original
+   database and discards the incomplete request.
 5. Restart Paper. Before services start, SurvivalTweaks opens both endpoints,
    requires an empty destination, copies every aggregate in a transaction,
    compares counts and SHA-256, runs integrity checks, and only then changes
@@ -151,6 +154,8 @@ logged once when the level changes, with the triggering MSPT and reason.
 
 Before startup loads or migrates data, and before every configuration reload,
 the plugin writes an atomic ZIP snapshot into `plugins/SurvivalTweaks/backups/`.
+ZIP archives are capped at 512 MiB uncompressed. A config reload can proceed
+when the archive exceeds that limit, and the server log records the skipped backup.
 Archives contain configuration, both language catalogs, the pinned storage
 identity, the default SQLite database, and preserved legacy YAML files. SQLite
 writes are paused briefly and its WAL is checkpointed while the database enters
@@ -184,6 +189,11 @@ Restoration is deliberately staged and cannot be completed in one step:
    re-verifies the staged archive, swaps only plugin-managed files with rollback
    protection, and applies current defaults before any player or world data
    loads.
+
+If the current data exceeds the ZIP limits, the pre-restore backup is a
+verified file copy under the backups directory. Its location appears in the
+server log. Keep it until you verify the restored data. This directory is
+retained separately from the automatically rotated ZIP archives.
 
 ## Diagnostics
 

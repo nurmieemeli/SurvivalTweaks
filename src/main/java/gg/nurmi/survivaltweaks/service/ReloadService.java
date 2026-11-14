@@ -129,7 +129,7 @@ public final class ReloadService {
 
     private Prepared prepare(Consumer<YamlConfiguration> edit) throws Exception {
         if (backups != null) {
-            backups.create("reload");
+            backups.createReloadBackup();
         }
         Candidate candidate = loadCandidateConfig();
         YamlConfiguration candidateConfig = candidate.configuration();

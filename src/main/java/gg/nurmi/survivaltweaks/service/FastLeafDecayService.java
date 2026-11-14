@@ -45,6 +45,7 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
     private final Set<Block> queuedLeaves = new HashSet<>();
     private BukkitTask batchTask;
     private boolean decayNext;
+    private LeavesDecayEvent pluginDecay;
 
     public FastLeafDecayService(SurvivalTweaks plugin, SettingsService settings) {
         this(plugin, settings, null, null);
@@ -75,6 +76,9 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onLeavesDecay(LeavesDecayEvent event) {
+        if (event == pluginDecay) {
+            return;
+        }
         PluginSettings current = settings.current();
         if (!current.fastLeafDecayEnabled()) {
             return;
@@ -167,13 +171,25 @@ public final class FastLeafDecayService implements Listener, AutoCloseable {
             Block leaf = decayQueue.remove();
             queuedLeaves.remove(leaf);
             if (isLoaded(leaf) && isNaturalLeaf(leaf) && !hasSupportingLog(leaf)) {
-                leaf.breakNaturally();
-                enqueueCanopy(leaf, 1);
+                decayLeaf(leaf);
             }
         }
 
         if (!discovery.isEmpty() || !decayQueue.isEmpty()) {
             scheduleBatch(budgetExhausted ? 1 : delayTicks);
+        }
+    }
+
+    private void decayLeaf(Block leaf) {
+        LeavesDecayEvent event = new LeavesDecayEvent(leaf);
+        pluginDecay = event;
+        try {
+            plugin.getServer().getPluginManager().callEvent(event);
+        } finally {
+            pluginDecay = null;
+        }
+        if (!event.isCancelled() && isNaturalLeaf(leaf) && leaf.breakNaturally()) {
+            enqueueCanopy(leaf, 1);
         }
     }
 

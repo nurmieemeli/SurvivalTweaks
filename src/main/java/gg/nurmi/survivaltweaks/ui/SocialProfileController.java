@@ -96,13 +96,18 @@ public final class SocialProfileController implements Listener, CommandExecutor,
             messages.send(viewer, "profile.unknown");
             return;
         }
-        profiles.loadAsync(target.getUniqueId()).thenAccept(targetProfile -> {
+        profiles.loadAsync(target.getUniqueId()).thenAccept(loaded -> {
             server.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
                 if (!messages.requirePermission(viewer, "survivaltweaks.command.profile")) {
                     return;
                 }
                 
+                if (!settings.current().playerProfilesEnabled()) {
+                    messages.send(viewer, "profile.disabled");
+                    return;
+                }
+                var targetProfile = profiles.load(target.getUniqueId());
                 boolean own = viewer.getUniqueId().equals(target.getUniqueId());
                 if (!own
                         && !targetProfile.preferences().publicProfileEnabled()

@@ -182,6 +182,7 @@ profile:
   private: "<yellow>That player keeps their profile private.</yellow>"
 
 statistics:
+  unavailable: "<red>Could not load this player's statistics.</red>"
   usage: "<red>Usage: /stats [player]</red>"
   disabled: "<red>Player statistics are disabled on this server.</red>"
   unknown: "<red>That player has not joined this server.</red>"

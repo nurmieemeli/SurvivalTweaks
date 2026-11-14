@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.storage.SqlStorage;
+import gg.nurmi.survivaltweaks.storage.StorageConfiguration;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -112,6 +114,47 @@ public final class BackupService {
         }
     }
 
+    public synchronized Optional<Path> createPreRestoreBackup() throws IOException {
+        try {
+            return create("pre-restore");
+        } catch (ArchiveLimitException exception) {
+            try (SnapshotLease ignored = snapshotLeaseFactory.acquire()) {
+                List<Path> sources = sources();
+                if (sources.isEmpty()) {
+                    return Optional.empty();
+                }
+                Path staged = Files.createTempDirectory(backupFolder, ".pre-restore-");
+                Path target = backupFolder.resolve(staged.getFileName().toString().substring(1));
+                try {
+                    for (Path source : sources) {
+                        ensureNotInterrupted();
+                        Path relative = dataFolder.relativize(source);
+                        Path copy = staged.resolve(relative);
+                        Files.createDirectories(copy.getParent());
+                        Files.copy(source, copy);
+                        if (Files.mismatch(source, copy) != -1) {
+                            throw new IOException("Could not verify pre-restore copy of " + relative);
+                        }
+                    }
+                    movePath(staged, target);
+                } finally {
+                    cleanupTemporary(staged);
+                }
+                logger.warning("Saved verified pre-restore files in " + target
+                        + " because they exceed the ZIP limit. Retain this folder until the restore is verified.");
+                return Optional.of(target);
+            }
+        }
+    }
+
+    void createReloadBackup() throws IOException {
+        try {
+            create("reload");
+        } catch (ArchiveLimitException exception) {
+            logger.warning("Skipped reload backup: " + exception.getMessage());
+        }
+    }
+
     public void createStartupBackup() throws IOException {
         try {
             create("startup");
@@ -139,7 +182,7 @@ public final class BackupService {
 
     public synchronized void databaseFilename(String updatedFilename) {
         String normalized = Objects.requireNonNull(updatedFilename, "updatedFilename").strip();
-        if (!validDatabaseFilename(normalized)) {
+        if (!StorageConfiguration.validSqliteFilename(normalized)) {
             throw new IllegalArgumentException("SQLite backup filename is invalid");
         }
         databaseFilename = normalized;
@@ -336,7 +379,7 @@ public final class BackupService {
                 if (!validManagedEntry(name)) {
                     return Verification.invalid("Archive contains unsupported path '" + name + "'");
                 }
-                if (!names.add(name)) {
+                if (!names.add(name.toLowerCase(Locale.ROOT))) {
                     return Verification.invalid("Archive contains duplicate path '" + name + "'");
                 }
                 CRC32 crc = new CRC32();
@@ -412,6 +455,18 @@ public final class BackupService {
             throw new ArchiveLimitException("Archive contains too many files");
         }
         long totalBytes = 0;
+        Set<String> names = new HashSet<>();
+        for (Path source : sources) {
+            String name = dataFolder.relativize(source).toString().replace('\\', '/');
+            if (!names.add(name.toLowerCase(Locale.ROOT))) {
+                throw new IOException("Backup contains duplicate or case-colliding entry '" + name + "'");
+            }
+            totalBytes += Files.size(source);
+            if (totalBytes > MAX_ARCHIVE_BYTES) {
+                throw new ArchiveLimitException("Archive expands beyond the 512 MiB safety limit");
+            }
+        }
+        totalBytes = 0;
         try (OutputStream output = Files.newOutputStream(archive);
              ZipOutputStream zip = new ZipOutputStream(output)) {
             byte[] buffer = new byte[16_384];
@@ -532,7 +587,7 @@ public final class BackupService {
                 }
                 Files.createDirectories(target.getParent());
                 try (InputStream input = zip.getInputStream(entry);
-                     OutputStream output = Files.newOutputStream(target)) {
+                     OutputStream output = Files.newOutputStream(target, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
                     int read;
                     while ((read = input.read(buffer)) >= 0) {
                         if (read == 0) {
@@ -593,7 +648,7 @@ public final class BackupService {
         if (ROOT_FILES.contains(name)) {
             return true;
         }
-        if (validDatabaseFilename(name)) {
+        if (StorageConfiguration.validSqliteFilename(name)) {
             return true;
         }
         if (!name.startsWith("userdata/") || !name.endsWith(".yml")) {
@@ -604,12 +659,6 @@ public final class BackupService {
                 && !filename.contains("/")
                 && !filename.equals(".")
                 && !filename.equals("..");
-    }
-
-    private static boolean validDatabaseFilename(String name) {
-        return name != null
-                && name.matches("[A-Za-z0-9._-]{1,128}\\.db")
-                && !name.startsWith(".");
     }
 
     /** The write-ahead log and rollback files SQLite keeps beside a database. */
@@ -623,7 +672,7 @@ public final class BackupService {
             var entries = zip.entries();
             while (entries.hasMoreElements()) {
                 String name = entries.nextElement().getName();
-                if (validDatabaseFilename(name) && !databases.contains(name)) {
+                if (StorageConfiguration.validSqliteFilename(name) && !databases.contains(name)) {
                     databases.add(name);
                 }
             }

@@ -124,11 +124,8 @@ public record StorageConfiguration(
             );
         }
         String sqliteName = config.getString("storage.sqlite.file", "survivaltweaks.db").strip();
-        Path sqliteFile = Path.of(sqliteName);
-        if (sqliteFile.isAbsolute() || sqliteName.contains("..")) {
-            throw new IllegalArgumentException(
-                    "storage.sqlite.file must stay inside the SurvivalTweaks data folder"
-            );
+        if (!validSqliteFilename(sqliteName)) {
+            throw new IllegalArgumentException("storage.sqlite.file must be a .db filename in the SurvivalTweaks data folder");
         }
         StorageBackend remoteBackend = remoteType.isBlank()
                 ? selected
@@ -137,7 +134,7 @@ public record StorageConfiguration(
         int configuredPort = config.getInt("storage.remote.port", 0);
         return new StorageConfiguration(
                 selected,
-                dataFolder.resolve(sqliteFile),
+                dataFolder.resolve(sqliteName),
                 config.getString("storage.remote.host", "localhost"),
                 configuredPort > 0 ? configuredPort : defaultPort,
                 config.getString("storage.remote.database", "survivaltweaks"),
@@ -152,6 +149,11 @@ public record StorageConfiguration(
                 config.getInt("storage.remote.socket-timeout-seconds", 30),
                 config.getInt("storage.remote.query-timeout-seconds", 30)
         );
+    }
+
+    public static boolean validSqliteFilename(String name) {
+        return name != null && name.matches("[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\\.db")
+                && !name.contains("..");
     }
 
     public StorageConfiguration forBackend(StorageBackend requested) {

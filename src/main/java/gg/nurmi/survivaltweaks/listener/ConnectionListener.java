@@ -82,7 +82,9 @@ public final class ConnectionListener implements Listener {
                 nameComp = Component.text(event.getPlayer().getName());
             }
             Component finalNameComp = nameComp;
-            server.getOnlinePlayers().forEach(viewer -> messages.send(
+            server.getOnlinePlayers().stream()
+                    .filter(viewer -> viewer.equals(event.getPlayer()) || viewer.canSee(event.getPlayer()))
+                    .forEach(viewer -> messages.send(
                     viewer,
                     "connection.join",
                     Placeholder.component("player", finalNameComp)
@@ -112,6 +114,7 @@ public final class ConnectionListener implements Listener {
             Component finalNameComp = nameComp;
             server.getOnlinePlayers().stream()
                     .filter(viewer -> !viewer.getUniqueId().equals(event.getPlayer().getUniqueId()))
+                    .filter(viewer -> viewer.canSee(event.getPlayer()))
                     .forEach(viewer -> messages.send(
                             viewer,
                             "connection.quit",

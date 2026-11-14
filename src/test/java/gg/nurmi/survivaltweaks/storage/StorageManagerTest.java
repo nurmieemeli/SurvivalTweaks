@@ -264,6 +264,49 @@ class StorageManagerTest {
         assertTrue(Files.exists(userdata.resolve(playerId + ".yml")));
     }
 
+    @Test
+    void refusesToCreateAReplacementForAPinnedSqliteFile() throws IOException {
+        YamlConfiguration config = sqliteConfig("players.db");
+        Path database = directory.resolve("players.db");
+        try (StorageManager ignored = StorageManager.open(config, directory, logger, name -> null)) {
+            assertTrue(Files.isRegularFile(database));
+        }
+        Files.move(database, directory.resolve("original.db"));
+        IOException failure = assertThrows(IOException.class,
+                () -> StorageManager.open(config, directory, logger, name -> null));
+        assertTrue(failure.getMessage().contains("pinned SQLite database is missing"));
+        assertFalse(Files.exists(database));
+
+        Files.createFile(database);
+        assertThrows(IOException.class, () -> StorageManager.open(config, directory, logger, name -> null));
+        assertEquals(0, Files.size(database));
+    }
+
+    @Test
+    void relocatedSqliteRequiresTheExistingPinnedDatabaseIdentity() throws IOException {
+        Path original = Files.createDirectory(directory.resolve("original"));
+        Path relocated = Files.createDirectory(directory.resolve("relocated"));
+        YamlConfiguration config = sqliteConfig("players.db");
+        UUID instance;
+        try (StorageManager storage = StorageManager.open(config, original, logger, name -> null)) {
+            instance = storage.store().instanceId();
+        }
+
+        Files.copy(original.resolve("storage-state.yml"), relocated.resolve("storage-state.yml"));
+        assertThrows(IOException.class, () -> StorageManager.open(config, relocated, logger, name -> null));
+        assertFalse(Files.exists(relocated.resolve("players.db")));
+        try (StorageManager other = StorageManager.open(config, directory, logger, name -> null)) {
+            assertTrue(!instance.equals(other.store().instanceId()));
+        }
+        Files.copy(directory.resolve("players.db"), relocated.resolve("players.db"));
+        assertThrows(IOException.class, () -> StorageManager.open(config, relocated, logger, name -> null));
+        Files.copy(original.resolve("players.db"), relocated.resolve("players.db"),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        try (StorageManager storage = StorageManager.open(config, relocated, logger, name -> null)) {
+            assertEquals(instance, storage.store().instanceId());
+        }
+    }
+
     private static YamlConfiguration sqliteConfig(String filename) {
         YamlConfiguration config = new YamlConfiguration();
         config.set("storage.backend", "auto");

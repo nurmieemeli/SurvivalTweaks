@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import org.bukkit.Material;
 
 public final class HomeMenuController implements Listener {
@@ -90,6 +91,10 @@ public final class HomeMenuController implements Listener {
     }
 
     public void teleport(Player player, Home home) {
+        teleport(player, home, () -> true);
+    }
+
+    public void teleport(Player player, Home home, BooleanSupplier destinationAllowed) {
         if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
             return;
         }
@@ -108,7 +113,7 @@ public final class HomeMenuController implements Listener {
         Location resolved = destination.orElseThrow();
         teleports.begin(
                 player,
-                resolved::clone,
+                () -> destinationAllowed.getAsBoolean() ? resolved.clone() : null,
                 messages.component(
                         player,
                         "home.teleported",

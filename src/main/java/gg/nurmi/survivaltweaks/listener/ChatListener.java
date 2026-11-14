@@ -9,6 +9,7 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 
 public final class ChatListener implements Listener {
@@ -27,9 +28,15 @@ public final class ChatListener implements Listener {
         this.mentions = mentions;
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onChatComplete(AsyncChatEvent event) {
+        if (!event.isCancelled()) {
+            mentions.process(event.getPlayer(), event.message());
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
     public void onChat(AsyncChatEvent event) {
-        mentions.process(event.getPlayer(), event.message());
         if (settings.current().chatFormattingEnabled()) {
             event.renderer((sender, senderName, message, audience) -> mentions.highlight(
                     audience,

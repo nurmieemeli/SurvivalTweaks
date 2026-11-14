@@ -27,11 +27,14 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.jetbrains.annotations.NotNull;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.logging.Level;
 
 public final class StatisticsJournalController implements Listener, CommandExecutor, TabCompleter {
 
@@ -94,39 +97,80 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             return;
         }
         
-        profiles.loadAsync(target.getUniqueId()).thenAcceptAsync(targetProfile -> {
-            // An online player's statistics live in memory and are mutated by the
-            // server thread every tick, so they have to be read there. Only a
-            // genuinely offline player's file-backed statistics are safe to read
-            // here, and those are the ones worth keeping off the tick.
-            PlayerStatisticsService.Snapshot offlineSnapshot = target.isOnline()
-                    ? null
-                    : statistics.snapshot(target);
-            server.getScheduler().runTask(plugin, () -> {
-                if (!viewer.isOnline()) return;
-                if (!messages.requirePermission(viewer, "survivaltweaks.command.stats")) {
+        profiles.loadAsync(target.getUniqueId()).thenAcceptAsync(loaded -> {
+            if (!canView(viewer, target)) {
+                return;
+            }
+            Player online = server.getPlayer(target.getUniqueId());
+            if (online != null) {
+                show(viewer, target, back, statistics.snapshot(online));
+                return;
+            }
+            Path folder = server.getWorlds().getFirst().getWorldPath().resolve("players/stats");
+            UUID playerId = target.getUniqueId();
+            String playerName = target.getName();
+            int dataVersion = server.getUnsafe().getDataVersion();
+            server.getScheduler().runTaskAsynchronously(plugin, () -> {
+                PlayerStatisticsService.Snapshot offline;
+                try {
+                    offline = statistics.offlineSnapshot(folder, playerId, playerName, dataVersion).orElse(null);
+                } catch (IOException exception) {
+                    plugin.getLogger().log(Level.WARNING,
+                            "Could not load offline statistics for " + playerId, exception);
+                    server.getScheduler().runTask(plugin, () -> {
+                        if (canView(viewer, target)) {
+                            messages.send(viewer, "statistics.unavailable");
+                        }
+                    });
                     return;
                 }
+                server.getScheduler().runTask(plugin, () -> {
+                    if (!canView(viewer, target)) {
+                        return;
+                    }
+                    Player current = server.getPlayer(target.getUniqueId());
+                    if (current != null) {
+                        show(viewer, target, back, statistics.snapshot(current));
+                    } else if (offline != null) {
+                        show(viewer, target, back, offline);
+                    } else {
+                        // shortcut: let Paper upgrade old statistics until the player rejoins and saves the current format.
+                        show(viewer, target, back, statistics.snapshot(target));
+                    }
+                });
+            });
+        }, runnable -> server.getScheduler().runTask(plugin, runnable));
+    }
 
-                PlayerStatisticsService.Snapshot snapshot = offlineSnapshot == null
-                        ? statistics.snapshot(target)
-                        : offlineSnapshot;
+    private boolean canView(Player viewer, OfflinePlayer target) {
+        if (!viewer.isOnline() || !messages.requirePermission(viewer, "survivaltweaks.command.stats")) {
+            return false;
+        }
+        if (!settings.current().statisticsEnabled()) {
+            messages.send(viewer, "statistics.disabled");
+            return false;
+        }
+        if (viewer.getUniqueId().equals(target.getUniqueId())
+                || viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
+            return true;
+        }
+        if (settings.current().statisticsPublicViewing()
+                && profiles.load(target.getUniqueId()).preferences().publicProfileEnabled()) {
+            return true;
+        }
+        messages.send(viewer, "statistics.private");
+        return false;
+    }
 
-                boolean own = viewer.getUniqueId().equals(target.getUniqueId());
-                if (!own
-                        && (!settings.current().statisticsPublicViewing()
-                        || !targetProfile.preferences().publicProfileEnabled())
-                        && !viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
-                    messages.send(viewer, "statistics.private");
-                    return;
-                }
-                String targetName = target.getName() == null
-                        ? targetProfile.lastKnownName()
-                        : target.getName();
-                if (targetName.isBlank()) {
-                    targetName = target.getUniqueId().toString().substring(0, 8);
-                }
-
+    private void show(Player viewer, OfflinePlayer target, Consumer<Player> back,
+                      PlayerStatisticsService.Snapshot snapshot) {
+        String targetName = target.getName();
+        if (targetName == null || targetName.isBlank()) {
+            targetName = profiles.load(target.getUniqueId()).lastKnownName();
+        }
+        if (targetName.isBlank()) {
+            targetName = target.getUniqueId().toString().substring(0, 8);
+        }
         StatisticsHolder holder = new StatisticsHolder(
                 viewer.getUniqueId(),
                 back,
@@ -179,8 +223,6 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         ));
         viewer.openInventory(inventory);
         feedback.play(viewer, FeedbackService.UI_OPEN);
-            });
-        });
     }
 
     @Override

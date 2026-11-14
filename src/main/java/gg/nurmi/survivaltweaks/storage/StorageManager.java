@@ -76,15 +76,13 @@ public final class StorageManager implements AutoCloseable {
                         migration
                 );
             }
-            return migrate(
-                    normalized,
-                    logger,
-                    worldResolver,
-                    configured,
-                    states,
-                    previous,
-                    migration
-            );
+            if (previous == null || configured.backend() != migration.source()
+                    || previous.backend() != migration.source()
+                    || !endpointMatches(configured, previous.endpointFingerprint())) {
+                return migrate(normalized, logger, configured, states, previous, migration);
+            }
+            states.completeMigration();
+            logger.warning("Discarded an incomplete storage migration request. The source remains active.");
         }
 
         if (previous != null && previous.backend() != configured.backend()) {
@@ -94,21 +92,27 @@ public final class StorageManager implements AutoCloseable {
                             + configured.backend().key()
             );
         }
-        if (previous != null
-                && !endpointMatches(configured, previous.endpointFingerprint())) {
+        boolean changedEndpoint = previous != null && !endpointMatches(configured, previous.endpointFingerprint());
+        if (changedEndpoint && (configured.backend() != StorageBackend.SQLITE
+                || !Files.isRegularFile(configured.sqliteFile()))) {
             throw new IOException(
                     "The configured storage endpoint differs from the pinned endpoint; "
                             + "use the storage migration command instead of changing it directly"
             );
         }
 
+        if (previous != null) {
+            requirePinnedSqlite(configured, previous.instanceId());
+        }
         SqlStorage storage = new SqlStorage(configured, logger);
         try {
-            UUID instanceId = previous == null
-                    ? existingOrNewInstance(storage)
-                    : previous.instanceId();
-            storage.ensureInstanceId(instanceId);
             storage.acquireInstanceLease();
+            UUID instanceId;
+            if (previous == null) {
+                instanceId = storage.ensureInstanceId(existingOrNewInstance(storage));
+            } else {
+                instanceId = requireInstance(storage.instanceId(), previous.instanceId());
+            }
             ImportResult imported = importLegacyIfNeeded(
                     normalized,
                     logger,
@@ -289,8 +293,7 @@ public final class StorageManager implements AutoCloseable {
         return new ExportResult(target, snapshot.counts(), checksum);
     }
 
-    public TestResult testBackend(StorageBackend target) throws IOException {
-        StorageConfiguration tested = configuration.forBackend(target);
+    public TestResult testBackend(StorageConfiguration tested) throws IOException {
         long started = System.nanoTime();
         try (SqlStorage candidate = new SqlStorage(tested, logger)) {
             SqlStorage.Verification verification = candidate.verifyUninitialized();
@@ -298,20 +301,22 @@ public final class StorageManager implements AutoCloseable {
                 throw new IOException(String.join("; ", verification.problems()));
             }
             return new TestResult(
-                    target,
+                    tested.backend(),
                     candidate.isEmpty(),
                     Duration.ofNanos(System.nanoTime() - started).toMillis()
             );
         }
     }
 
-    public MigrationPlan stageMigration(StorageBackend target)
+    public MigrationPlan stageMigration(StorageConfiguration configured, StorageBackend target)
             throws IOException {
-        Objects.requireNonNull(target, "target");
         if (target == backend()) {
             throw new IOException("Storage already uses " + target.key());
         }
-        StorageConfiguration targetConfiguration = configuration.forBackend(target);
+        if (!endpointMatches(configured.forBackend(backend()), state.endpointFingerprint())) {
+            throw new IOException("The configured migration source differs from the active database");
+        }
+        StorageConfiguration targetConfiguration = configured.forBackend(target);
         try (SqlStorage destination = new SqlStorage(targetConfiguration, logger)) {
             destination.acquireInstanceLease();
             if (!destination.isEmpty()) {
@@ -371,7 +376,6 @@ public final class StorageManager implements AutoCloseable {
     private static StorageManager migrate(
             Path dataFolder,
             Logger logger,
-            Function<String, UUID> worldResolver,
             StorageConfiguration configured,
             StorageStateStore states,
             StorageStateStore.State previous,
@@ -397,13 +401,13 @@ public final class StorageManager implements AutoCloseable {
             throw new IOException("Target storage configuration changed after migration was staged");
         }
 
-        SqlStorage source = new SqlStorage(sourceConfiguration, logger);
+        requirePinnedSqlite(sourceConfiguration, previous.instanceId());
         SqlStorage target = new SqlStorage(targetConfiguration, logger);
         boolean keepTarget = false;
         boolean targetWasEmpty = false;
-        try {
-            source.ensureInstanceId(previous.instanceId());
+        try (SqlStorage source = new SqlStorage(sourceConfiguration, logger)) {
             source.acquireInstanceLease();
+            requireInstance(source.instanceId(), previous.instanceId());
             target.acquireInstanceLease();
             StorageSnapshot snapshot = source.exportSnapshot();
             String sourceChecksum = StorageChecksum.calculate(snapshot);
@@ -464,7 +468,6 @@ public final class StorageManager implements AutoCloseable {
                     new ImportResult(false, snapshot.counts(), targetChecksum, Instant.now())
             );
         } finally {
-            source.close();
             if (!keepTarget) {
                 if (targetWasEmpty) {
                     try {
@@ -493,6 +496,23 @@ public final class StorageManager implements AutoCloseable {
         }
     }
 
+    private static void requirePinnedSqlite(StorageConfiguration configuration, UUID expected) throws IOException {
+        if (configuration.backend() == StorageBackend.SQLITE) {
+            Path file = configuration.sqliteFile();
+            if (!Files.isRegularFile(file)) {
+                throw new IOException("The pinned SQLite database is missing: " + file);
+            }
+            requireInstance(SqlStorage.sqliteInstanceId(file), expected);
+        }
+    }
+
+    private static UUID requireInstance(UUID actual, UUID expected) throws IOException {
+        if (!actual.equals(expected)) {
+            throw new IOException("The configured database belongs to a different SurvivalTweaks instance");
+        }
+        return actual;
+    }
+
     private static UUID existingOrNewInstance(SqlStorage storage) {
         try {
             return storage.instanceId();
@@ -509,10 +529,11 @@ public final class StorageManager implements AutoCloseable {
             StorageStateStore.State previous,
             StorageStateStore.Migration migration
     ) throws IOException {
+        requirePinnedSqlite(configuration, previous.instanceId());
         SqlStorage target = new SqlStorage(configuration, logger);
         try {
-            target.ensureInstanceId(previous.instanceId());
             target.acquireInstanceLease();
+            requireInstance(target.instanceId(), previous.instanceId());
             SqlStorage.Verification verification = target.verify();
             if (!verification.healthy()) {
                 throw new IOException(

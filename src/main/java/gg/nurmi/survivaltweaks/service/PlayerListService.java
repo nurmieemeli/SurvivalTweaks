@@ -278,20 +278,9 @@ public final class PlayerListService implements Listener, AutoCloseable {
             });
             rowsDirty = true;
         }
-        int away = 0;
-        if (current.afkIndicatorsEnabled()) {
-            for (UUID playerId : online) {
-                if (afk.isAfk(playerId)) {
-                    away++;
-                }
-            }
-        }
         RefreshContext context = new RefreshContext(
                 current,
                 players,
-                players.size(),
-                players.size() - away,
-                away,
                 server.getMaxPlayers(),
                 greetingKey(),
                 quantizeTenths(oneMinuteTps()),
@@ -367,14 +356,24 @@ public final class PlayerListService implements Listener, AutoCloseable {
         boolean showWorld = current.playerListShowWorld();
         boolean worldDetails = showWorld
                 && world.getEnvironment() == World.Environment.NORMAL;
+        int visible = 0;
+        int away = 0;
+        for (Player candidate : context.players()) {
+            if (player.equals(candidate) || player.canSee(candidate)) {
+                visible++;
+                if (current.afkIndicatorsEnabled() && afk.isAfk(candidate.getUniqueId())) {
+                    away++;
+                }
+            }
+        }
         ViewState state = new ViewState(
                 preferences.playerListEnabled(),
                 preferences.language(),
                 player.locale().getLanguage(),
                 player.getName(),
-                context.online(),
-                context.active(),
-                context.afk(),
+                visible,
+                visible - away,
+                away,
                 context.maximum(),
                 context.greetingKey(),
                 current.playerListShowPing() ? player.getPing() : 0,
@@ -401,7 +400,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
             player.sendPlayerListHeaderAndFooter(Component.empty(), Component.empty());
             return;
         }
-        player.sendPlayerListHeaderAndFooter(header(player, context), footer(player, context, unread));
+        player.sendPlayerListHeaderAndFooter(header(player, context), footer(player, context, state));
     }
 
     private Component header(Player player, RefreshContext context) {
@@ -413,16 +412,16 @@ public final class PlayerListService implements Listener, AutoCloseable {
         );
     }
 
-    private Component footer(Player player, RefreshContext context, long unread) {
+    private Component footer(Player player, RefreshContext context, ViewState state) {
         PluginSettings current = context.settings();
         Component firstLine = messages.component(
                 player,
                 current.afkIndicatorsEnabled()
                         ? "player-list.online-with-afk"
                         : "player-list.online",
-                Placeholder.unparsed("online", Integer.toString(context.online())),
-                Placeholder.unparsed("active", Integer.toString(context.active())),
-                Placeholder.unparsed("afk", Integer.toString(context.afk())),
+                Placeholder.unparsed("online", Integer.toString(state.online())),
+                Placeholder.unparsed("active", Integer.toString(state.active())),
+                Placeholder.unparsed("afk", Integer.toString(state.afk())),
                 Placeholder.unparsed("maximum", Integer.toString(context.maximum()))
         );
         if (current.playerListShowPing()) {
@@ -459,6 +458,7 @@ public final class PlayerListService implements Listener, AutoCloseable {
         if (!performance.isEmpty()) {
             footer = footer.append(Component.newline()).append(join(performance));
         }
+        long unread = state.unread();
         if (current.playerListShowUnreadNotifications() && unread > 0) {
             footer = footer.append(Component.newline()).append(messages.component(
                     player,
@@ -642,9 +642,6 @@ public final class PlayerListService implements Listener, AutoCloseable {
     private record RefreshContext(
             PluginSettings settings,
             List<Player> players,
-            int online,
-            int active,
-            int afk,
             int maximum,
             String greetingKey,
             long tpsTenths,

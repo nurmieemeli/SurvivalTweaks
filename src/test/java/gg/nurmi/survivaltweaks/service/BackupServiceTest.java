@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
@@ -231,6 +232,22 @@ class BackupServiceTest {
         assertFalse(backups.verify("traversal.zip").valid());
         assertFalse(backups.verify("corrupt.zip").valid());
         assertFalse(backups.verify("../traversal.zip").valid());
+    }
+
+    @Test
+    void rejectsCaseCollisionsBeforeStagingARestore() throws IOException {
+        Path folder = Files.createDirectories(dataFolder.resolve("backups"));
+        try (var zip = new ZipOutputStream(Files.newOutputStream(folder.resolve("collision.zip")))) {
+            for (String name : List.of("userdata/Player.yml", "userdata/player.yml")) {
+                zip.putNextEntry(new ZipEntry(name));
+                zip.write(1);
+                zip.closeEntry();
+            }
+        }
+        BackupService backup = service(10);
+        assertFalse(backup.verify("collision.zip").valid());
+        org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> backup.stageRestore("collision.zip"));
+        assertFalse(backup.hasPendingRestore());
     }
 
     private BackupService service(int retention) {

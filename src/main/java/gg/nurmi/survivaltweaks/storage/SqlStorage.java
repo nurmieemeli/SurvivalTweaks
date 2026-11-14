@@ -21,6 +21,7 @@ import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.Material;
 import org.sqlite.JDBC;
+import org.sqlite.SQLiteConfig;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -71,8 +72,7 @@ public final class SqlStorage implements
     private final HikariDataSource dataSource;
     private final ReentrantReadWriteLock snapshotGate = new ReentrantReadWriteLock();
     private Connection instanceLeaseConnection;
-    private long postgresLeaseKey;
-    private String mysqlLeaseName;
+    private List<?> leaseKeys = List.of();
     private ScheduledExecutorService leaseMonitor;
     private ScheduledFuture<?> leaseCheck;
     private volatile String leaseFailure = "";
@@ -143,12 +143,26 @@ public final class SqlStorage implements
 
     public UUID instanceId() throws IOException {
         try (Connection connection = connection()) {
-            String value = meta(connection, META_INSTANCE_ID)
-                    .orElseThrow(() -> new IOException("Storage instance identity is missing"));
-            return UUID.fromString(value);
+            return readInstanceId(connection);
         } catch (SQLException | IllegalArgumentException exception) {
             throw io("Could not read storage instance identity", exception);
         }
+    }
+
+    static UUID sqliteInstanceId(Path file) throws IOException {
+        SQLiteConfig options = new SQLiteConfig();
+        options.setReadOnly(true);
+        try (Connection connection = new JDBC().connect("jdbc:sqlite:" + file, options.toProperties())) {
+            return readInstanceId(connection);
+        } catch (SQLException | IllegalArgumentException exception) {
+            throw new IOException("Could not read SQLite instance identity", exception);
+        }
+    }
+
+    private static UUID readInstanceId(Connection connection) throws SQLException, IOException {
+        String value = meta(connection, META_INSTANCE_ID)
+                .orElseThrow(() -> new IOException("Storage instance identity is missing"));
+        return UUID.fromString(value);
     }
 
     /**
@@ -166,57 +180,66 @@ public final class SqlStorage implements
         Connection lease = null;
         try {
             lease = connection();
-            boolean acquired;
-            if (configuration.backend() == StorageBackend.POSTGRESQL) {
-                postgresLeaseKey = Long.parseUnsignedLong(
-                        configuration.endpointFingerprint().substring(0, 16),
-                        16
-                );
-                try (PreparedStatement statement = lease.prepareStatement(
-                        "SELECT pg_try_advisory_lock(?)"
-                )) {
-                    statement.setLong(1, postgresLeaseKey);
-                    try (ResultSet result = statement.executeQuery()) {
-                        acquired = result.next() && result.getBoolean(1);
-                    }
-                }
+            boolean postgres = configuration.backend() == StorageBackend.POSTGRESQL;
+            List<?> keys;
+            // Retain the configured endpoint key so older builds cannot acquire it concurrently.
+            if (postgres) {
+                String schema = leaseIdentity(lease, "SELECT current_schema()");
+                UUID hash = UUID.nameUUIDFromBytes(("survivaltweaks:" + schema)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                long current = hash.getMostSignificantBits() ^ hash.getLeastSignificantBits();
+                long legacy = Long.parseUnsignedLong(configuration.endpointFingerprint().substring(0, 16), 16);
+                keys = current == legacy ? List.of(current) : List.of(current, legacy);
             } else {
-                mysqlLeaseName = "survivaltweaks:"
-                        + configuration.endpointFingerprint().substring(0, 40);
-                try (PreparedStatement statement = lease.prepareStatement(
-                        "SELECT GET_LOCK(?, 0)"
-                )) {
-                    statement.setString(1, mysqlLeaseName);
-                    try (ResultSet result = statement.executeQuery()) {
-                        acquired = result.next() && result.getInt(1) == 1;
-                    }
+                String database = leaseIdentity(lease,
+                        "SELECT IF(@@lower_case_table_names = 0, DATABASE(), LOWER(DATABASE()))");
+                String current = "survivaltweaks:" + UUID.nameUUIDFromBytes(
+                        database.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String legacy = "survivaltweaks:" + configuration.endpointFingerprint().substring(0, 40);
+                keys = List.of(current, legacy);
+            }
+            String acquire = postgres ? "SELECT pg_try_advisory_lock(?)" : "SELECT GET_LOCK(?, 0)";
+            for (Object key : keys) {
+                if (!leaseQuery(lease, acquire, key)) {
+                    throw new IOException("Another SurvivalTweaks server is already using this database endpoint");
                 }
             }
-            if (!acquired) {
-                throw new IOException(
-                        "Another SurvivalTweaks server is already using this database endpoint"
-                );
-            }
+            leaseKeys = keys;
             instanceLeaseConnection = lease;
             startLeaseMonitor();
-        } catch (SQLException | RuntimeException exception) {
+        } catch (SQLException | RuntimeException | IOException exception) {
             if (lease != null) {
+                // Returning a pooled connection would leave any acquired session locks in place.
+                dataSource.evictConnection(lease);
                 try {
                     lease.close();
                 } catch (SQLException closeFailure) {
                     exception.addSuppressed(closeFailure);
                 }
+            }
+            if (exception instanceof IOException failure) {
+                throw failure;
             }
             throw io("Could not acquire the database instance lease", exception);
-        } catch (IOException exception) {
-            if (lease != null) {
-                try {
-                    lease.close();
-                } catch (SQLException closeFailure) {
-                    exception.addSuppressed(closeFailure);
-                }
+        }
+    }
+
+    private static boolean leaseQuery(Connection lease, String query, Object key) throws SQLException {
+        try (PreparedStatement statement = lease.prepareStatement(query)) {
+            statement.setObject(1, key);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() && rows.getBoolean(1);
             }
-            throw exception;
+        }
+    }
+
+    private static String leaseIdentity(Connection connection, String query) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet results = statement.executeQuery(query)) {
+            if (!results.next() || results.getString(1) == null) {
+                throw new SQLException("Could not identify the database namespace for the instance lease");
+            }
+            return results.getString(1);
         }
     }
 
@@ -783,38 +806,28 @@ public final class SqlStorage implements
             return;
         }
         try {
-            boolean held;
-            if (configuration.backend() == StorageBackend.POSTGRESQL) {
-                try (PreparedStatement check = lease.prepareStatement(
-                        "SELECT pg_try_advisory_lock(?)"
-                )) {
-                    check.setLong(1, postgresLeaseKey);
-                    try (ResultSet result = check.executeQuery()) {
-                        held = result.next() && result.getBoolean(1);
-                    }
-                }
-                if (held) {
-                    try (PreparedStatement balance = lease.prepareStatement(
-                            "SELECT pg_advisory_unlock(?)"
-                    )) {
-                        balance.setLong(1, postgresLeaseKey);
-                        try (ResultSet result = balance.executeQuery()) {
+            for (Object key : leaseKeys) {
+                boolean held;
+                if (key instanceof Long value) {
+                    try (PreparedStatement check = lease.prepareStatement("""
+                            SELECT EXISTS (
+                                SELECT 1 FROM pg_locks WHERE locktype = 'advisory'
+                                AND pid = pg_backend_pid() AND granted AND objsubid = 1
+                                AND classid::bigint = ? AND objid::bigint = ?
+                            )
+                            """)) {
+                        check.setLong(1, value >>> 32);
+                        check.setLong(2, value & 0xffffffffL);
+                        try (ResultSet result = check.executeQuery()) {
                             held = result.next() && result.getBoolean(1);
                         }
                     }
+                } else {
+                    held = leaseQuery(lease, "SELECT IS_USED_LOCK(?) = CONNECTION_ID()", key);
                 }
-            } else {
-                try (PreparedStatement check = lease.prepareStatement(
-                        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()"
-                )) {
-                    check.setString(1, mysqlLeaseName);
-                    try (ResultSet result = check.executeQuery()) {
-                        held = result.next() && result.getBoolean(1);
-                    }
+                if (!held) {
+                    throw new SQLException("The database session no longer owns its singleton lock");
                 }
-            }
-            if (!held) {
-                throw new SQLException("The database session no longer owns its singleton lock");
             }
         } catch (SQLException | RuntimeException exception) {
             leaseFailure = exception.getClass().getSimpleName() + ": "
@@ -861,23 +874,14 @@ public final class SqlStorage implements
         }
         try {
             if (!lease.isClosed()) {
-                if (configuration.backend() == StorageBackend.POSTGRESQL) {
-                    try (PreparedStatement statement = lease.prepareStatement(
-                            "SELECT pg_advisory_unlock(?)"
-                    )) {
-                        statement.setLong(1, postgresLeaseKey);
-                        statement.executeQuery();
-                    }
-                } else if (configuration.backend() == StorageBackend.MYSQL) {
-                    try (PreparedStatement statement = lease.prepareStatement(
-                            "SELECT RELEASE_LOCK(?)"
-                    )) {
-                        statement.setString(1, mysqlLeaseName);
-                        statement.executeQuery();
-                    }
+                String unlock = configuration.backend() == StorageBackend.POSTGRESQL
+                        ? "SELECT pg_advisory_unlock(?)" : "SELECT RELEASE_LOCK(?)";
+                for (Object key : leaseKeys) {
+                    leaseQuery(lease, unlock, key);
                 }
             }
         } catch (SQLException exception) {
+            dataSource.evictConnection(lease);
             logger.log(Level.WARNING, "Could not release database instance lease", exception);
         } finally {
             try {
@@ -2310,7 +2314,7 @@ public final class SqlStorage implements
         }
     }
 
-    private Optional<String> meta(Connection connection, String key) throws SQLException {
+    private static Optional<String> meta(Connection connection, String key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT meta_value FROM st_meta WHERE meta_key = ?"
         )) {

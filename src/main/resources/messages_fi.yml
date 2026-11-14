@@ -181,6 +181,7 @@ profile:
   private: "<yellow>Tämä pelaaja pitää profiilinsa yksityisenä.</yellow>"
 
 statistics:
+  unavailable: "<red>Pelaajan tilastoja ei voitu ladata.</red>"
   usage: "<red>Käyttö: /stats [pelaaja]</red>"
   disabled: "<red>Pelaajatilastot eivät ole käytössä tällä palvelimella.</red>"
   unknown: "<red>Tämä pelaaja ei ole liittynyt palvelimelle.</red>"

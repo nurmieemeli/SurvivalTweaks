@@ -389,6 +389,14 @@ public final class SafeTeleportService implements AutoCloseable {
 
             Optional<Location> safeDestination;
             try {
+                // Destination suppliers also check access. The target can change while chunks load.
+                Location current = pendingTeleport.destination().get();
+                if (current == null || !Objects.equals(current.getWorld(), requested.getWorld())) {
+                    finish(player, pendingTeleport);
+                    messages.send(player, "teleport.safety.unavailable");
+                    feedback.play(player, FeedbackService.TELEPORT_CANCELLED);
+                    return;
+                }
                 safeDestination = findSafeDestination(requested);
             } catch (RuntimeException exception) {
                 fail(player, pendingTeleport, "Could not evaluate teleport destination safety", exception);

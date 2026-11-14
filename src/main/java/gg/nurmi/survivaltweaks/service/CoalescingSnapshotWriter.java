@@ -142,7 +142,7 @@ final class CoalescingSnapshotWriter<T> implements AutoCloseable {
                     }
                     failures = 0;
                     monitor.succeeded(lane, pending.get() == null ? 0 : 1);
-                } catch (IOException exception) {
+                } catch (IOException | RuntimeException exception) {
                     logger.log(Level.SEVERE, "Could not save " + description, exception);
                     if (latestRequested.get() == entry.value()) {
                         pending.compareAndSet(null, entry);

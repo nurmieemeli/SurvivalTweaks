@@ -57,6 +57,28 @@ class CoalescingSnapshotWriterTest {
     }
 
     @Test
+    void runtimeSaveFailureIsRecordedAndDoesNotStrandLaterWrites() throws Exception {
+        var monitor = new PersistenceMonitor();
+        var attempted = new CountDownLatch(1);
+        var lastSaved = new java.util.concurrent.atomic.AtomicReference<String>();
+        try (var writer = new CoalescingSnapshotWriter<String>("runtime-retry-test", "test",
+                value -> {
+                    if (value.equals("first")) {
+                        attempted.countDown();
+                        throw new IllegalStateException("transient failure");
+                    }
+                    lastSaved.set(value);
+                }, Logger.getAnonymousLogger(), monitor, "test")) {
+            writer.submit("first");
+            assertTrue(attempted.await(3, TimeUnit.SECONDS));
+            writer.submit("second");
+            assertTrue(writer.flush(Duration.ofSeconds(3)));
+            assertEquals("second", lastSaved.get());
+            assertTrue(monitor.snapshot().lastFailure() != null);
+        }
+    }
+
+    @Test
     void flushSucceedsImmediatelyWhenNothingWasEverSubmitted() {
         CoalescingSnapshotWriter<String> writer = new CoalescingSnapshotWriter<>(
                 "snapshot-idle-flush-test",

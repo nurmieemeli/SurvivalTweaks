@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.object.Profile;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
@@ -81,52 +82,48 @@ public final class MailService {
             return CompletableFuture.completedFuture(SendResult.TOO_LONG);
         }
         
-        return profiles.loadAsync(recipient.getUniqueId()).thenApplyAsync(recipientProfile -> {
-            if (!recipientProfile.preferences().mailEnabled()
-                    || recipientProfile.blocksMailFrom(sender.getUniqueId())) {
-                return SendResult.UNAVAILABLE;
-            }
+        return profiles.loadAsync(recipient.getUniqueId()).thenApplyAsync(
+                loaded -> profiles.withCurrent(loaded, current -> deliver(sender, recipient, current, message)),
+                runnable -> server.getScheduler().runTask(plugin, runnable));
+    }
 
-            Instant now = clock.instant();
+    private SendResult deliver(Player sender, OfflinePlayer recipient, Profile profile, String message) {
+        var current = settings.current();
+        if (!current.mailEnabled()) {
+            return SendResult.DISABLED;
+        }
+        UUID senderId = sender.getUniqueId();
+        if (!profile.preferences().mailEnabled() || profile.blocksMailFrom(senderId)) {
+            return SendResult.UNAVAILABLE;
+        }
+
+        Instant now = clock.instant();
         if (++sendsSinceCleanup >= 64) {
             cleanupRateLimits(now);
             sendsSinceCleanup = 0;
         }
-        Instant allowedAt = cooldowns.get(sender.getUniqueId());
+        Instant allowedAt = cooldowns.get(senderId);
         if (allowedAt != null && allowedAt.isAfter(now)) {
             return SendResult.COOLDOWN;
         }
-        ArrayDeque<Instant> recent = hourlySends.computeIfAbsent(
-                sender.getUniqueId(),
-                ignored -> new ArrayDeque<>()
-        );
+        ArrayDeque<Instant> recent = hourlySends.computeIfAbsent(senderId, ignored -> new ArrayDeque<>());
         Instant cutoff = now.minusSeconds(3600);
         while (!recent.isEmpty() && recent.peekFirst().isBefore(cutoff)) {
             recent.removeFirst();
         }
-        if (recent.size() >= settings.current().mailMaximumPerHour()) {
+        if (recent.size() >= current.mailMaximumPerHour()) {
             return SendResult.HOURLY_LIMIT;
         }
 
-        notifications.mail(
-                recipient.getUniqueId(),
-                sender.getUniqueId(),
-                sender.getName(),
-                message
-        );
-        cooldowns.put(sender.getUniqueId(), now.plus(settings.current().mailCooldown()));
-            recent.addLast(now);
-            Player online = recipient.getPlayer();
-            if (online != null) {
-                messages.send(
-                        online,
-                        "mail.received",
-                        Placeholder.unparsed("sender", sender.getName())
-                );
-                feedback.play(online, FeedbackService.MAIL);
-            }
-            return SendResult.SENT;
-        }, runnable -> server.getScheduler().runTask(plugin, runnable));
+        notifications.mail(profile, senderId, sender.getName(), message);
+        cooldowns.put(senderId, now.plus(current.mailCooldown()));
+        recent.addLast(now);
+        Player online = recipient.getPlayer();
+        if (online != null) {
+            messages.send(online, "mail.received", Placeholder.unparsed("sender", sender.getName()));
+            feedback.play(online, FeedbackService.MAIL);
+        }
+        return SendResult.SENT;
     }
 
     private void cleanupRateLimits(Instant now) {

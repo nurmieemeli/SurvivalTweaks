@@ -143,9 +143,10 @@ public final class SurvivalTweaks extends JavaPlugin {
             );
             backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
             if (backups.hasPendingRestore()) {
-                backups.create("pre-restore");
+                backups.createPreRestoreBackup();
                 backups.applyPendingRestore();
                 reloadConfig();
+                backups.databaseFilename(getConfig().getString("storage.sqlite.file", "survivaltweaks.db"));
             } else {
                 backups.createStartupBackup();
             }

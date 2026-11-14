@@ -67,6 +67,25 @@ class ChatListenerTest {
         assertEquals(ClickEvent.runCommand("/profile Alex"), click);
     }
 
+    @Test
+    void onlyFinalUncancelledChatCanTriggerMentions() {
+        var mentions = mock(MentionService.class);
+        var listener = new ChatListener(mock(MessageService.class), mock(SettingsService.class), mentions);
+        var event = mock(AsyncChatEvent.class);
+        var player = mock(Player.class);
+        Component message = Component.text("@Alex");
+        when(event.getPlayer()).thenReturn(player);
+        when(event.message()).thenReturn(message);
+        when(event.isCancelled()).thenReturn(true);
+
+        listener.onChatComplete(event);
+        org.mockito.Mockito.verifyNoInteractions(mentions);
+
+        when(event.isCancelled()).thenReturn(false);
+        listener.onChatComplete(event);
+        org.mockito.Mockito.verify(mentions).process(player, message);
+    }
+
     private ClickEvent findClickEvent(Component component) {
         if (component.clickEvent() != null) {
             return component.clickEvent();

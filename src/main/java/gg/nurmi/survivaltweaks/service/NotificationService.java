@@ -44,8 +44,12 @@ public final class NotificationService {
             String senderName,
             String message
     ) {
+        return mail(profiles.load(playerId), senderId, senderName, message);
+    }
+
+    boolean mail(Profile recipient, UUID senderId, String senderName, String message) {
         return notify(
-                profiles.load(playerId),
+                recipient,
                 NotificationType.MAIL,
                 senderId,
                 senderName,
