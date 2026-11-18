@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.26.3 - 2026-11-18
+
+### Fixed
+
+- Backup verification rejects oversized or malformed YAML, conflicting records,
+  unsupported database schemas, and pending config migrations before staging.
+  Rotation preserves the last restorable archive when a new backup fails.
+- A staged restore stays pending if Windows locks files and retries at restart.
+  Restores save the original SQLite databases and their sidecars before replacing
+  data. Config-only and legacy restores preserve unrelated player files.
+- Storage migration and restore share a staging gate. Migration preserves config
+  edits and verifies both endpoints. Storage testing validates only the selected
+  destination, and Doctor reports invalid storage settings without exposing passwords.
+- Delayed chat replies and menu results cannot confirm a newer lock transfer or
+  replace a newer menu. Shared-home requests honor the most recent request, and
+  hidden players stay out of home and mail suggestions.
+- Concurrent profile loads, mail updates, and language recovery preserve newer
+  player changes. Lock hints refresh when names or languages change, and home
+  teleports and first joins avoid open trapdoors.
+
 ## 2.26.2 - 2026-11-14
 
 ### Fixed
