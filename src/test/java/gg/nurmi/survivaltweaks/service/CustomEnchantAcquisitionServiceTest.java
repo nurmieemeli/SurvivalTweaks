@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import net.kyori.adventure.text.Component;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
@@ -14,6 +15,8 @@ import org.bukkit.inventory.view.AnvilView;
 import org.bukkit.loot.LootTable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,7 +104,38 @@ class CustomEnchantAcquisitionServiceTest {
 
         verify(event).setResult(result);
         verify(view).setRepairCost(5);
+        verify(view).setRepairItemCountCost(1);
         verify(view, never()).setMaximumRepairCost(anyInt());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"36, SURVIVAL, false", "39, SURVIVAL, false", "39, CREATIVE, true"})
+    void combinedAnvilCostHonorsTheCapAndCreativeExemption(int baseCost, GameMode gameMode, boolean allowed) {
+        var event = mock(PrepareAnvilEvent.class);
+        var inventory = mock(AnvilInventory.class);
+        var view = mock(AnvilView.class);
+        var player = mock(Player.class);
+        var first = item(Material.DIAMOND_PICKAXE);
+        var second = item(Material.ENCHANTED_BOOK);
+        var vanilla = item(Material.DIAMOND_PICKAXE);
+        var result = item(Material.DIAMOND_PICKAXE);
+        when(player.getGameMode()).thenReturn(gameMode);
+        when(event.getInventory()).thenReturn(inventory);
+        when(event.getView()).thenReturn(view);
+        when(event.getResult()).thenReturn(vanilla);
+        when(view.getPlayer()).thenReturn(player);
+        when(view.getMaximumRepairCost()).thenReturn(40);
+        when(view.getRepairCost()).thenReturn(baseCost);
+        when(inventory.getFirstItem()).thenReturn(first);
+        when(inventory.getSecondItem()).thenReturn(second);
+        when(vanilla.clone()).thenReturn(result);
+        when(items.enchantments(second)).thenReturn(Map.of(CustomEnchantment.TUNNELING, 1));
+        when(items.apply(result, CustomEnchantment.TUNNELING, 1, player)).thenReturn(true);
+
+        service.onPrepareAnvil(event);
+
+        verify(view).setRepairCost(baseCost + 4);
+        verify(event).setResult(allowed ? result : null);
     }
 
     private ItemStack item(Material material) {

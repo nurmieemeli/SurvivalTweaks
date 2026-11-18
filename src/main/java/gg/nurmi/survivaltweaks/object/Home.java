@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public record Home(
         String name,
@@ -27,6 +28,12 @@ public record Home(
         HomeArrivalStyle arrivalStyle,
         Set<UUID> sharedWith
 ) {
+
+    private static final Pattern VALID_NAME = Pattern.compile("[\\p{L}\\p{N}_-]{1,32}");
+
+    public static boolean isValidName(String name) {
+        return VALID_NAME.matcher(name).matches();
+    }
 
     public Home(
             String name,

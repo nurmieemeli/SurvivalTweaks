@@ -85,15 +85,20 @@ public final class ContainerLock {
     }
 
     public boolean canAccess(UUID playerId, boolean administrator) {
-        return administrator
-                || ownerId.equals(playerId)
-                || accessMode == LockAccessMode.PUBLIC
-                || accessMode == LockAccessMode.DEPOSIT_ONLY
-                || trustedPlayers.contains(playerId);
+        return canAccess(playerId, administrator, false);
     }
 
     public boolean canWithdraw(UUID playerId, boolean administrator) {
-        return administrator
+        return canWithdraw(playerId, administrator, false);
+    }
+
+    public boolean canAccess(UUID playerId, boolean administrator, boolean trustedProfile) {
+        return accessMode == LockAccessMode.DEPOSIT_ONLY || canWithdraw(playerId, administrator, trustedProfile);
+    }
+
+    public boolean canWithdraw(UUID playerId, boolean administrator, boolean trustedProfile) {
+        return trustedProfile
+                || administrator
                 || ownerId.equals(playerId)
                 || accessMode == LockAccessMode.PUBLIC
                 || trustedPlayers.contains(playerId);
@@ -116,6 +121,10 @@ public final class ContainerLock {
 
     public boolean addBlock(BlockKey block) {
         return blocks.add(block);
+    }
+
+    public boolean removeBlock(BlockKey block) {
+        return blocks.remove(block);
     }
 
     public boolean rename(String updatedName) {

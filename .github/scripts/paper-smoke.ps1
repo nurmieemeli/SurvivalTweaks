@@ -32,6 +32,7 @@ if ($actualPaperSha256 -ne $paperSha256) {
 
 [IO.File]::WriteAllText((Join-Path $smokeRoot "eula.txt"), "eula=true`n", $utf8NoBom)
 [IO.File]::WriteAllLines((Join-Path $smokeRoot "server.properties"), @(
+    "server-ip=127.0.0.1"
     "online-mode=false"
     "server-port=25572"
     "enable-rcon=true"

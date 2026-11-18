@@ -13,6 +13,8 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 
+import java.util.function.Predicate;
+
 public class BlockRefillService implements Listener {
 
     private static final int FIRST_STORAGE_SLOT = 9;
@@ -36,7 +38,7 @@ public class BlockRefillService implements Listener {
 
         Player player = event.getPlayer();
         EquipmentSlot slot = event.getHand();
-        Material placedType = event.getItemInHand().getType();
+        ItemStack placed = event.getItemInHand().clone();
         int targetSlot = slot == EquipmentSlot.OFF_HAND
                 ? OFF_HAND_SLOT
                 : player.getInventory().getHeldItemSlot();
@@ -48,7 +50,7 @@ public class BlockRefillService implements Listener {
 
             PlayerInventory inventory = player.getInventory();
             if (isEmpty(inventory.getItem(targetSlot))) {
-                refillSlot(inventory, targetSlot, placedType);
+                refillSlot(inventory, targetSlot, placed::isSimilar);
             }
         }, 1L);
     }
@@ -58,13 +60,13 @@ public class BlockRefillService implements Listener {
         int targetSlot = slot == EquipmentSlot.OFF_HAND
                 ? OFF_HAND_SLOT
                 : inventory.getHeldItemSlot();
-        return refillSlot(inventory, targetSlot, targetMaterial);
+        return refillSlot(inventory, targetSlot, stack -> stack.getType() == targetMaterial);
     }
 
-    boolean refillSlot(PlayerInventory inventory, int targetSlot, Material targetMaterial) {
+    private boolean refillSlot(PlayerInventory inventory, int targetSlot, Predicate<ItemStack> matches) {
         for (int i = FIRST_STORAGE_SLOT; i <= LAST_STORAGE_SLOT; i++) {
             ItemStack stack = inventory.getItem(i);
-            if (stack != null && stack.getType() == targetMaterial && stack.getAmount() > 0) {
+            if (stack != null && stack.getAmount() > 0 && matches.test(stack)) {
                 ItemStack copy = stack.clone();
                 inventory.setItem(i, null);
                 inventory.setItem(targetSlot, copy);

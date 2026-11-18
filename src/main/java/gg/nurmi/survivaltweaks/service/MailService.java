@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.service;
 
+import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.Profile;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -15,8 +16,11 @@ import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 
 public final class MailService {
 
@@ -30,6 +34,7 @@ public final class MailService {
     private final Clock clock;
     private final Map<UUID, Instant> cooldowns = new HashMap<>();
     private final Map<UUID, ArrayDeque<Instant>> hourlySends = new HashMap<>();
+    private final Set<UUID> pendingSends = ConcurrentHashMap.newKeySet();
     private int sendsSinceCleanup;
 
     public MailService(
@@ -53,38 +58,51 @@ public final class MailService {
     }
 
     public OfflinePlayer findRecipient(String name) {
-        if (name == null || name.isBlank()) {
-            return null;
-        }
-        Player online = server.getPlayerExact(name);
-        if (online != null) {
-            return online;
-        }
-        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
-        return cached != null && cached.hasPlayedBefore() ? cached : null;
+        return PlayerNameLookup.find(server, profiles, name);
     }
 
     public CompletableFuture<SendResult> sendAsync(Player sender, OfflinePlayer recipient, String rawMessage) {
-        if (!settings.current().mailEnabled()) {
+        var current = settings.current();
+        if (!current.mailEnabled()) {
             return CompletableFuture.completedFuture(SendResult.DISABLED);
         }
         if (recipient == null || (!recipient.isOnline() && !recipient.hasPlayedBefore())) {
             return CompletableFuture.completedFuture(SendResult.UNKNOWN_PLAYER);
         }
-        if (sender.getUniqueId().equals(recipient.getUniqueId())) {
+        UUID senderId = sender.getUniqueId();
+        if (senderId.equals(recipient.getUniqueId())) {
             return CompletableFuture.completedFuture(SendResult.SELF);
         }
         String message = normalize(rawMessage);
         if (message.isEmpty()) {
             return CompletableFuture.completedFuture(SendResult.EMPTY);
         }
-        if (message.codePointCount(0, message.length()) > settings.current().mailMaximumLength()) {
+        if (message.codePointCount(0, message.length()) > current.mailMaximumLength()) {
             return CompletableFuture.completedFuture(SendResult.TOO_LONG);
         }
-        
-        return profiles.loadAsync(recipient.getUniqueId()).thenApplyAsync(
-                loaded -> profiles.withCurrent(loaded, current -> deliver(sender, recipient, current, message)),
-                runnable -> server.getScheduler().runTask(plugin, runnable));
+
+        Instant now = clock.instant();
+        if (++sendsSinceCleanup >= 64) {
+            cleanupRateLimits(now);
+            sendsSinceCleanup = 0;
+        }
+        SendResult limit = rateLimit(senderId, now, current);
+        if (limit != null) {
+            return CompletableFuture.completedFuture(limit);
+        }
+        if (!pendingSends.add(senderId)) {
+            return CompletableFuture.completedFuture(SendResult.COOLDOWN);
+        }
+        try {
+            return profiles.withProfileAsync(recipient.getUniqueId(),
+                    runnable -> server.getScheduler().runTask(plugin, runnable),
+                    profile -> deliver(sender, recipient, profile, message))
+                    .whenComplete((result, failure) -> pendingSends.remove(senderId))
+                    .copy();
+        } catch (RuntimeException exception) {
+            pendingSends.remove(senderId);
+            return CompletableFuture.failedFuture(exception);
+        }
     }
 
     private SendResult deliver(Player sender, OfflinePlayer recipient, Profile profile, String message) {
@@ -98,32 +116,39 @@ public final class MailService {
         }
 
         Instant now = clock.instant();
-        if (++sendsSinceCleanup >= 64) {
-            cleanupRateLimits(now);
-            sendsSinceCleanup = 0;
+        SendResult limit = rateLimit(senderId, now, current);
+        if (limit != null) {
+            return limit;
         }
-        Instant allowedAt = cooldowns.get(senderId);
-        if (allowedAt != null && allowedAt.isAfter(now)) {
-            return SendResult.COOLDOWN;
+        if (!notifications.mail(profile, senderId, sender.getName(), message)) {
+            return SendResult.MAILBOX_FULL;
         }
-        ArrayDeque<Instant> recent = hourlySends.computeIfAbsent(senderId, ignored -> new ArrayDeque<>());
-        Instant cutoff = now.minusSeconds(3600);
-        while (!recent.isEmpty() && recent.peekFirst().isBefore(cutoff)) {
-            recent.removeFirst();
-        }
-        if (recent.size() >= current.mailMaximumPerHour()) {
-            return SendResult.HOURLY_LIMIT;
-        }
-
-        notifications.mail(profile, senderId, sender.getName(), message);
         cooldowns.put(senderId, now.plus(current.mailCooldown()));
-        recent.addLast(now);
+        hourlySends.computeIfAbsent(senderId, ignored -> new ArrayDeque<>()).addLast(now);
         Player online = recipient.getPlayer();
         if (online != null) {
             messages.send(online, "mail.received", Placeholder.unparsed("sender", sender.getName()));
             feedback.play(online, FeedbackService.MAIL);
         }
         return SendResult.SENT;
+    }
+
+    private SendResult rateLimit(UUID senderId, Instant now, PluginSettings current) {
+        Instant allowedAt = cooldowns.get(senderId);
+        if (allowedAt != null && allowedAt.isAfter(now)) {
+            return SendResult.COOLDOWN;
+        }
+        ArrayDeque<Instant> recent = hourlySends.get(senderId);
+        if (recent != null) {
+            Instant cutoff = now.minusSeconds(3600);
+            while (!recent.isEmpty() && recent.peekFirst().isBefore(cutoff)) {
+                recent.removeFirst();
+            }
+            if (recent.size() >= current.mailMaximumPerHour()) {
+                return SendResult.HOURLY_LIMIT;
+            }
+        }
+        return null;
     }
 
     private void cleanupRateLimits(Instant now) {
@@ -138,7 +163,16 @@ public final class MailService {
     }
 
     public void sendWithFeedbackAsync(Player sender, OfflinePlayer recipient, String rawMessage) {
-        sendAsync(sender, recipient, rawMessage).thenAccept(result -> {
+        sendAsync(sender, recipient, rawMessage).whenComplete((result, failure) -> {
+            if (failure != null) {
+                plugin.getLogger().log(Level.WARNING, "Could not deliver player mail", failure);
+                server.getScheduler().runTask(plugin, () -> {
+                    if (sender.isOnline()) {
+                        messages.send(sender, "mail.result.failed");
+                    }
+                });
+                return;
+            }
             if (!sender.isOnline()) {
                 return;
             }
@@ -198,6 +232,7 @@ public final class MailService {
         EMPTY,
         TOO_LONG,
         UNAVAILABLE,
+        MAILBOX_FULL,
         COOLDOWN,
         HOURLY_LIMIT
     }

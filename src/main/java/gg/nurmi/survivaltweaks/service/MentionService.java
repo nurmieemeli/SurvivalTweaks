@@ -69,7 +69,7 @@ public final class MentionService implements Listener {
         });
     }
 
-    public void process(Player sender, Component message) {
+    public void process(Player sender, Component message, Set<Audience> viewers) {
         if (!settings.current().mentionsEnabled()) {
             return;
         }
@@ -78,8 +78,19 @@ public final class MentionService implements Listener {
                 plain,
                 settings.current().mentionMaxPerMessage()
         );
-        if (!names.isEmpty()) {
-            plugin.getServer().getScheduler().runTask(plugin, () -> notifyTargets(sender, names));
+        Set<UUID> mentionedViewers = new HashSet<>();
+        for (String name : names) {
+            UUID targetId = onlineByName.get(name.toLowerCase(Locale.ROOT));
+            if (targetId != null) {
+                mentionedViewers.add(targetId);
+            }
+        }
+        if (!mentionedViewers.isEmpty()) {
+            mentionedViewers.retainAll(viewers.stream()
+                    .filter(Player.class::isInstance).map(Player.class::cast).map(Player::getUniqueId).toList());
+            if (!mentionedViewers.isEmpty()) {
+                plugin.getServer().getScheduler().runTask(plugin, () -> notifyTargets(sender, mentionedViewers));
+            }
         }
     }
 
@@ -143,13 +154,12 @@ public final class MentionService implements Listener {
                 key.senderId().equals(playerId) || key.targetId().equals(playerId));
     }
 
-    private void notifyTargets(Player sender, java.util.List<String> names) {
+    private void notifyTargets(Player sender, Set<UUID> targets) {
         if (!sender.isOnline()) {
             return;
         }
-        for (String name : names) {
-            UUID targetId = onlineByName.get(name.toLowerCase(Locale.ROOT));
-            Player target = targetId == null ? null : plugin.getServer().getPlayer(targetId);
+        for (UUID targetId : targets) {
+            Player target = plugin.getServer().getPlayer(targetId);
             if (target == null
                     || target.getUniqueId().equals(sender.getUniqueId())
                     || !sender.canSee(target)

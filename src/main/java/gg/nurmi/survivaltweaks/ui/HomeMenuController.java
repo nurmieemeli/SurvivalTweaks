@@ -91,12 +91,29 @@ public final class HomeMenuController implements Listener {
     }
 
     public void teleport(Player player, Home home) {
-        teleport(player, home, () -> true);
+        teleport(player, home, () -> profiles.load(player.getUniqueId()).home(home.name())
+                .filter(current -> current.resolve(server).equals(home.resolve(server)))
+                .isPresent());
     }
 
     public void teleport(Player player, Home home, BooleanSupplier destinationAllowed) {
+        teleport(player, home, destinationAllowed, null);
+    }
+
+    public void teleport(Player player, Home home, BooleanSupplier destinationAllowed, Runnable onEnd) {
+        boolean accepted = false;
+        try {
+            accepted = beginTeleport(player, home, destinationAllowed, onEnd);
+        } finally {
+            if (!accepted && onEnd != null) {
+                onEnd.run();
+            }
+        }
+    }
+
+    private boolean beginTeleport(Player player, Home home, BooleanSupplier destinationAllowed, Runnable onEnd) {
         if (!messages.requirePermission(player, "survivaltweaks.command.home")) {
-            return;
+            return false;
         }
         Optional<Location> destination = home.resolve(server);
         if (destination.isEmpty()) {
@@ -107,13 +124,14 @@ public final class HomeMenuController implements Listener {
                     Placeholder.unparsed("world", home.worldName())
             );
             feedback.play(player, FeedbackService.TELEPORT_CANCELLED);
-            return;
+            return false;
         }
 
         Location resolved = destination.orElseThrow();
-        teleports.begin(
+        return teleports.beginWithCompletion(
                 player,
-                () -> destinationAllowed.getAsBoolean() ? resolved.clone() : null,
+                () -> player.hasPermission("survivaltweaks.command.home") && destinationAllowed.getAsBoolean()
+                        ? resolved.clone() : null,
                 messages.component(
                         player,
                         "home.teleported",
@@ -124,7 +142,8 @@ public final class HomeMenuController implements Listener {
                         "teleport.destination.home",
                         Placeholder.unparsed("home", home.name())
                 ),
-                home.arrivalStyle().cue()
+                home.arrivalStyle().cue(),
+                onEnd
         );
     }
 
@@ -268,7 +287,7 @@ public final class HomeMenuController implements Listener {
                     return;
                 }
                 String updatedName = text.strip();
-                if (updatedName.isBlank() || updatedName.length() > 16) {
+                if (!Home.isValidName(updatedName)) {
                     messages.send(responding, "ui.home-editor.invalid-name");
                     return;
                 }

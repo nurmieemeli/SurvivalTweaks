@@ -3,7 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.object.BlockKey;
 import gg.nurmi.survivaltweaks.object.ContainerLock;
 import gg.nurmi.survivaltweaks.object.LockAccessMode;
-import gg.nurmi.survivaltweaks.storage.ContainerLockStore;
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.LockFiles;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class ContainerLockServiceTest {
     @Test
     void rejectsOverlapsAndPersistsTheLatestAclAndBlockSet() {
         Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
-        ContainerLockStore store = new ContainerLockStore(directory.resolve("locks.yml"), logger);
+        LockFiles store = new LockFiles(directory.resolve("locks.yml"), logger);
         ContainerLockService service = new ContainerLockService(store, logger);
         UUID owner = UUID.randomUUID();
         UUID trusted = UUID.randomUUID();
@@ -62,13 +62,17 @@ class ContainerLockServiceTest {
     @Test
     void ownershipTransferPersistsAndRecentAccessIsBoundedNewestFirst() {
         Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
-        ContainerLockStore store = new ContainerLockStore(directory.resolve("transfer.yml"), logger);
+        LockFiles store = new LockFiles(directory.resolve("transfer.yml"), logger);
         ContainerLockService service = new ContainerLockService(store, logger);
         UUID originalOwner = UUID.randomUUID();
         UUID newOwner = UUID.randomUUID();
         ContainerLock lock = service.create(originalOwner, Set.of(block(30))).orElseThrow();
 
-        assertTrue(service.transfer(lock, newOwner));
+        ContainerLock existing = service.create(newOwner, Set.of(block(31))).orElseThrow();
+        assertEquals(ContainerLockService.TransferResult.LIMIT, service.transfer(lock, newOwner, 1));
+        assertEquals(originalOwner, lock.ownerId());
+        service.remove(existing);
+        assertEquals(ContainerLockService.TransferResult.TRANSFERRED, service.transfer(lock, newOwner, 1));
         for (int index = 0; index < 7; index++) {
             service.recordAccess(lock, UUID.randomUUID(), index % 2 == 0, Instant.ofEpochSecond(index));
         }
@@ -88,7 +92,7 @@ class ContainerLockServiceTest {
     @Test
     void everyBlockOfALockIsIndividuallyReportedAsLockedAcrossReloads() {
         Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
-        ContainerLockStore store = new ContainerLockStore(directory.resolve("blocks.yml"), logger);
+        LockFiles store = new LockFiles(directory.resolve("blocks.yml"), logger);
         ContainerLockService service = new ContainerLockService(store, logger);
         BlockKey left = block(80);
         BlockKey right = new BlockKey(left.worldId(), 81, left.y(), left.z());
@@ -112,7 +116,7 @@ class ContainerLockServiceTest {
     void allocationFreeAutomationCheckCoversBothBlocksAndRemovalClearsHistory() {
         Logger logger = Logger.getLogger(ContainerLockServiceTest.class.getName());
         ContainerLockService service = new ContainerLockService(
-                new ContainerLockStore(directory.resolve("automation.yml"), logger),
+                new LockFiles(directory.resolve("automation.yml"), logger),
                 logger
         );
         BlockKey first = block(60);

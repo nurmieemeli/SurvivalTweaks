@@ -1,9 +1,11 @@
 package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.service.PlayerStatisticsService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import net.kyori.adventure.text.Component;
@@ -22,19 +24,21 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.SkullMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.logging.Level;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
+import static gg.nurmi.survivaltweaks.ui.MenuItems.playerHead;
 
 public final class StatisticsJournalController implements Listener, CommandExecutor, TabCompleter {
 
@@ -52,6 +56,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
     private final PlayerStatisticsService statistics;
     private final MessageService messages;
     private final FeedbackService feedback;
+    private final ProfileMenuRequests menuRequests;
     private Consumer<Player> defaultBack = Player::closeInventory;
 
     public StatisticsJournalController(
@@ -61,7 +66,8 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             ProfileRepository profiles,
             PlayerStatisticsService statistics,
             MessageService messages,
-            FeedbackService feedback
+            FeedbackService feedback,
+            ProfileMenuRequests menuRequests
     ) {
         this.plugin = plugin;
         this.server = server;
@@ -70,6 +76,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         this.statistics = statistics;
         this.messages = messages;
         this.feedback = feedback;
+        this.menuRequests = menuRequests;
     }
 
     public void backTo(Consumer<Player> action) {
@@ -96,53 +103,54 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             messages.send(viewer, "statistics.unknown");
             return;
         }
-        
-        profiles.loadAsync(target.getUniqueId()).thenAcceptAsync(loaded -> {
-            if (!canView(viewer, target)) {
-                return;
+        UUID playerId = target.getUniqueId();
+        Player initialOnline = server.getPlayer(playerId);
+        if (hiddenFrom(viewer, initialOnline)) {
+            messages.send(viewer, "statistics.unavailable");
+            return;
+        }
+        var request = menuRequests.begin(viewer);
+        Executor mainThread = task -> server.getScheduler().runTask(plugin, task);
+        profiles.<CompletableFuture<Void>>withProfileAsync(playerId, mainThread, request::isCurrent, profile -> {
+            Player online = server.getPlayer(playerId);
+            if (!canView(viewer, profile, online)) {
+                return CompletableFuture.completedFuture(null);
             }
-            Player online = server.getPlayer(target.getUniqueId());
             if (online != null) {
-                show(viewer, target, back, statistics.snapshot(online));
-                return;
+                show(viewer, target, profile, back, statistics.snapshot(online));
+                return CompletableFuture.completedFuture(null);
             }
             Path folder = server.getWorlds().getFirst().getWorldPath().resolve("players/stats");
-            UUID playerId = target.getUniqueId();
             String playerName = target.getName();
             int dataVersion = server.getUnsafe().getDataVersion();
-            server.getScheduler().runTaskAsynchronously(plugin, () -> {
-                PlayerStatisticsService.Snapshot offline;
+            return CompletableFuture.supplyAsync(() -> {
                 try {
-                    offline = statistics.offlineSnapshot(folder, playerId, playerName, dataVersion).orElse(null);
+                    return statistics.offlineSnapshot(folder, playerId, playerName, dataVersion);
                 } catch (IOException exception) {
-                    plugin.getLogger().log(Level.WARNING,
-                            "Could not load offline statistics for " + playerId, exception);
-                    server.getScheduler().runTask(plugin, () -> {
-                        if (canView(viewer, target)) {
-                            messages.send(viewer, "statistics.unavailable");
-                        }
-                    });
-                    return;
+                    throw new UncheckedIOException(exception);
                 }
-                server.getScheduler().runTask(plugin, () -> {
-                    if (!canView(viewer, target)) {
-                        return;
+            }, task -> server.getScheduler().runTaskAsynchronously(plugin, task)).thenCompose(offline ->
+                    profiles.withProfileAsync(playerId, mainThread, request::isCurrent, currentProfile -> {
+                        Player current = server.getPlayer(playerId);
+                        if (canView(viewer, currentProfile, current)) {
+                            // Let Paper upgrade older statistics until the player next saves the current format.
+                            var snapshot = current != null ? statistics.snapshot(current)
+                                    : offline.orElseGet(() -> statistics.snapshot(target));
+                            show(viewer, target, currentProfile, back, snapshot);
+                        }
+                        return null;
+                    }));
+        }).thenCompose(stage -> stage == null ? CompletableFuture.completedFuture(null) : stage)
+                .whenCompleteAsync((ignored, failure) -> {
+                    if (failure != null && request.isCurrent()) {
+                        plugin.getLogger().log(Level.WARNING, "Could not load statistics for " + playerId, failure);
+                        messages.send(viewer, "statistics.unavailable");
                     }
-                    Player current = server.getPlayer(target.getUniqueId());
-                    if (current != null) {
-                        show(viewer, target, back, statistics.snapshot(current));
-                    } else if (offline != null) {
-                        show(viewer, target, back, offline);
-                    } else {
-                        // shortcut: let Paper upgrade old statistics until the player rejoins and saves the current format.
-                        show(viewer, target, back, statistics.snapshot(target));
-                    }
-                });
-            });
-        }, runnable -> server.getScheduler().runTask(plugin, runnable));
+                    request.finish();
+                }, mainThread);
     }
 
-    private boolean canView(Player viewer, OfflinePlayer target) {
+    private boolean canView(Player viewer, Profile target, Player online) {
         if (!viewer.isOnline() || !messages.requirePermission(viewer, "survivaltweaks.command.stats")) {
             return false;
         }
@@ -150,23 +158,32 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             messages.send(viewer, "statistics.disabled");
             return false;
         }
-        if (viewer.getUniqueId().equals(target.getUniqueId())
-                || viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
+        if (viewer.getUniqueId().equals(target.uniqueId())) {
             return true;
         }
-        if (settings.current().statisticsPublicViewing()
-                && profiles.load(target.getUniqueId()).preferences().publicProfileEnabled()) {
+        if (hiddenFrom(viewer, online)) {
+            messages.send(viewer, "statistics.unavailable");
+            return false;
+        }
+        if (viewer.hasPermission(SocialProfileController.BYPASS_PERMISSION)) {
+            return true;
+        }
+        if (settings.current().statisticsPublicViewing() && target.preferences().publicProfileEnabled()) {
             return true;
         }
         messages.send(viewer, "statistics.private");
         return false;
     }
 
-    private void show(Player viewer, OfflinePlayer target, Consumer<Player> back,
+    private static boolean hiddenFrom(Player viewer, Player target) {
+        return target != null && !viewer.getUniqueId().equals(target.getUniqueId()) && !viewer.canSee(target);
+    }
+
+    private void show(Player viewer, OfflinePlayer target, Profile profile, Consumer<Player> back,
                       PlayerStatisticsService.Snapshot snapshot) {
         String targetName = target.getName();
         if (targetName == null || targetName.isBlank()) {
-            targetName = profiles.load(target.getUniqueId()).lastKnownName();
+            targetName = profile.lastKnownName();
         }
         if (targetName.isBlank()) {
             targetName = target.getUniqueId().toString().substring(0, 8);
@@ -182,7 +199,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
                 )
         );
         Inventory inventory = holder.getInventory();
-        inventory.setItem(4, head(
+        inventory.setItem(4, playerHead(
                 target,
                 messages.component(
                         viewer,
@@ -240,7 +257,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             messages.send(player, "statistics.usage");
             return true;
         }
-        OfflinePlayer target = arguments.length == 0 ? player : find(arguments[0]);
+        OfflinePlayer target = arguments.length == 0 ? player : PlayerNameLookup.findCached(server, arguments[0]);
         open(player, target);
         return true;
     }
@@ -255,13 +272,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         if (arguments.length != 1) {
             return List.of();
         }
-        String prefix = arguments[0].toLowerCase(Locale.ROOT);
-        return server.getOnlinePlayers().stream()
-                .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
-                .map(Player::getName)
-                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                .sorted(String.CASE_INSENSITIVE_ORDER)
-                .toList();
+        return PlayerNameLookup.suggestions(server, sender, arguments[0]);
     }
 
     @EventHandler
@@ -396,33 +407,6 @@ public final class StatisticsJournalController implements Listener, CommandExecu
                 ),
                 Placeholder.component("value", value)
         );
-    }
-
-    private OfflinePlayer find(String name) {
-        Player online = server.getPlayerExact(name);
-        if (online != null) {
-            return online;
-        }
-        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
-        return cached != null && cached.hasPlayedBefore() ? cached : null;
-    }
-
-    private ItemStack head(OfflinePlayer owner, Component name, List<Component> lore) {
-        ItemStack item = item(Material.PLAYER_HEAD, name, lore);
-        if (item.getItemMeta() instanceof SkullMeta meta) {
-            meta.setOwningPlayer(owner);
-            item.setItemMeta(meta);
-        }
-        return item;
-    }
-
-    private ItemStack item(Material material, Component name, List<Component> lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
     }
 
     private static final class StatisticsHolder implements SurvivalTweaksMenu {

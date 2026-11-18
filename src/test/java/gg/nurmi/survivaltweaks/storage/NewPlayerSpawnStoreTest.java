@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.SpawnFiles;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnAssignment;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnLocation;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnState;
@@ -28,7 +29,7 @@ class NewPlayerSpawnStoreTest {
     @Test
     void roundTripsPreparedAndAssignedLocationsAtomically() throws IOException {
         Path file = temporary.resolve("new-player-spawns.yml");
-        NewPlayerSpawnStore store = new NewPlayerSpawnStore(file, quietLogger());
+        SpawnFiles store = new SpawnFiles(file, quietLogger());
         UUID worldId = UUID.randomUUID();
         UUID completedPlayer = UUID.randomUUID();
         UUID pendingPlayer = UUID.randomUUID();
@@ -72,7 +73,7 @@ class NewPlayerSpawnStoreTest {
                   - { player: nope, completed: true, location: {} }
                 """.formatted(worldId));
 
-        NewPlayerSpawnState loaded = new NewPlayerSpawnStore(
+        NewPlayerSpawnState loaded = new SpawnFiles(
                 file,
                 quietLogger()
         ).load();

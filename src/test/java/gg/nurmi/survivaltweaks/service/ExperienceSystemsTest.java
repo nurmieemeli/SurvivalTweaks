@@ -2,12 +2,15 @@ package gg.nurmi.survivaltweaks.service;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExperienceSystemsTest {
 
@@ -46,6 +49,33 @@ class ExperienceSystemsTest {
         assertEquals(Duration.ofHours(1), MaintenanceService.parseDelay("1h"));
         assertNull(MaintenanceService.parseDelay("5"));
         assertNull(MaintenanceService.parseDelay("soon"));
+    }
+
+    @Test
+    void sharedStagingGateReleasesOnFailureAndHandsOffToShutdown() {
+        var maintenance = new MaintenanceService(null, null, null, null, null, null, Clock.systemUTC());
+        var staging = MaintenanceService.ExclusiveOperation.RESTART_STAGING;
+        var cleanup = MaintenanceService.ExclusiveOperation.DATABASE_MAINTENANCE;
+        assertTrue(maintenance.beginExclusiveOperation(staging));
+        assertTrue(maintenance.status().joinBlocked());
+        assertEquals(MaintenanceService.ScheduleResult.STAGING_IN_PROGRESS, maintenance.schedule(Duration.ofSeconds(10)));
+        assertFalse(maintenance.beginExclusiveOperation(cleanup));
+        maintenance.finishExclusiveOperation();
+        assertFalse(maintenance.status().joinBlocked());
+
+        maintenance.maintenanceMode(true);
+        assertTrue(maintenance.beginExclusiveOperation(cleanup));
+        maintenance.maintenanceMode(false);
+        assertTrue(maintenance.status().joinBlocked());
+        assertFalse(maintenance.beginExclusiveOperation(staging));
+        maintenance.finishExclusiveOperation();
+        assertFalse(maintenance.status().joinBlocked());
+
+        assertTrue(maintenance.beginExclusiveOperation(staging));
+        maintenance.blockJoinsForShutdown();
+        maintenance.finishExclusiveOperation();
+        assertTrue(maintenance.status().joinBlocked());
+        assertFalse(maintenance.beginExclusiveOperation(staging));
     }
 
     @Test

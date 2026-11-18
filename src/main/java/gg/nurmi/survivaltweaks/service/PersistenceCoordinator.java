@@ -24,10 +24,10 @@ public final class PersistenceCoordinator {
         this.newPlayerSpawns = Objects.requireNonNull(newPlayerSpawns, "newPlayerSpawns");
     }
 
-    public void prepareMaintenance(Instant now, int mailPurgeInactiveDays) {
+    public void reconcileMaintenance(Instant now, int mailPurgeInactiveDays) {
         Objects.requireNonNull(now, "now");
-        profiles.prepareMaintenance(now, mailPurgeInactiveDays);
-        deathRecovery.prepareMaintenance(now);
+        profiles.reconcileMaintenance(now, mailPurgeInactiveDays);
+        deathRecovery.reconcileMaintenance(now);
     }
 
     public void flush(Duration timeout) throws IOException {

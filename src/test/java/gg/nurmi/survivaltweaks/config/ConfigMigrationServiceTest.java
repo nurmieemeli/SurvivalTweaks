@@ -100,6 +100,14 @@ class ConfigMigrationServiceTest {
         assertThrows(IllegalStateException.class, () -> service().migrate(config, dataFolder));
     }
 
+    @Test
+    void aLargeFutureVersionCannotWrapToTheCurrentVersion() {
+        var config = new YamlConfiguration();
+        config.set("config-version", (1L << 32) + ConfigMigrationService.CURRENT_VERSION);
+        assertThrows(IllegalStateException.class, () -> service().migrate(config, dataFolder));
+        assertThrows(IllegalStateException.class, () -> ConfigMigrationService.requireSupported(config));
+    }
+
     private ConfigMigrationService service() {
         return new ConfigMigrationService(
                 Clock.fixed(Instant.parse("2026-07-30T12:00:00Z"), ZoneOffset.UTC),

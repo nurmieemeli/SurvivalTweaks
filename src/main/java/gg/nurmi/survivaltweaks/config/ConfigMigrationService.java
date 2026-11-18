@@ -34,15 +34,19 @@ public final class ConfigMigrationService {
     }
 
     public Result migrate(FileConfiguration config, Path dataFolder) throws IOException {
-        Objects.requireNonNull(config, "config");
         Objects.requireNonNull(dataFolder, "dataFolder");
-        int sourceVersion = configuredVersion(config);
-        if (sourceVersion > CURRENT_VERSION) {
-            throw new IllegalStateException(
-                    "config.yml uses schema " + sourceVersion
-                            + ", but this build only supports up to " + CURRENT_VERSION
-            );
+        Result result = migrateInMemory(config);
+        if (result.changed()) {
+            writeReport(dataFolder.resolve("config-migration-report.txt"), result, clock.instant());
+            logger.info("Migrated config.yml schema " + result.fromVersion() + " -> " + result.toVersion()
+                    + " (" + result.changes().size() + " change(s)); details: config-migration-report.txt");
         }
+        return result;
+    }
+
+    public static Result migrateInMemory(FileConfiguration config) {
+        Objects.requireNonNull(config, "config");
+        int sourceVersion = requireSupported(config);
         if (sourceVersion == CURRENT_VERSION) {
             return new Result(sourceVersion, sourceVersion, List.of());
         }
@@ -139,11 +143,7 @@ public final class ConfigMigrationService {
         }
         config.set("config-version", version);
 
-        Result result = new Result(sourceVersion, version, List.copyOf(changes));
-        writeReport(dataFolder.resolve("config-migration-report.txt"), result, clock.instant());
-        logger.info("Migrated config.yml schema " + sourceVersion + " -> " + version
-                + " (" + changes.size() + " change(s)); details: config-migration-report.txt");
-        return result;
+        return new Result(sourceVersion, version, List.copyOf(changes));
     }
 
     public static void requireCurrent(FileConfiguration config) {
@@ -156,20 +156,36 @@ public final class ConfigMigrationService {
         }
     }
 
+    public static int requireSupported(FileConfiguration config) {
+        int version = configuredVersion(config);
+        if (version > CURRENT_VERSION) {
+            throw new IllegalStateException(
+                    "config.yml uses schema " + version
+                            + ", but this build only supports up to " + CURRENT_VERSION
+            );
+        }
+        return version;
+    }
+
     static int configuredVersion(FileConfiguration config) {
         if (!config.getValues(false).containsKey("config-version")) {
             return 0;
         }
         Object configured = config.get("config-version");
-        if (!(configured instanceof Number number)
-                || number.doubleValue() != Math.rint(number.doubleValue())
-                || number.intValue() < 0) {
+        if (!(configured instanceof Number number)) {
             throw new IllegalArgumentException("config-version must be a non-negative integer");
         }
-        return number.intValue();
+        double version = number.doubleValue();
+        if (version != Math.rint(version) || version < 0) {
+            throw new IllegalArgumentException("config-version must be a non-negative integer");
+        }
+        if (version > Integer.MAX_VALUE) {
+            throw new IllegalStateException("config.yml uses an unsupported schema version: " + configured);
+        }
+        return (int) version;
     }
 
-    private void setIfMissing(
+    private static void setIfMissing(
             FileConfiguration config,
             String path,
             Object value,
@@ -181,7 +197,7 @@ public final class ConfigMigrationService {
         }
     }
 
-    private void removeIfPresent(FileConfiguration config, String path, List<String> changes) {
+    private static void removeIfPresent(FileConfiguration config, String path, List<String> changes) {
         if (config.contains(path, true)) {
             config.set(path, null);
             changes.add("Removed obsolete setting: " + path);

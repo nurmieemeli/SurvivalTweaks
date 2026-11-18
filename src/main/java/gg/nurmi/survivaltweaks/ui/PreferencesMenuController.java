@@ -15,13 +15,15 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Consumer;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
 
 public final class PreferencesMenuController implements Listener {
 
@@ -114,7 +116,7 @@ public final class PreferencesMenuController implements Listener {
                                 "language",
                                 messages.component(
                                         player,
-                                        "ui.preferences.language." + preferences.language().name().toLowerCase()
+                                        "ui.preferences.language." + preferences.language().name().toLowerCase(Locale.ROOT)
                                 )
                         )
                 ))
@@ -256,15 +258,6 @@ public final class PreferencesMenuController implements Listener {
                         enabled ? "ui.preferences.enabled" : "ui.preferences.disabled"
                 ))
         );
-    }
-
-    private ItemStack item(Material material, Component name, List<Component> lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
     }
 
     private static final class PreferencesHolder implements SurvivalTweaksMenu {

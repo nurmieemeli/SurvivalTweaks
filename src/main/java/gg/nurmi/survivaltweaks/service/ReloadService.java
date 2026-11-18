@@ -3,7 +3,9 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.ConfigMigrationService;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.config.StrictYaml;
 import gg.nurmi.survivaltweaks.storage.StorageConfiguration;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -16,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -37,33 +40,6 @@ public final class ReloadService {
             SettingsService settings,
             MessageService messages,
             FeedbackService feedback,
-            Consumer<PluginSettings> afterApply
-    ) {
-        this(
-                plugin, settings, messages, feedback, null,
-                (updated, ignored) -> afterApply.accept(updated)
-        );
-    }
-
-    public ReloadService(
-            JavaPlugin plugin,
-            SettingsService settings,
-            MessageService messages,
-            FeedbackService feedback,
-            BackupService backups,
-            Consumer<PluginSettings> afterApply
-    ) {
-        this(
-                plugin, settings, messages, feedback, backups,
-                (updated, ignored) -> afterApply.accept(updated)
-        );
-    }
-
-    public ReloadService(
-            JavaPlugin plugin,
-            SettingsService settings,
-            MessageService messages,
-            FeedbackService feedback,
             BackupService backups,
             BiConsumer<PluginSettings, FileConfiguration> afterApply
     ) {
@@ -73,19 +49,6 @@ public final class ReloadService {
         this.feedback = feedback;
         this.backups = backups;
         this.afterApply = afterApply;
-    }
-
-    public Result reload() {
-        if (!reloading.compareAndSet(false, true)) {
-            return Result.failure("A reload is already running");
-        }
-        try {
-            return apply(prepare(config -> {}), false);
-        } catch (Exception exception) {
-            return rejected(exception);
-        } finally {
-            reloading.set(false);
-        }
     }
 
     public boolean reloadAsync(Consumer<Result> completion) {
@@ -134,11 +97,8 @@ public final class ReloadService {
         Candidate candidate = loadCandidateConfig();
         YamlConfiguration candidateConfig = candidate.configuration();
         edit.accept(candidateConfig);
-        ConfigMigrationService.requireCurrent(candidateConfig);
-        StorageConfiguration.load(candidateConfig, plugin.getDataFolder().toPath());
-        PortableExportService.validate(candidateConfig);
         return new Prepared(
-                PluginSettings.validate(candidateConfig),
+                validateConfiguration(candidateConfig, plugin.getDataFolder().toPath()),
                 messages.prepareReload(candidateConfig),
                 feedback.prepare(candidateConfig),
                 candidateConfig,
@@ -162,9 +122,8 @@ public final class ReloadService {
             feedback.apply(prepared.feedback());
             afterApply.accept(prepared.settings(), prepared.configuration());
             if (publish) {
-                publishConfig(prepared);
+                publishConfig(prepared.configuration(), prepared.configFingerprint());
             }
-            plugin.reloadConfig();
         } catch (RuntimeException | IOException applyFailure) {
             settings.apply(previousSettings);
             messages.apply(previousMessages);
@@ -180,12 +139,48 @@ public final class ReloadService {
         return Result.success();
     }
 
-    private void publishConfig(Prepared prepared) throws IOException {
+    public Candidate prepareStorageBackend(String backend) throws Exception {
+        Candidate candidate = loadStorageCandidate(backend);
+        validateConfiguration(candidate.configuration(), plugin.getDataFolder().toPath());
+        return candidate;
+    }
+
+    public StorageConfiguration prepareStorageTest(String backend) throws Exception {
+        Candidate candidate = loadStorageCandidate(backend);
+        YamlConfiguration config = candidate.configuration();
+        // Test only the requested endpoint; the connection timeout is also used by SQLite.
+        if (backend.equals("sqlite")) {
+            for (String key : List.of("type", "pool-size", "socket-timeout-seconds", "query-timeout-seconds")) {
+                String path = "storage.remote." + key;
+                config.set(path, config.getDefaults().get(path));
+            }
+        } else {
+            config.set("storage.sqlite.file", config.getDefaults().get("storage.sqlite.file"));
+        }
+        return StorageConfiguration.load(config, plugin.getDataFolder().toPath());
+    }
+
+    private Candidate loadStorageCandidate(String backend) throws Exception {
+        Candidate candidate = loadCandidateConfig();
+        YamlConfiguration config = candidate.configuration();
+        if (!backend.equals("sqlite")
+                && !backend.equalsIgnoreCase(config.getString("storage.remote.type", "").strip())) {
+            throw new IllegalArgumentException("storage.remote.type must select " + backend);
+        }
+        config.set("storage.backend", backend);
+        return candidate;
+    }
+
+    public void publishStorageBackend(Candidate candidate) throws IOException {
+        publishConfig(candidate.configuration(), candidate.fingerprint());
+    }
+
+    private void publishConfig(FileConfiguration configuration, String expectedFingerprint) throws IOException {
         Path path = configPath();
         Path temporary = Files.createTempFile(path.getParent(), ".config-", ".tmp");
         try {
-            prepared.configuration().save(temporary.toFile());
-            if (!prepared.configFingerprint().equals(configFingerprint(path))) {
+            configuration.save(temporary.toFile());
+            if (!expectedFingerprint.equals(configFingerprint(path))) {
                 throw new IllegalStateException("config.yml changed while reload validation was running; retry the command");
             }
             Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -203,16 +198,27 @@ public final class ReloadService {
     }
 
     private Candidate loadCandidateConfig() throws Exception {
+        byte[] source = StrictYaml.read(configPath());
+        return new Candidate(parseConfiguration(plugin, source), configFingerprint(source));
+    }
+
+    static YamlConfiguration parseConfiguration(JavaPlugin plugin, byte[] source)
+            throws IOException, InvalidConfigurationException {
         YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
                 Objects.requireNonNull(plugin.getResource("config.yml"), "Missing bundled config.yml"),
                 StandardCharsets.UTF_8
         ));
-        byte[] source = Files.readAllBytes(configPath());
-        YamlConfiguration candidate = new YamlConfiguration();
-        candidate.loadFromString(new String(source, StandardCharsets.UTF_8));
+        YamlConfiguration candidate = StrictYaml.parse(source, "config.yml");
         candidate.setDefaults(defaults);
         candidate.options().copyDefaults(true);
-        return new Candidate(candidate, configFingerprint(source));
+        return candidate;
+    }
+
+    static PluginSettings validateConfiguration(FileConfiguration config, Path dataFolder) {
+        ConfigMigrationService.requireCurrent(config);
+        StorageConfiguration.load(config, dataFolder);
+        PortableExportService.validate(config);
+        return PluginSettings.validate(config);
     }
 
     private Path configPath() {
@@ -221,7 +227,7 @@ public final class ReloadService {
 
     private String configFingerprint(Path path) {
         try {
-            return configFingerprint(Files.readAllBytes(path));
+            return configFingerprint(StrictYaml.read(path));
         } catch (Exception exception) {
             throw new IllegalStateException("Could not re-read config.yml before applying reload", exception);
         }
@@ -257,6 +263,6 @@ public final class ReloadService {
     ) {
     }
 
-    private record Candidate(YamlConfiguration configuration, String fingerprint) {
+    public record Candidate(YamlConfiguration configuration, String fingerprint) {
     }
 }

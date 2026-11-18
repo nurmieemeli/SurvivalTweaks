@@ -43,6 +43,7 @@ public final class MaintenanceService implements Listener, AutoCloseable {
     private final Map<UUID, BossBar> bossBars = new HashMap<>();
     private volatile boolean maintenanceMode;
     private volatile boolean stopping;
+    private volatile ExclusiveOperation exclusiveOperation;
     private volatile Instant restartAt;
     private Duration restartDuration = Duration.ZERO;
     private BukkitTask task;
@@ -71,6 +72,9 @@ public final class MaintenanceService implements Listener, AutoCloseable {
                 || delay.compareTo(Duration.ofHours(24)) > 0) {
             return ScheduleResult.INVALID;
         }
+        if (exclusiveOperation != null) {
+            return ScheduleResult.STAGING_IN_PROGRESS;
+        }
         if (restartAt != null || stopping) {
             return ScheduleResult.ALREADY_SCHEDULED;
         }
@@ -96,6 +100,22 @@ public final class MaintenanceService implements Listener, AutoCloseable {
 
     public void maintenanceMode(boolean enabled) {
         maintenanceMode = enabled;
+    }
+
+    public void blockJoinsForShutdown() {
+        stopping = true;
+    }
+
+    public boolean beginExclusiveOperation(ExclusiveOperation operation) {
+        if (stopping || exclusiveOperation != null || restartAt != null) {
+            return false;
+        }
+        exclusiveOperation = operation;
+        return true;
+    }
+
+    public void finishExclusiveOperation() {
+        exclusiveOperation = null;
     }
 
     public Status status() {
@@ -133,17 +153,18 @@ public final class MaintenanceService implements Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onValidateLogin(PlayerConnectionValidateLoginEvent event) {
-        if (!event.isAllowed() || !restartJoinBlocked()) {
-            return;
+        String blocked = joinBlockMessage();
+        if (event.isAllowed() && blocked != null) {
+            event.kickMessage(messages.component(blocked));
         }
-        event.kickMessage(messages.component("maintenance.restart-join-blocked"));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if (restartJoinBlocked()) {
-            player.kick(messages.component(player, "maintenance.restart-join-blocked"));
+        String blocked = joinBlockMessage();
+        if (blocked != null) {
+            player.kick(messages.component(player, blocked));
             return;
         }
         if (maintenanceMode
@@ -258,14 +279,18 @@ public final class MaintenanceService implements Listener, AutoCloseable {
     }
 
     private boolean joinBlocked() {
-        return maintenanceMode
-                || restartJoinBlocked();
+        return maintenanceMode || joinBlockMessage() != null;
     }
 
-    private boolean restartJoinBlocked() {
-        return stopping
-                || (restartAt != null
-                && remainingSeconds() <= settings.current().maintenanceJoinBlockSeconds());
+    private String joinBlockMessage() {
+        ExclusiveOperation operation = exclusiveOperation;
+        if (operation == ExclusiveOperation.DATABASE_MAINTENANCE) {
+            return "maintenance.join-blocked";
+        }
+        long remaining = remainingSeconds();
+        return operation == ExclusiveOperation.RESTART_STAGING || stopping
+                || (remaining >= 0 && remaining <= settings.current().maintenanceJoinBlockSeconds())
+                ? "maintenance.restart-join-blocked" : null;
     }
 
     private void beginShutdown() {
@@ -314,12 +339,19 @@ public final class MaintenanceService implements Listener, AutoCloseable {
         cancelTask();
         hideBossBars();
         restartAt = null;
+        exclusiveOperation = null;
     }
 
     public enum ScheduleResult {
         SCHEDULED,
         ALREADY_SCHEDULED,
+        STAGING_IN_PROGRESS,
         INVALID
+    }
+
+    public enum ExclusiveOperation {
+        RESTART_STAGING,
+        DATABASE_MAINTENANCE
     }
 
     public record Status(

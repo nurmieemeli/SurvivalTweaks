@@ -16,17 +16,24 @@ import gg.nurmi.survivaltweaks.object.OnboardingHint;
 import gg.nurmi.survivaltweaks.object.PlayerNotification;
 import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
+import gg.nurmi.survivaltweaks.service.DeathRecoveryService;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.service.PersistenceMonitor;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
 import org.bukkit.Material;
+import org.bukkit.Server;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -39,10 +46,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SqlStorageTest {
 
@@ -54,6 +66,61 @@ class SqlStorageTest {
     Path directory;
 
     private final Logger logger = Logger.getLogger(SqlStorageTest.class.getName());
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "2", "invalid"})
+    void unsupportedSchemaIsRejectedBeforeChangingTheDatabase(String version) throws Exception {
+        Path database = directory.resolve("unsupported.db");
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE st_meta(meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)");
+            statement.execute("INSERT INTO st_meta VALUES('schema-version', '" + version + "')");
+        }
+        byte[] original = Files.readAllBytes(database);
+
+        assertThrows(IllegalStateException.class, () -> sqlite("unsupported.db"));
+
+        assertArrayEquals(original, Files.readAllBytes(database));
+        for (String suffix : List.of("-wal", "-shm", "-journal")) {
+            assertFalse(Files.exists(Path.of(database + suffix)));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void conflictingSqliteRowsCannotBeVerifiedOrExported(boolean conflictingHomes) throws Exception {
+        String file = "conflicting.db";
+        UUID world = UUID.randomUUID();
+        try (SqlStorage storage = sqlite(file)) {
+            storage.ensureInstanceId(UUID.randomUUID());
+            storage.save(new ProfileSnapshot(ENGLISH_PLAYER,
+                    List.of(new Home("Mine", world, "world", 12, 65, 14, 0, 0))));
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(file));
+                 var statement = connection.createStatement()) {
+                if (conflictingHomes) {
+                    statement.executeUpdate("""
+                            INSERT INTO st_homes
+                            SELECT player_id, 'MINE', position + 1, 'mine', world_id, world_name, 55, y, z,
+                                   yaw, pitch, icon, description, favorite, sort_order, category, arrival_style
+                            FROM st_homes WHERE home_key = 'mine'
+                            """);
+                } else {
+                    statement.executeUpdate("""
+                            INSERT INTO st_spawn_locations VALUES
+                                ('assignment', 0, '%s', 1, '%s', 'world', 64, 65, 14, 0),
+                                ('assignment', 1, '%s', 0, '%s', 'world', 90, 65, 14, 0)
+                            """.formatted(ENGLISH_PLAYER, world, ENGLISH_PLAYER, world));
+                }
+            }
+
+            String reason = conflictingHomes ? "Conflicting home rows" : "Conflicting spawn assignments";
+            var verification = storage.verify();
+            assertFalse(verification.healthy());
+            assertTrue(verification.problems().stream().anyMatch(problem -> problem.contains(reason)),
+                    verification.problems().toString());
+            assertTrue(assertThrows(IOException.class, storage::exportSnapshot).getMessage().contains(reason));
+        }
+    }
 
     @Test
     void forcedExitAfterOneLanguageCommitReplaysOnlyTheRemainingPlayer() throws Exception {
@@ -145,7 +212,7 @@ class SqlStorageTest {
             try (SqlStorage storage = sqlite(directory.resolve(RECOVERY_DATABASE), logger);
                  ProfileRepository repository = new ProfileRepository(
                          storage, logger, new PersistenceMonitor(), recovery)) {
-                repository.retryPendingLanguages();
+                repository.retryPendingLanguages(Runnable::run);
                 if (args[1].equals("interrupt")) {
                     new CountDownLatch(1).await();
                 }
@@ -214,6 +281,8 @@ class SqlStorageTest {
 
             StorageSnapshot exported = source.exportSnapshot();
             assertEquals(expected, exported);
+            ProfileSnapshot exportedProfile = exported.profiles().getFirst();
+            assertEquals(exportedProfile, source.load(exportedProfile.uniqueId()).snapshot());
             assertTrue(source.verify().healthy());
             assertEquals(instanceId, source.instanceId());
 
@@ -399,6 +468,7 @@ class SqlStorageTest {
                 now, now.plusSeconds(600), "FALL"
         );
         try (SqlStorage storage = sqlite("maintenance.db")) {
+            storage.ensureInstanceId(UUID.randomUUID());
             storage.saveDeathMarkers(List.of(expired, active));
 
             assertEquals(1, storage.maintenancePreview(now, 0).expiredDeathMarkers());
@@ -412,7 +482,7 @@ class SqlStorageTest {
     }
 
     @Test
-    void maintenancePreparationPreventsCachedProfilesFromRestoringPurgedMail() throws IOException {
+    void maintenanceReconcilesCachedProfilesOnlyAfterCommit() throws Exception {
         UUID playerId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-09T12:00:00Z");
         PlayerNotification oldMail = new PlayerNotification(
@@ -437,19 +507,116 @@ class SqlStorageTest {
                 Set.of()
         );
         try (SqlStorage storage = sqlite("maintenance-cache.db")) {
+            storage.ensureInstanceId(UUID.randomUUID());
             storage.save(snapshot);
             try (ProfileRepository profiles = new ProfileRepository(storage, logger)) {
                 var cached = profiles.load(playerId);
-                profiles.prepareMaintenance(now, 1);
-                assertTrue(profiles.flush(Duration.ofSeconds(2)));
+                try (var connection = java.sql.DriverManager.getConnection(
+                        "jdbc:sqlite:" + directory.resolve("maintenance-cache.db"));
+                     var statement = connection.createStatement()) {
+                    statement.executeUpdate("UPDATE st_profiles SET language = 'INVALID'");
+                    assertThrows(IOException.class, () -> storage.maintain(now, 1));
+                    assertEquals(List.of(oldMail), storage.load(playerId).notifications());
+                    assertEquals(List.of(oldMail), cached.notifications());
+                    statement.executeUpdate("UPDATE st_profiles SET language = 'AUTO'");
+                }
 
-                storage.maintain(now, 1);
+                assertEquals(1, storage.maintain(now, 1).removed().oldMail());
+                profiles.reconcileMaintenance(now, 1);
                 assertTrue(storage.load(playerId).notifications().isEmpty());
 
                 cached.lastKnownName("After");
                 profiles.save(cached);
                 assertTrue(profiles.flush(Duration.ofSeconds(2)));
                 assertTrue(storage.load(playerId).notifications().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    void shutdownKeepsUnexpiredMarkersWithoutUndoingMaintenance() throws IOException {
+        Instant now = Instant.parse("2026-07-28T12:00:00Z");
+        Instant maintenanceAt = now.plusSeconds(60);
+        UUID world = UUID.randomUUID();
+        var expired = new DeathMarker(FINNISH_PLAYER, world, "world", 0, 64, 0, now, maintenanceAt, "FALL");
+        var active = new DeathMarker(ENGLISH_PLAYER, world, "world", 0, 64, 0, now,
+                maintenanceAt.plusSeconds(60), "FALL");
+        var clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(now);
+        var plugin = mock(JavaPlugin.class);
+        var server = mock(Server.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(mock(BukkitScheduler.class));
+
+        try (SqlStorage storage = sqlite("maintenance-shutdown.db")) {
+            storage.ensureInstanceId(UUID.randomUUID());
+            storage.saveDeathMarkers(List.of(expired, active));
+            try (var recovery = new DeathRecoveryService(plugin, storage, null, null, clock,
+                    null, null, null, null, null, null)) {
+                when(clock.instant()).thenReturn(maintenanceAt);
+                assertEquals(1, storage.maintain(maintenanceAt, 0).removed().total());
+            }
+            assertEquals(List.of(active), storage.loadDeathMarkers());
+        }
+    }
+
+    @Test
+    void shuttingDownBeforeCacheReconciliationDoesNotRestorePurgedMail() throws Exception {
+        UUID playerId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-09T12:00:00Z");
+        try (SqlStorage storage = sqlite("maintenance-mail-shutdown.db")) {
+            storage.ensureInstanceId(UUID.randomUUID());
+            try (ProfileRepository profiles = new ProfileRepository(storage, logger)) {
+                var older = new gg.nurmi.survivaltweaks.service.NotificationService(profiles,
+                        Clock.fixed(now.minus(Duration.ofDays(2)), java.time.ZoneOffset.UTC));
+                var current = new gg.nurmi.survivaltweaks.service.NotificationService(profiles,
+                        Clock.fixed(now, java.time.ZoneOffset.UTC));
+                assertTrue(older.mail(playerId, UUID.randomUUID(), "Alex", "Expired letter"));
+                assertTrue(current.mail(playerId, UUID.randomUUID(), "Sam", "Recent letter"));
+                assertTrue(profiles.flush(Duration.ofSeconds(2)));
+                assertEquals(1, storage.maintain(now, 1).removed().oldMail());
+
+                assertTrue(current.notify(playerId, NotificationType.DEATH_MARKER_EXPIRED, "", "world"));
+            }
+            var saved = storage.load(playerId).notifications();
+            assertEquals(Set.of("Recent letter", "world"), saved.stream()
+                    .map(PlayerNotification::detail).collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    @Test
+    void profileReadStartedBeforeMaintenanceCannotPublishPurgedMail() throws Exception {
+        UUID playerId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-09T12:00:00Z");
+        var read = new CountDownLatch(1);
+        var publish = new CountDownLatch(1);
+        try (SqlStorage storage = sqlite("maintenance-in-flight-profile.db")) {
+            storage.ensureInstanceId(UUID.randomUUID());
+            var initial = storage.load(playerId);
+            initial.addNotification(PlayerNotification.create(NotificationType.MAIL,
+                    now.minus(Duration.ofDays(2)), UUID.randomUUID(), "Alex", "Expired"), 80);
+            initial.addNotification(PlayerNotification.create(NotificationType.MAIL,
+                    now, UUID.randomUUID(), "Sam", "Recent"), 80);
+            storage.save(initial.snapshot());
+            ProfileDataStore store = mock(ProfileDataStore.class, delegatesTo(storage));
+            doAnswer(invocation -> {
+                var loaded = storage.load(playerId);
+                read.countDown();
+                assertTrue(publish.await(5, TimeUnit.SECONDS));
+                return loaded;
+            }).when(store).load(playerId);
+
+            try (var profiles = new ProfileRepository(store, logger)) {
+                var late = profiles.loadAsync(playerId);
+                try {
+                    assertTrue(read.await(5, TimeUnit.SECONDS));
+                    assertEquals(1, storage.maintain(now, 1).removed().oldMail());
+                    profiles.reconcileMaintenance(now, 1);
+                } finally {
+                    publish.countDown();
+                }
+                assertEquals(List.of("Recent"), late.get(5, TimeUnit.SECONDS).notifications().stream()
+                        .map(PlayerNotification::detail).toList());
             }
         }
     }

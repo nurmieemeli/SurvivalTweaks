@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.object.Home;
 import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import gg.nurmi.survivaltweaks.ui.HomeMenuController;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -18,9 +19,15 @@ import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.logging.Level;
 
 public final class HomeCommand implements CommandExecutor, TabCompleter {
 
@@ -30,14 +37,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
     private final Plugin plugin;
     private final Server server;
     private final FeedbackService feedback;
-
-    public HomeCommand(
-            ProfileRepository profiles,
-            MessageService messages,
-            HomeMenuController homeMenu
-    ) {
-        this(profiles, messages, homeMenu, null, null, null);
-    }
+    private final Map<UUID, Object> pendingHomeRequests = new HashMap<>();
 
     public HomeCommand(
             ProfileRepository profiles,
@@ -51,7 +51,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         this.messages = messages;
         this.homeMenu = homeMenu;
         this.plugin = plugin;
-        this.server = server;
+        this.server = Objects.requireNonNull(server, "server");
         this.feedback = feedback;
     }
 
@@ -67,13 +67,12 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (arguments.length == 3 && arguments[0].equalsIgnoreCase("invite")) {
-            handleInvite(player, arguments[1], arguments[2]);
-            return true;
-        }
-        if (arguments.length == 3 && arguments[0].equalsIgnoreCase("uninvite")) {
-            handleUninvite(player, arguments[1], arguments[2]);
-            return true;
+        if (arguments.length == 3) {
+            boolean invite = arguments[0].equalsIgnoreCase("invite");
+            if (invite || arguments[0].equalsIgnoreCase("uninvite")) {
+                handleSharing(player, arguments[1], arguments[2], invite);
+                return true;
+            }
         }
 
         if (arguments.length > 1) {
@@ -81,6 +80,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        pendingHomeRequests.remove(player.getUniqueId());
         Profile profile = profiles.load(player.getUniqueId());
         if (arguments.length == 1) {
             String arg = arguments[0];
@@ -113,31 +113,12 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    /**
-     * Resolves a name the same way the trust and mail commands do. {@code
-     * Server#getOfflinePlayer(String)} is unusable here for two reasons: it can
-     * contact Mojang's API from the server thread, and it never returns null â€”
-     * it invents a profile for a name that has never played, so a typo would be
-     * accepted as a real invite rather than rejected.
-     */
-    private OfflinePlayer resolvePlayer(String name) {
-        if (server == null) {
-            return null;
-        }
-        Player online = server.getPlayerExact(name);
-        if (online != null) {
-            return online;
-        }
-        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
-        return cached != null && cached.hasPlayedBefore() ? cached : null;
-    }
-
     private String displayName(OfflinePlayer player, String fallback) {
         String name = player.getName();
         return name == null ? fallback : name;
     }
 
-    private void handleInvite(Player owner, String homeName, String targetName) {
+    private void handleSharing(Player owner, String homeName, String targetName, boolean invite) {
         Profile ownerProfile = profiles.load(owner.getUniqueId());
         Optional<Home> homeOpt = ownerProfile.home(homeName);
         if (homeOpt.isEmpty()) {
@@ -145,18 +126,20 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        OfflinePlayer target = resolvePlayer(targetName);
+        OfflinePlayer target = PlayerNameLookup.find(server, profiles, targetName);
         if (target == null) {
             messages.send(owner, "teleport.player-not-found", Placeholder.unparsed("player", targetName));
             return;
         }
 
-        Home updated = homeOpt.orElseThrow().invite(target.getUniqueId());
+        Home home = homeOpt.orElseThrow();
+        Home updated = invite ? home.invite(target.getUniqueId()) : home.uninvite(target.getUniqueId());
         ownerProfile.updateHome(updated);
         profiles.save(ownerProfile);
 
-        messages.send(owner, "home.invited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
-        if (target.isOnline()) {
+        messages.send(owner, invite ? "home.invited" : "home.uninvited",
+                Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
+        if (invite && target.isOnline()) {
             messages.send(target.getPlayer(), "home.invite-received", Placeholder.unparsed("player", owner.getName()), Placeholder.unparsed("home", homeName));
         }
         if (feedback != null) {
@@ -164,65 +147,45 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
         }
     }
 
-    private void handleUninvite(Player owner, String homeName, String targetName) {
-        Profile ownerProfile = profiles.load(owner.getUniqueId());
-        Optional<Home> homeOpt = ownerProfile.home(homeName);
-        if (homeOpt.isEmpty()) {
-            messages.send(owner, "home.not-found", Placeholder.unparsed("home", homeName));
-            return;
-        }
-
-        OfflinePlayer target = resolvePlayer(targetName);
-        if (target == null) {
-            messages.send(owner, "teleport.player-not-found", Placeholder.unparsed("player", targetName));
-            return;
-        }
-
-        Home updated = homeOpt.orElseThrow().uninvite(target.getUniqueId());
-        ownerProfile.updateHome(updated);
-        profiles.save(ownerProfile);
-
-        messages.send(owner, "home.uninvited", Placeholder.unparsed("player", displayName(target, targetName)), Placeholder.unparsed("home", homeName));
-        if (feedback != null) {
-            feedback.play(owner, FeedbackService.UI_CLICK);
-        }
-    }
-
     private void handleSharedTeleport(Player visitor, String ownerName, String homeName) {
-        if (server == null) {
-            messages.send(visitor, "home.not-found", Placeholder.unparsed("home", homeName));
-            return;
-        }
-
-        OfflinePlayer owner = resolvePlayer(ownerName);
+        OfflinePlayer owner = PlayerNameLookup.find(server, profiles, ownerName);
         if (owner == null) {
             messages.send(visitor, "teleport.player-not-found", Placeholder.unparsed("player", ownerName));
             return;
         }
 
-        profiles.loadAsync(owner.getUniqueId()).thenAccept(loaded -> {
-            server.getScheduler().runTask(plugin, () -> {
-                if (!visitor.isOnline()) return;
-                
-                Optional<Home> homeOpt = profiles.load(owner.getUniqueId()).home(homeName);
+        UUID visitorId = visitor.getUniqueId();
+        Object request = new Object();
+        pendingHomeRequests.put(visitorId, request);
+        Executor mainThread = task -> server.getScheduler().runTask(plugin, task);
+        profiles.withProfileAsync(owner.getUniqueId(), mainThread,
+                () -> pendingHomeRequests.get(visitorId) == request && server.getPlayer(visitorId) == visitor,
+                profile -> {
+                Optional<Home> homeOpt = profile.home(homeName);
                 if (homeOpt.isEmpty()) {
                     messages.send(visitor, "home.not-found", Placeholder.unparsed("home", homeName));
-                    return;
+                    return null;
                 }
 
                 Home home = homeOpt.orElseThrow();
                 if (!home.isSharedWith(visitor.getUniqueId()) && !owner.getUniqueId().equals(visitor.getUniqueId())) {
                     messages.send(visitor, "home.not-shared");
-                    return;
+                    return null;
                 }
 
-                homeMenu.teleport(visitor, home, () -> profiles.load(owner.getUniqueId()).home(homeName)
+                homeMenu.teleport(visitor, home, () -> profile.home(homeName)
                         .filter(current -> current.isSharedWith(visitor.getUniqueId())
                                 || owner.getUniqueId().equals(visitor.getUniqueId()))
                         .filter(current -> current.resolve(server).equals(home.resolve(server)))
-                        .isPresent());
-            });
-        });
+                        .isPresent(), profiles.retain(profile));
+                return null;
+            }).whenCompleteAsync((ignored, failure) -> {
+                if (pendingHomeRequests.remove(visitorId, request) && failure != null
+                        && server.getPlayer(visitorId) == visitor) {
+                    plugin.getLogger().log(Level.WARNING, "Could not load shared home", failure);
+                    messages.send(visitor, "teleport.safety.unavailable");
+                }
+            }, mainThread);
     }
 
     @Override
@@ -238,33 +201,18 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
 
         if (arguments.length == 1) {
             String prefix = arguments[0].toLowerCase(Locale.ROOT);
-            List<String> suggestions = new ArrayList<>(profiles.load(player.getUniqueId()).homes().stream()
-                    .map(Home::name)
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted()
-                    .toList());
+            List<String> suggestions = new ArrayList<>(profiles.load(player.getUniqueId()).matchingHomeNames(prefix));
             if ("invite".startsWith(prefix)) suggestions.add("invite");
             if ("uninvite".startsWith(prefix)) suggestions.add("uninvite");
             return suggestions;
         }
 
         if (arguments.length == 2 && (arguments[0].equalsIgnoreCase("invite") || arguments[0].equalsIgnoreCase("uninvite"))) {
-            String prefix = arguments[1].toLowerCase(Locale.ROOT);
-            return profiles.load(player.getUniqueId()).homes().stream()
-                    .map(Home::name)
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted()
-                    .toList();
+            return profiles.load(player.getUniqueId()).matchingHomeNames(arguments[1]);
         }
 
-        if (arguments.length == 3 && (arguments[0].equalsIgnoreCase("invite") || arguments[0].equalsIgnoreCase("uninvite")) && server != null) {
-            String prefix = arguments[2].toLowerCase(Locale.ROOT);
-            return server.getOnlinePlayers().stream()
-                    .filter(candidate -> !candidate.getUniqueId().equals(player.getUniqueId()))
-                    .map(Player::getName)
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted(String.CASE_INSENSITIVE_ORDER)
-                    .toList();
+        if (arguments.length == 3 && (arguments[0].equalsIgnoreCase("invite") || arguments[0].equalsIgnoreCase("uninvite"))) {
+            return PlayerNameLookup.otherPlayerSuggestions(server, player, arguments[2], String.CASE_INSENSITIVE_ORDER);
         }
 
         return List.of();

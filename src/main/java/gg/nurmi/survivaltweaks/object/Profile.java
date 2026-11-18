@@ -40,6 +40,15 @@ public final class Profile {
         return List.copyOf(homes.values());
     }
 
+    public List<String> matchingHomeNames(String input) {
+        String prefix = input.toLowerCase(Locale.ROOT);
+        return homes().stream()
+                .map(Home::name)
+                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
+                .sorted()
+                .toList();
+    }
+
     public Optional<Home> home(String name) {
         return Optional.ofNullable(homes.get(key(name)));
     }
@@ -143,11 +152,23 @@ public final class Profile {
         notifications.addAll(loaded);
     }
 
-    public void addNotification(PlayerNotification notification, int maximum) {
-        notifications.addFirst(Objects.requireNonNull(notification, "notification"));
-        while (notifications.size() > maximum) {
-            notifications.removeLast();
+    public boolean addNotification(PlayerNotification notification, int maximum) {
+        Objects.requireNonNull(notification, "notification");
+        int remove = notifications.size() - maximum + 1;
+        if (remove > 0) {
+            long replaceable = notifications.stream().filter(item -> item.type() != NotificationType.MAIL).count();
+            if (replaceable < remove) {
+                return false;
+            }
+            for (int index = notifications.size() - 1; remove > 0; index--) {
+                if (notifications.get(index).type() != NotificationType.MAIL) {
+                    notifications.remove(index);
+                    remove--;
+                }
+            }
         }
+        notifications.addFirst(notification);
+        return true;
     }
 
     public boolean markNotificationRead(UUID notificationId) {

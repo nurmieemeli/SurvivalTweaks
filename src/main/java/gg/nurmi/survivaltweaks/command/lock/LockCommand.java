@@ -8,11 +8,10 @@ import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.OnboardingService;
 import gg.nurmi.survivaltweaks.object.OnboardingHint;
-import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.service.NotificationService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -21,6 +20,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -143,19 +143,16 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
 
         String action = arguments[0].toLowerCase(Locale.ROOT);
         if (action.equals("trust") || action.equals("transfer")) {
-            return matching(
-                    server.getOnlinePlayers().stream()
-                            .filter(candidate -> !candidate.getUniqueId().equals(player.getUniqueId()))
-                            .map(Player::getName)
-                            .toList(),
-                    arguments[1]
-            );
+            return PlayerNameLookup.otherPlayerSuggestions(server, player, arguments[1], Comparator.naturalOrder());
         }
         if (action.equals("untrust")) {
-            return targetLock(player).map(lock -> matching(
-                    lock.trustedPlayers().stream().map(this::playerName).toList(),
-                    arguments[1]
-            )).orElseGet(List::of);
+            return resolver.target(player, settings.current().lockTargetDistance())
+                    .flatMap(target -> locks.singleLockFor(target.blocks()))
+                    .filter(lock -> lock.canManage(player.getUniqueId(), player.hasPermission(ADMIN_PERMISSION)))
+                    .map(lock -> matching(
+                            lock.trustedPlayers().stream().map(id -> PlayerNameLookup.displayName(server, id)).toList(),
+                            arguments[1]
+                    )).orElseGet(List::of);
         }
         return List.of();
     }
@@ -259,7 +256,7 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
         ContainerLock lock = selected.orElseThrow();
         if (action.equals("untrust")) {
             Optional<UUID> trustedId = lock.trustedPlayers().stream()
-                    .filter(uniqueId -> playerName(uniqueId).equalsIgnoreCase(playerName))
+                    .filter(uniqueId -> PlayerNameLookup.displayName(server, uniqueId).equalsIgnoreCase(playerName))
                     .findFirst();
             if (trustedId.isEmpty()) {
                 messages.send(
@@ -270,9 +267,9 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
                 return;
             }
 
-            String resolvedName = playerName(trustedId.orElseThrow());
+            String resolvedName = PlayerNameLookup.displayName(server, trustedId.orElseThrow());
             locks.untrust(lock, trustedId.orElseThrow());
-            notifyAdministrativeChange(player, lock, "untrusted:" + resolvedName);
+            notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "untrusted:" + resolvedName);
             messages.send(
                     player,
                     "lock.untrusted",
@@ -296,7 +293,7 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
         String message = changed ? "lock.trusted" : "lock.already-trusted";
         messages.send(player, message, Placeholder.unparsed("player", trustedPlayer.getName()));
         if (changed) {
-            notifyAdministrativeChange(player, lock, "trusted:" + trustedPlayer.getName());
+            notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "trusted:" + trustedPlayer.getName());
             feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
         }
     }
@@ -318,8 +315,14 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        if (locks.transfer(lock, newOwner.getUniqueId())) {
-            notifyAdministrativeChange(player, lock, "transferred:" + newOwner.getName());
+        UUID previousOwnerId = lock.ownerId();
+        ContainerLockService.TransferResult result = locks.transfer(
+                lock, newOwner.getUniqueId(), settings.current().maxLocksPerPlayer());
+        if (result == ContainerLockService.TransferResult.LIMIT) {
+            messages.send(player, "lock.transfer-limit", Placeholder.unparsed("player", newOwner.getName()));
+        } else if (result == ContainerLockService.TransferResult.TRANSFERRED) {
+            notifications.lockTransferred(previousOwnerId, newOwner.getUniqueId(), player.getUniqueId(),
+                    player.getName(), newOwner.getName(), lock.name());
             messages.send(player, "lock.transferred", Placeholder.unparsed("player", newOwner.getName()));
             messages.send(newOwner, "lock.transfer-received", Placeholder.unparsed("player", player.getName()));
             feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
@@ -338,12 +341,12 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
                 ? messages.component(player, "lock.nobody")
                 : Component.text(String.join(
                         ", ",
-                        lock.trustedPlayers().stream().map(this::playerName).sorted().toList()
+                        lock.trustedPlayers().stream().map(id -> PlayerNameLookup.displayName(server, id)).sorted().toList()
                 ));
         messages.send(
                 player,
                 "lock.info",
-                Placeholder.unparsed("owner", playerName(lock.ownerId())),
+                Placeholder.unparsed("owner", PlayerNameLookup.displayName(server, lock.ownerId())),
                 Placeholder.component("trusted", trusted)
         );
     }
@@ -371,27 +374,6 @@ public final class LockCommand implements CommandExecutor, TabCompleter {
             return Optional.empty();
         }
         return found.stream().findFirst();
-    }
-
-    private Optional<ContainerLock> targetLock(Player player) {
-        return resolver.target(player, settings.current().lockTargetDistance())
-                .flatMap(target -> locks.locksFor(target.blocks()).stream().findFirst());
-    }
-
-    private String playerName(UUID uniqueId) {
-        OfflinePlayer player = server.getOfflinePlayer(uniqueId);
-        return player.getName() == null ? uniqueId.toString().substring(0, 8) : player.getName();
-    }
-
-    private void notifyAdministrativeChange(Player actor, ContainerLock lock, String detail) {
-        if (!actor.getUniqueId().equals(lock.ownerId())) {
-            notifications.notify(
-                    lock.ownerId(),
-                    NotificationType.LOCK_ADMIN_CHANGED,
-                    actor.getName(),
-                    detail
-            );
-        }
     }
 
     private List<String> matching(List<String> values, String input) {

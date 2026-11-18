@@ -14,7 +14,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
-import java.util.Locale;
 
 public final class DeleteHomeCommand implements CommandExecutor, TabCompleter {
 
@@ -86,11 +85,6 @@ public final class DeleteHomeCommand implements CommandExecutor, TabCompleter {
         if (!(sender instanceof Player player) || arguments.length != 1) {
             return List.of();
         }
-        String prefix = arguments[0].toLowerCase(Locale.ROOT);
-        return profiles.load(player.getUniqueId()).homes().stream()
-                .map(Home::name)
-                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                .sorted()
-                .toList();
+        return profiles.load(player.getUniqueId()).matchingHomeNames(arguments[0]);
     }
 }

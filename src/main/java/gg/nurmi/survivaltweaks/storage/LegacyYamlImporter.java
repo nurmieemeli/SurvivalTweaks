@@ -1,15 +1,22 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.config.StrictYaml;
+import gg.nurmi.survivaltweaks.object.BlockKey;
+import gg.nurmi.survivaltweaks.object.ContainerLockSnapshot;
+import gg.nurmi.survivaltweaks.object.DeathMarker;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.InvalidConfigurationException;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -74,14 +81,11 @@ final class LegacyYamlImporter {
         Path locks = dataFolder.resolve("locked-containers.yml");
         Path deaths = dataFolder.resolve("death-markers.yml");
         Path spawns = dataFolder.resolve("new-player-spawns.yml");
-        validateIfPresent(locks);
-        validateIfPresent(deaths);
-        validateIfPresent(spawns);
         StorageSnapshot snapshot = new StorageSnapshot(
                 profiles,
-                new ContainerLockStore(locks, importLogger).loadLocks(),
-                new DeathMarkerStore(deaths, importLogger).loadDeathMarkers(),
-                new NewPlayerSpawnStore(spawns, importLogger).loadSpawnState()
+                new ContainerLockStore(locks, importLogger).load(readYamlIfPresent(locks)),
+                new DeathMarkerStore(importLogger).load(readYamlIfPresent(deaths)),
+                new NewPlayerSpawnStore(importLogger).load(readYamlIfPresent(spawns))
         );
         if (!rejected.isEmpty()) {
             throw new IOException(
@@ -90,7 +94,29 @@ final class LegacyYamlImporter {
                             + rejected.getFirst()
             );
         }
+        validateLocks(snapshot.locks());
+        Set<UUID> markedPlayers = new HashSet<>();
+        for (DeathMarker marker : snapshot.deathMarkers()) {
+            if (!markedPlayers.add(marker.playerId())) {
+                throw new IOException("Legacy death markers repeat player " + marker.playerId());
+            }
+        }
         return snapshot;
+    }
+
+    private static void validateLocks(List<ContainerLockSnapshot> locks) throws IOException {
+        Set<UUID> ids = new HashSet<>();
+        Set<BlockKey> blocks = new HashSet<>();
+        for (ContainerLockSnapshot lock : locks) {
+            if (!ids.add(lock.id())) {
+                throw new IOException("Legacy container locks repeat ID " + lock.id());
+            }
+            for (BlockKey block : lock.blocks()) {
+                if (!blocks.add(block)) {
+                    throw new IOException("Legacy container locks share block " + block);
+                }
+            }
+        }
     }
 
     private List<ProfileSnapshot> readProfiles(Logger importLogger) throws IOException {
@@ -107,34 +133,36 @@ final class LegacyYamlImporter {
         ProfileStore store = new ProfileStore(directory, importLogger, worldResolver);
         List<ProfileSnapshot> profiles = new ArrayList<>();
         for (Path file : files) {
-            validateIfPresent(file);
+            YamlConfiguration yaml = readYamlIfPresent(file);
             String filename = file.getFileName().toString();
             try {
                 UUID playerId = UUID.fromString(filename.substring(0, filename.length() - 4));
-                profiles.add(store.load(playerId).snapshot());
+                ProfileSnapshot profile = store.load(playerId, yaml).snapshot();
+                // A UUID filename alone does not make a truncated or unrelated file player data.
+                if (!profile.equals(new ProfileSnapshot(playerId, List.of()))) {
+                    profiles.add(profile);
+                }
             } catch (IllegalArgumentException exception) {
-                throw new IOException("Invalid profile filename " + filename, exception);
+                throw new IOException("Invalid legacy profile " + filename + ": " + exception.getMessage(), exception);
             }
         }
         return List.copyOf(profiles);
     }
 
     private boolean isProfileFile(Path path) {
-        String name = path.getFileName().toString();
-        return Files.isRegularFile(path)
-                && name.endsWith(".yml")
-                && name.length() == 40;
+        return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                && ProfileStore.isProfileFilename(path.getFileName().toString());
     }
 
-    private void validateIfPresent(Path path) throws IOException {
+    private YamlConfiguration readYamlIfPresent(Path path) throws IOException {
         if (Files.notExists(path)) {
-            return;
+            return new YamlConfiguration();
         }
-        YamlConfiguration yaml = new YamlConfiguration();
         try {
-            yaml.loadFromString(Files.readString(path, StandardCharsets.UTF_8));
-        } catch (Exception exception) {
-            throw new IOException("Could not parse legacy file " + path.getFileName(), exception);
+            return StrictYaml.load(path);
+        } catch (InvalidConfigurationException exception) {
+            throw new IOException("Could not parse legacy file " + path.getFileName() + ": " + exception.getMessage(),
+                    exception);
         }
     }
 }

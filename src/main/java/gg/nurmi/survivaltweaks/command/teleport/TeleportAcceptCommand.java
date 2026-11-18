@@ -101,16 +101,7 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
         } else if (incoming.size() == 1) {
             selected = Optional.of(incoming.getFirst());
         } else {
-            if (inbox != null) {
-                inbox.open(recipient);
-            } else {
-                String names = String.join(", ", incoming.stream()
-                        .map(this::senderName)
-                        .flatMap(Optional::stream)
-                        .sorted()
-                        .toList());
-                messages.send(recipient, "teleport.accept.choose", Placeholder.unparsed("players", names));
-            }
+            inbox.open(recipient);
             return true;
         }
 
@@ -145,12 +136,19 @@ public final class TeleportAcceptCommand implements CommandExecutor, TabComplete
             feedback.play(recipient, FeedbackService.TELEPORT_CANCELLED);
             return;
         }
+        if (!requestingPlayer.hasPermission(TeleportCommand.PERMISSION)) {
+            requests.consume(request);
+            messages.send(recipient, "teleport.accept.sender-unavailable");
+            feedback.play(recipient, FeedbackService.TELEPORT_CANCELLED);
+            return;
+        }
 
         boolean started = safeTeleports.begin(
                 requestingPlayer,
                 () -> {
                     Player currentRecipient = server.getPlayer(request.recipientId());
                     return currentRecipient == null || !requestingPlayer.canSee(currentRecipient)
+                            || !requestingPlayer.hasPermission(TeleportCommand.PERMISSION)
                             ? null : currentRecipient.getLocation();
                 },
                 messages.component(

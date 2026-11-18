@@ -2,12 +2,15 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.AbstractHorse;
 import org.bukkit.entity.AnimalTamer;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Tameable;
+import org.bukkit.entity.TNTPrimed;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -20,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class PetProtectionServiceTest {
@@ -37,6 +41,27 @@ public class PetProtectionServiceTest {
         MockitoAnnotations.openMocks(this);
         when(settingsService.current()).thenReturn(settings);
         service = new PetProtectionService(settingsService);
+    }
+
+    @Test
+    void cancelsPlayerCausedTntDamageToATamedPet() {
+        var event = mock(EntityDamageByEntityEvent.class);
+        var wolf = mock(Tameable.class);
+        var player = mock(Player.class);
+        var tnt = mock(TNTPrimed.class);
+        var source = mock(DamageSource.class);
+        when(settings.petProtectionEnabled()).thenReturn(true);
+        when(settings.petPreventFriendlyFire()).thenReturn(true);
+        when(wolf.isTamed()).thenReturn(true);
+        when(wolf.getOwner()).thenReturn(player);
+        when(event.getEntity()).thenReturn(wolf);
+        when(event.getDamager()).thenReturn(tnt);
+        when(event.getDamageSource()).thenReturn(source);
+        when(source.getCausingEntity()).thenReturn(player);
+
+        service.onEntityDamageByEntity(event);
+
+        verify(event).setCancelled(true);
     }
 
     @Test

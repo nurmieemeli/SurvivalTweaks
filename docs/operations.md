@@ -10,6 +10,11 @@ player's homes — each with its icon, description, favorite state, category,
 arrival style, ordering, and a UUID-first world reference — alongside
 preferences, one-time onboarding progress, last-seen and cached playtime
 metadata, UUID-based mail blocks, and a capped notification inbox.
+The inbox retains up to 80 entries. New entries can replace old notifications,
+while saved mail stays until the player deletes it or an operator purges it.
+When all entries are mail, new deliveries are refused and the sender is told.
+Lock ownership transfers notify the recipient. An administrator's transfer
+also alerts the original owner; an owner's own transfer skips that admin alert.
 
 Saves go through ordered, coalescing background writers into one transactional
 SQL store. Profiles, homes and shares, preferences, notifications, locks,
@@ -33,15 +38,17 @@ is rejected before gameplay services can write.
 
 On the first SQL startup, existing `userdata/*.yml`,
 `locked-containers.yml`, `death-markers.yml`, and
-`new-player-spawns.yml` are parsed and imported only if the SQL database is
-empty. SurvivalTweaks verifies logical counts and a deterministic SHA-256
-before accepting the import. The YAML originals remain untouched as a manual
-rollback source.
+`new-player-spawns.yml` are parsed and imported into an empty database before
+the storage identity is pinned. SurvivalTweaks verifies logical counts and a
+deterministic SHA-256 before accepting the import. It keeps the YAML originals
+for manual recovery. Once pinned, the database never imports them again.
 
 The active engine, endpoint fingerprint, and random server-instance UUID are
 pinned in `storage-state.yml`. Changing the backend or remote endpoint
-requires a staged migration. An existing SQLite file can be reopened at a new
-path when its database instance ID matches the pinned ID. Startup rejects a
+requires a staged migration. SQLite pins both the filename and database identity.
+When moving the plugin data directory, keep that filename. Installations with an
+older absolute-path fingerprint upgrade it on successful startup at the original
+path. Use a verified backup restore to switch SQLite files. Startup rejects a
 missing or unrecognized pinned database. A remote outage
 also fails startup: SurvivalTweaks never silently falls back to SQLite, because
 doing so could create two divergent copies of player data.
@@ -89,15 +96,25 @@ the primary defence.
    read, update, and delete its tables.
 2. Keep `storage.backend: sqlite`, then set `storage.remote.type` to either
    `postgresql` or `mysql` and fill in the host, port, database, username,
-   password, schema, and TLS setting. PostgreSQL defaults to the dedicated
+   password, schema, and TLS setting. Set `storage.remote.password` directly in
+   `config.yml` because server commands can appear in logs. PostgreSQL defaults to the dedicated
    `survivaltweaks` schema and `postgresql-ssl-mode: verify-full`, which validates
    the certificate chain and hostname. Existing schema-v2 installations migrate
    to the `public` schema and retain their old `require`/`disable` behavior so
    current tables remain visible.
 3. Reload is only a validator; it does not switch the live store. Run
-   `/survivaltweaks storage test <backend>`.
+   `/survivaltweaks storage test <backend>`. Testing and migration both read
+   the configuration currently saved on disk, so destination edits do not
+   require a reload. Testing validates the destination settings; migration
+   validates the full configuration and both endpoints before staging.
+   PostgreSQL/MySQL testing ignores the SQLite filename; SQLite testing ignores
+   remote-only options while keeping its connection timeout validation.
+   Databases with unsupported schema versions are rejected before initialization
+   changes their schema or SQLite journal mode.
 4. Run `/survivaltweaks storage migrate <backend>`. This records a migration
-   plan and updates `storage.backend`. The data moves on restart. If shutdown
+   plan and updates `storage.backend`, preserving edits already saved in
+   `config.yml`. If that file changes during staging, publication is rejected;
+   retry the command using the updated configuration. The data moves on restart. If shutdown
    interrupts staging before the config is saved, startup keeps the original
    database and discards the incomplete request.
 5. Restart Paper. Before services start, SurvivalTweaks opens both endpoints,
@@ -154,12 +171,14 @@ logged once when the level changes, with the triggering MSPT and reason.
 
 Before startup loads or migrates data, and before every configuration reload,
 the plugin writes an atomic ZIP snapshot into `plugins/SurvivalTweaks/backups/`.
-ZIP archives are capped at 512 MiB uncompressed. A config reload can proceed
-when the archive exceeds that limit, and the server log records the skipped backup.
+ZIP archives are capped at 512 MiB uncompressed, with a 16 MiB limit per YAML
+file. A config reload can proceed when a backup exceeds those limits, and the
+server log records the skipped backup.
 Archives contain configuration, both language catalogs, the pinned storage
 identity, the default SQLite database, and preserved legacy YAML files. SQLite
 writes are paused briefly and its WAL is checkpointed while the database enters
-the ZIP, so the archived file is self-contained. Remote database contents should
+the ZIP, so the archived file is self-contained. A startup backup recovers any
+unfinished SQLite rollback journal before capturing the database. Remote database contents should
 also be backed up using the database provider's native backup tooling. In
 addition, when PostgreSQL or MySQL is active, SurvivalTweaks automatically
 writes a portable SQLite copy to `storage-exports/automatic/`. The default
@@ -168,14 +187,19 @@ the newest seven exports. Every copy is reopened and compared with the source
 record counts and deterministic checksum before it is accepted. The schedule
 and retention can be changed under `storage.portable-exports` and applied with
 a validated reload. Manual `storage export` files remain separate and are not
-removed by automatic retention. The newest ten ZIP safety archives are
-retained.
+removed by automatic retention. ZIP safety backups keep the newest ten
+archives, reserving one slot for the most recent restorable archive when
+the latest snapshots cannot be restored. Rotation pauses when it cannot
+read an archive it needs to verify, so a temporary file lock cannot cost
+the last recovery point. Archives with pending storage migrations cannot be
+staged and do not count as recovery points. Verification rejects individual YAML
+files over 16 MiB and stops parsing documents that exceed 250,000 parser events.
 
 | Command | Effect |
 | --- | --- |
 | `/survivaltweaks backup list` | List retained archives |
 | `/survivaltweaks backup create` | Create one manually |
-| `/survivaltweaks backup verify <file>` | Validate an archive and report its SHA-256 |
+| `/survivaltweaks backup verify <file>` | Validate the archive and its local SQLite database, if present, and report its SHA-256 |
 | `/survivaltweaks backup restore <file> [confirm]` | Stage a restore for the next startup |
 
 ### Restoring
@@ -185,13 +209,24 @@ Restoration is deliberately staged and cannot be completed in one step:
 1. Enable maintenance mode and wait until no players remain online.
 2. Issue the final confirmation from the local server console — not in-game.
 3. The chosen archive is copied to a protected pending file and Paper shuts down.
-4. On the next startup the plugin creates a fresh `pre-restore` backup,
-   re-verifies the staged archive, swaps only plugin-managed files with rollback
-   protection, and applies current defaults before any player or world data
-   loads.
+4. On the next startup the plugin re-verifies the staged archive, including any
+   SQLite database, language catalogs, and legacy YAML it would import. Before replacing files,
+   it creates a fresh `pre-restore` backup. Restore replaces UUID-named legacy
+   profile files under `userdata` and leaves unrelated files in place. A full SQLite restore requires an archived
+   database or legacy data with at least one importable record. It keeps the original files until the plugin
+   finishes starting with the restored data. If the staged archive is
+   temporarily unreadable, startup uses the existing data and leaves the
+   archive staged for the next restart. On a rejected restore it preserves the
+   original files and logs where it saved the rejected archive. A failure
+   late in startup may require another server restart. Use the database
+   provider's tools to verify or restore remote database contents.
 
-If the current data exceeds the ZIP limits, the pre-restore backup is a
-verified file copy under the backups directory. Its location appears in the
+If the data exceeds the ZIP limits, SQLite has write-ahead log or rollback files,
+or the restore will replace a second SQLite database, the pre-restore backup is a
+verified file copy under the backups directory. It includes the current and
+destination databases and their sidecars. The storage pin identifies the current
+SQLite file if the live config is unusable. SQLite files are copied together before
+SQLite opens them. The backup location appears in the
 server log. Keep it until you verify the restored data. This directory is
 retained separately from the automatically rotated ZIP archives.
 
@@ -208,8 +243,9 @@ workers, and oldest age of the plugin's coalesced persistence queues, plus the
 last and next automatic portable-export times. Operators with
 `survivaltweaks.health-notify` receive a compact warning after joining when the
 database is unavailable or slow, its connection pool has waiters, writes are
-stalled or failing, an automatic export has failed or become overdue, or no
-recent safety backup is available. Healthy joins remain silent.
+stalled or failing, an automatic export has failed or become overdue, or the
+newest backup ZIP is missing or over 48 hours old. The join notice checks ZIP
+age. Run `/survivaltweaks doctor` to verify that an archive can restore.
 
 ### Database maintenance
 
@@ -265,6 +301,10 @@ successful placement, and retained afterwards so future selections respect the
 configured minimum separation. Pending placement is retried when the player
 reconnects. Candidate chunks generate asynchronously and are held loaded with
 plugin chunk tickets until assigned.
+
+If the pool is empty on first join, the player starts at Paper's normal spawn
+and waits for a prepared location. The plugin remembers their place in the
+pool even if they disconnect before the first reservation.
 
 Generation runs one candidate at a time, waits `generation-delay-ticks` between
 candidates, and pauses whenever the one-minute TPS falls below `minimum-tps`.

@@ -21,9 +21,6 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.SkullMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Clock;
@@ -31,6 +28,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
+import static gg.nurmi.survivaltweaks.ui.MenuItems.playerHead;
 
 public final class TeleportInboxController implements Listener, CommandExecutor {
 
@@ -95,7 +95,7 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
                     (Duration.between(clock.instant(), request.expiresAt()).toMillis() + 999L) / 1_000L
             );
             inventory.getInventory().setItem(index, playerHead(
-                    request.senderId(),
+                    server.getOfflinePlayer(request.senderId()),
                     messages.component(
                             player,
                             "ui.teleport-inbox.request",
@@ -182,23 +182,6 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
         if (event.getView().getTopInventory().getHolder(false) instanceof Inbox) {
             event.setCancelled(true);
         }
-    }
-
-    private ItemStack playerHead(UUID playerId, Component name, List<Component> lore) {
-        ItemStack item = item(Material.PLAYER_HEAD, name, lore);
-        SkullMeta meta = (SkullMeta) item.getItemMeta();
-        meta.setOwningPlayer(server.getOfflinePlayer(playerId));
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private ItemStack item(Material material, Component name, List<Component> lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
     }
 
     private static final class Inbox implements SurvivalTweaksMenu {

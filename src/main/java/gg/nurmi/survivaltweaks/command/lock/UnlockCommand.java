@@ -7,7 +7,6 @@ import gg.nurmi.survivaltweaks.service.ContainerLockService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.NotificationService;
-import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.ui.ConfirmationDialogService;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -116,14 +115,7 @@ public final class UnlockCommand implements CommandExecutor {
             return;
         }
 
-        if (!player.getUniqueId().equals(lock.ownerId())) {
-            notifications.notify(
-                    lock.ownerId(),
-                    NotificationType.LOCK_ADMIN_CHANGED,
-                    player.getName(),
-                    "removed"
-            );
-        }
+        notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "removed");
         locks.remove(lock);
         messages.send(player, "lock.unlocked");
         feedback.play(player, FeedbackService.LOCK_REMOVED);

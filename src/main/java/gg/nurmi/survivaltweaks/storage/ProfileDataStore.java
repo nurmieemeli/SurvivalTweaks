@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.UUID;
 
 public interface ProfileDataStore {
@@ -11,6 +12,10 @@ public interface ProfileDataStore {
     Profile load(UUID uniqueId);
 
     java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts() throws IOException;
+
+    default Map<UUID, String> loadKnownPlayerNames() throws IOException {
+        return Map.of();
+    }
 
     void save(ProfileSnapshot snapshot) throws IOException;
 }

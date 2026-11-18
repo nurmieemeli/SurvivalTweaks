@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.object;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import java.util.List;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,6 +11,28 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProfileTest {
+
+    @Test
+    void matchingHomeNamesKeepsCaseInsensitivePrefixesAndNaturalSorting() {
+        Profile profile = new Profile(UUID.randomUUID());
+        for (String name : List.of("beta", "alpine", "Mökki", "Alpha")) {
+            profile.addHome(home(name));
+        }
+
+        assertEquals(List.of("Alpha", "Mökki", "alpine", "beta"), profile.matchingHomeNames(""));
+        assertEquals(List.of("Alpha", "alpine"), profile.matchingHomeNames("AL"));
+        assertEquals(List.of("Mökki"), profile.matchingHomeNames("MÖ"));
+        assertEquals(List.of(), profile.matchingHomeNames("missing"));
+    }
+
+    @Test
+    void homeNamesMustWorkAsOneUnambiguousCommandArgument() {
+        assertTrue(Home.isValidName("kesämökki_2-east"));
+        assertTrue(Home.isValidName("a".repeat(32)));
+        assertFalse(Home.isValidName("mine:base"));
+        assertFalse(Home.isValidName("my base"));
+        assertFalse(Home.isValidName("a".repeat(33)));
+    }
 
     @Test
     void homeNamesAreUniqueAndCaseInsensitive() {

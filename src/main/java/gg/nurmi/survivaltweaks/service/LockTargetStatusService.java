@@ -4,14 +4,13 @@ import gg.nurmi.survivaltweaks.command.lock.LockCommand;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.ContainerLock;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -21,6 +20,9 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class LockTargetStatusService implements AutoCloseable {
+
+    private static final long UNKNOWN_NAME_RETRY_MILLIS = 5_000;
+    private static final long KNOWN_NAME_RETRY_MILLIS = 60_000;
 
     private final Server server;
     private final ContainerBlockResolver resolver;
@@ -32,8 +34,8 @@ public final class LockTargetStatusService implements AutoCloseable {
     private final PlayerExperienceService experience;
     private final ProfileRepository profiles;
     private final Set<UUID> hinted = new HashSet<>();
-    private final Map<UUID, String> ownerNames = new HashMap<>();
-    private final Map<UUID, HintState> hintStates = new HashMap<>();
+    private final Map<UUID, OwnerName> ownerNames = new HashMap<>();
+    private final Clock clock;
     private final BukkitTask task;
 
     public LockTargetStatusService(
@@ -45,32 +47,8 @@ public final class LockTargetStatusService implements AutoCloseable {
             ActionBarService actionBars,
             SafeTeleportService teleports,
             PlayerExperienceService experience,
-            ProfileRepository profiles
-    ) {
-        this(
-                plugin,
-                resolver,
-                locks,
-                messages,
-                settings,
-                actionBars,
-                teleports,
-                experience,
-                profiles,
-                null
-        );
-    }
-
-    public LockTargetStatusService(
-            JavaPlugin plugin,
-            ContainerBlockResolver resolver,
-            ContainerLockService locks,
-            MessageService messages,
-            SettingsService settings,
-            ActionBarService actionBars,
-            SafeTeleportService teleports,
-            PlayerExperienceService experience,
             ProfileRepository profiles,
+            Clock clock,
             TaskFailureIsolation failures
     ) {
         this.profiles = java.util.Objects.requireNonNull(profiles, "profiles");
@@ -82,10 +60,10 @@ public final class LockTargetStatusService implements AutoCloseable {
         this.actionBars = actionBars;
         this.teleports = teleports;
         this.experience = experience;
-        Runnable update = this::update;
+        this.clock = clock;
         this.task = server.getScheduler().runTaskTimer(
                 plugin,
-                failures == null ? update : failures.guard("lock target hints", update),
+                failures.guard("lock target hints", this::update),
                 20L,
                 20L
         );
@@ -98,13 +76,11 @@ public final class LockTargetStatusService implements AutoCloseable {
         }
         server.getOnlinePlayers().forEach(this::clear);
         hinted.clear();
-        hintStates.clear();
         ownerNames.clear();
     }
 
     private void update() {
         hinted.removeIf(playerId -> server.getPlayer(playerId) == null);
-        hintStates.keySet().removeIf(playerId -> server.getPlayer(playerId) == null);
 
         PluginSettings current = settings.current();
         if (!current.actionBarEnabled()
@@ -138,12 +114,9 @@ public final class LockTargetStatusService implements AutoCloseable {
             ContainerLock selected = lock.orElseThrow();
             UUID playerId = player.getUniqueId();
             boolean administrator = player.hasPermission(LockCommand.ADMIN_PERMISSION);
-            // Enforcement also honours the owner's profile-wide /trust list, so
-            // the hint has to apply it too or a trusted player is told a
-            // container is denied while opening it actually succeeds.
             boolean trustedProfile = profiles.isTrusted(selected.ownerId(), playerId);
-            boolean canAccess = selected.canAccess(playerId, administrator) || trustedProfile;
-            boolean canWithdraw = selected.canWithdraw(playerId, administrator) || trustedProfile;
+            boolean canAccess = selected.canAccess(playerId, administrator, trustedProfile);
+            boolean canWithdraw = selected.canWithdraw(playerId, administrator, trustedProfile);
             String key;
             if (selected.canManage(playerId, administrator)) {
                 key = "lock.actionbar.owner";
@@ -155,21 +128,9 @@ public final class LockTargetStatusService implements AutoCloseable {
                 key = "lock.actionbar.denied";
             }
             String owner = playerName(selected.ownerId());
-            HintState previous = hintStates.get(playerId);
-            Component component;
-            if (previous != null && previous.key().equals(key) && previous.owner().equals(owner)) {
-                component = previous.component();
-            } else {
-                component = messages.component(
-                        player,
-                        key,
-                        Placeholder.unparsed("owner", owner)
-                );
-                hintStates.put(playerId, new HintState(key, owner, component));
-            }
             actionBars.show(
                     player,
-                    component,
+                    messages.component(player, key, Placeholder.unparsed("owner", owner)),
                     ActionBarService.LOCK_HINT_PRIORITY,
                     Duration.ofMillis(1_250)
             );
@@ -179,19 +140,31 @@ public final class LockTargetStatusService implements AutoCloseable {
 
     private void clear(Player player) {
         UUID playerId = player.getUniqueId();
-        hintStates.remove(playerId);
         if (hinted.remove(playerId)) {
             actionBars.clear(player, ActionBarService.LOCK_HINT_PRIORITY);
         }
     }
 
     private String playerName(UUID uniqueId) {
-        return ownerNames.computeIfAbsent(uniqueId, playerId -> {
-            OfflinePlayer player = server.getOfflinePlayer(playerId);
-            return player.getName() == null ? playerId.toString().substring(0, 8) : player.getName();
-        });
+        OwnerName cached = ownerNames.get(uniqueId);
+        long now = clock.millis();
+        Player online = server.getPlayer(uniqueId);
+        if (online != null) {
+            String name = online.getName();
+            if (cached == null || !name.equals(cached.name()) || now >= cached.retryAtMillis()) {
+                ownerNames.put(uniqueId, new OwnerName(name, now + KNOWN_NAME_RETRY_MILLIS));
+            }
+            return name;
+        }
+        if (cached == null || now >= cached.retryAtMillis()) {
+            String name = server.getOfflinePlayer(uniqueId).getName();
+            long retry = name == null ? UNKNOWN_NAME_RETRY_MILLIS : KNOWN_NAME_RETRY_MILLIS;
+            cached = new OwnerName(name, now + retry);
+            ownerNames.put(uniqueId, cached);
+        }
+        return PlayerNameLookup.displayName(uniqueId, cached.name());
     }
 
-    private record HintState(String key, String owner, Component component) {
+    private record OwnerName(String name, long retryAtMillis) {
     }
 }

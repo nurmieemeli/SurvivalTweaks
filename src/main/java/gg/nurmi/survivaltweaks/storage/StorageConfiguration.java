@@ -27,6 +27,7 @@ public record StorageConfiguration(
         int queryTimeoutSeconds
 ) {
 
+    static final String SQLITE_FILE_FINGERPRINT_PREFIX = "sqlite-file:";
     private static final String SIMPLE_DATABASE = "[A-Za-z0-9_-]{1,64}";
     private static final String SIMPLE_SCHEMA = "[A-Za-z_][A-Za-z0-9_]{0,62}";
     private static final java.util.Set<String> POSTGRESQL_SSL_MODES = java.util.Set.of(
@@ -210,18 +211,31 @@ public record StorageConfiguration(
     }
 
     public String endpointFingerprint() {
-        String endpoint = backend == StorageBackend.SQLITE
-                ? backend.key() + "|" + sqliteFile
-                : backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database
-                        + (backend == StorageBackend.POSTGRESQL ? "|" + postgresqlSchema : "");
+        if (backend == StorageBackend.SQLITE) {
+            return sqliteFileFingerprint(sqliteFile);
+        }
+        String endpoint = backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database
+                + (backend == StorageBackend.POSTGRESQL ? "|" + postgresqlSchema : "");
         return fingerprint(endpoint);
     }
 
     public String legacyEndpointFingerprint() {
-        String endpoint = backend == StorageBackend.SQLITE
-                ? backend.key() + "|" + sqliteFile
-                : backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database;
-        return fingerprint(endpoint);
+        if (backend == StorageBackend.SQLITE) {
+            return legacySqliteFingerprint(sqliteFile);
+        }
+        return fingerprint(backend.key() + "|" + host.toLowerCase(Locale.ROOT) + "|" + port + "|" + database);
+    }
+
+    static boolean matchesSqliteEndpoint(Path file, String fingerprint) {
+        return sqliteFileFingerprint(file).equals(fingerprint) || legacySqliteFingerprint(file).equals(fingerprint);
+    }
+
+    private static String sqliteFileFingerprint(Path file) {
+        return SQLITE_FILE_FINGERPRINT_PREFIX + fingerprint(file.getFileName().toString());
+    }
+
+    private static String legacySqliteFingerprint(Path file) {
+        return fingerprint(StorageBackend.SQLITE.key() + "|" + file);
     }
 
     private static String fingerprint(String endpoint) {

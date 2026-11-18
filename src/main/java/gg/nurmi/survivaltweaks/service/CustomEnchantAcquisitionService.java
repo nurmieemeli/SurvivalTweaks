@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
@@ -138,13 +139,21 @@ public final class CustomEnchantAcquisitionService implements Listener {
             return;
         }
 
+        ItemStack vanillaResult = event.getResult();
+        ItemStack baseResult = vanillaResult == null ? first : vanillaResult;
+        if (items.level(baseResult, CustomEnchantment.BEHEADING) > 0
+                && CustomEnchantment.BEHEADING.conflictsWith(baseResult)) {
+            event.setResult(null);
+            showAnvilStatus(event, "enchantments.anvil.conflict");
+            return;
+        }
         Map<CustomEnchantment, Integer> supplied = items.enchantments(second);
         if (supplied.isEmpty()) {
             showVanillaCostStatus(event);
             return;
         }
 
-        ItemStack result = event.getResult() == null ? first.clone() : event.getResult().clone();
+        ItemStack result = baseResult.clone();
         int appliedLevels = 0;
         boolean incompatibleItem = false;
         boolean conflict = false;
@@ -198,9 +207,18 @@ public final class CustomEnchantAcquisitionService implements Listener {
             meta.customName(Component.text(rename));
             result.setItemMeta(meta);
         }
-        event.getView().setRepairCost(
-                Math.max(1, event.getView().getRepairCost()) + appliedLevels * 4
-        );
+        var view = event.getView();
+        long combinedCost = Math.max(1, view.getRepairCost()) + appliedLevels * 4L;
+        view.setRepairCost((int) Math.min(Integer.MAX_VALUE, combinedCost));
+        if (combinedCost >= view.getMaximumRepairCost() && view.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            event.setResult(null);
+            showAnvilStatus(event, "enchantments.anvil.too-expensive");
+            return;
+        }
+        // Paper leaves the right input alone for vanilla rename-only recipes.
+        if (view.getRepairItemCountCost() < 1) {
+            view.setRepairItemCountCost(1);
+        }
         event.setResult(result);
         showVanillaCostStatus(event);
     }
@@ -269,7 +287,7 @@ public final class CustomEnchantAcquisitionService implements Listener {
     private void showVanillaCostStatus(PrepareAnvilEvent event) {
         int cost = event.getView().getRepairCost();
         if (cost >= event.getView().getMaximumRepairCost()
-                && event.getView().getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+                && event.getView().getPlayer().getGameMode() != GameMode.CREATIVE) {
             showAnvilStatus(event, "enchantments.anvil.too-expensive");
         } else if (!items.enchantments(event.getInventory().getSecondItem()).isEmpty()) {
             showAnvilStatus(

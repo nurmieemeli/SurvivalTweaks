@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.LockFiles;
 import gg.nurmi.survivaltweaks.object.BlockKey;
 import gg.nurmi.survivaltweaks.object.ContainerLockSnapshot;
 import gg.nurmi.survivaltweaks.object.LockAccessMode;
@@ -25,7 +26,7 @@ class ContainerLockStoreTest {
     @Test
     void roundTripsDoubleContainerCoordinatesAndAcl() throws IOException {
         Path file = directory.resolve("locked-containers.yml");
-        ContainerLockStore store = new ContainerLockStore(
+        LockFiles store = new LockFiles(
                 file,
                 Logger.getLogger(ContainerLockStoreTest.class.getName())
         );

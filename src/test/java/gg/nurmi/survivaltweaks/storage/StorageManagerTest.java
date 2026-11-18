@@ -1,10 +1,13 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.ProfileFiles;
 import gg.nurmi.survivaltweaks.object.Home;
 import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,10 +75,26 @@ class StorageManagerTest {
     }
 
     @Test
+    void pinnedEmptyDatabaseDoesNotImportLegacyHomesOnRestart() throws IOException {
+        var config = sqliteConfig("empty.db");
+        try (var initial = StorageManager.open(config, directory, logger, ignored -> null)) {
+            assertTrue(initial.exportSnapshot().empty());
+        }
+        UUID playerId = UUID.randomUUID();
+        new ProfileFiles(directory.resolve("userdata"), logger).save(new ProfileSnapshot(playerId,
+                List.of(new Home("old-home", UUID.randomUUID(), "world", 1, 64, 1, 0, 0))));
+
+        try (var reopened = StorageManager.open(config, directory, logger, ignored -> null)) {
+            assertFalse(reopened.importedLegacyAtStartup());
+            assertTrue(reopened.exportSnapshot().empty());
+        }
+    }
+
+    @Test
     void importsLegacyYamlOnceAndPinsTheDatabaseEndpoint() throws IOException {
         UUID playerId = UUID.randomUUID();
         UUID worldId = UUID.randomUUID();
-        ProfileStore yaml = new ProfileStore(directory.resolve("userdata"), logger);
+        ProfileFiles yaml = new ProfileFiles(directory.resolve("userdata"), logger);
         yaml.save(new ProfileSnapshot(
                 playerId,
                 List.of(new Home("base", worldId, "world", 1, 64, 2, 0, 0))
@@ -84,7 +103,7 @@ class StorageManagerTest {
         YamlConfiguration config = sqliteConfig("survivaltweaks.db");
         try (StorageManager manager =
                      StorageManager.open(config, directory, logger, ignored -> worldId)) {
-            assertTrue(manager.startupImport().imported());
+            assertTrue(manager.importedLegacyAtStartup());
             assertEquals(1, manager.exportSnapshot().profiles().size());
             assertTrue(manager.verify().healthy());
         }
@@ -93,7 +112,7 @@ class StorageManagerTest {
 
         try (StorageManager reopened =
                      StorageManager.open(config, directory, logger, ignored -> worldId)) {
-            assertFalse(reopened.startupImport().imported());
+            assertFalse(reopened.importedLegacyAtStartup());
             assertEquals(1, reopened.exportSnapshot().profiles().size());
         }
 
@@ -122,7 +141,7 @@ class StorageManagerTest {
                 Set.of(),
                 Set.of()
         );
-        new ProfileStore(directory.resolve("userdata"), logger).save(legacy);
+        new ProfileFiles(directory.resolve("userdata"), logger).save(legacy);
         StorageConfiguration configuration =
                 StorageConfiguration.load(sqliteConfig("survivaltweaks.db"), directory);
         try (SqlStorage interrupted = new SqlStorage(configuration, logger)) {
@@ -143,10 +162,30 @@ class StorageManagerTest {
                 logger,
                 ignored -> worldId
         )) {
-            assertTrue(manager.startupImport().imported());
+            assertTrue(manager.importedLegacyAtStartup());
             assertEquals(1, manager.exportSnapshot().profiles().size());
         }
         assertTrue(Files.isRegularFile(directory.resolve("storage-state.yml")));
+    }
+
+    @Test
+    void emptyLegacyFilesDoNotOverrideAnExistingUnpinnedDatabase() throws IOException {
+        UUID playerId = UUID.randomUUID();
+        UUID instanceId = UUID.randomUUID();
+        Home home = new Home("base", UUID.randomUUID(), "world", 1, 64, 2, 0, 0);
+        YamlConfiguration config = sqliteConfig("survivaltweaks.db");
+        try (SqlStorage existing = new SqlStorage(StorageConfiguration.load(config, directory), logger)) {
+            existing.ensureInstanceId(instanceId);
+            existing.save(new ProfileSnapshot(playerId, List.of(home)));
+        }
+        Path userdata = Files.createDirectories(directory.resolve("userdata"));
+        Files.createFile(userdata.resolve(playerId + ".yml"));
+
+        try (StorageManager manager = StorageManager.open(config, directory, logger, name -> null)) {
+            assertFalse(manager.importedLegacyAtStartup());
+            assertEquals(instanceId, manager.store().instanceId());
+            assertEquals(List.of(home), manager.store().load(playerId).homes());
+        }
     }
 
     @Test
@@ -282,6 +321,34 @@ class StorageManagerTest {
         assertEquals(0, Files.size(database));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsAStaleSqliteCopyWithTheSameInstanceId(boolean legacyPin) throws IOException {
+        YamlConfiguration original = sqliteConfig("players.db");
+        YamlConfiguration stale = sqliteConfig("older-copy.db");
+        StorageConfiguration configuration = StorageConfiguration.load(original, directory);
+        UUID instance;
+        try (StorageManager storage = StorageManager.open(original, directory, logger, name -> null)) {
+            instance = storage.store().instanceId();
+            assertThrows(IllegalArgumentException.class, () -> storage.verifyReloadConfiguration(stale));
+        }
+        Files.copy(directory.resolve("players.db"), directory.resolve("older-copy.db"));
+        StorageStateStore states = new StorageStateStore(directory);
+        if (legacyPin) {
+            states.saveState(new StorageStateStore.State(
+                    StorageBackend.SQLITE, configuration.legacyEndpointFingerprint(), instance));
+        }
+        assertEquals(configuration.sqliteFile(), StorageManager.findPinnedSqliteFile(directory).orElseThrow());
+
+        IOException failure = assertThrows(IOException.class,
+                () -> StorageManager.open(stale, directory, logger, name -> null));
+        assertTrue(failure.getMessage().contains("pinned endpoint"), failure.getMessage());
+        try (StorageManager storage = StorageManager.open(original, directory, logger, name -> null)) {
+            assertEquals(instance, storage.store().instanceId());
+            assertEquals(configuration.endpointFingerprint(), states.loadState().orElseThrow().endpointFingerprint());
+        }
+    }
+
     @Test
     void relocatedSqliteRequiresTheExistingPinnedDatabaseIdentity() throws IOException {
         Path original = Files.createDirectory(directory.resolve("original"));
@@ -304,6 +371,16 @@ class StorageManagerTest {
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         try (StorageManager storage = StorageManager.open(config, relocated, logger, name -> null)) {
             assertEquals(instance, storage.store().instanceId());
+        }
+
+        StorageConfiguration originalConfiguration = StorageConfiguration.load(config, original);
+        StorageStateStore relocatedState = new StorageStateStore(relocated);
+        relocatedState.saveState(new StorageStateStore.State(
+                StorageBackend.SQLITE, originalConfiguration.legacyEndpointFingerprint(), instance));
+        assertThrows(IOException.class, () -> StorageManager.open(config, relocated, logger, name -> null));
+        StorageManager.verifyRestore(config, relocated, relocated, logger, name -> null);
+        try (StorageManager restored = StorageManager.openRestored(config, relocated, logger, name -> null)) {
+            assertEquals(instance, restored.store().instanceId());
         }
     }
 

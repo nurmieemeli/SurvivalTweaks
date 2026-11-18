@@ -11,16 +11,22 @@ import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Pose;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.VoxelShape;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
@@ -32,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static gg.nurmi.survivaltweaks.service.SafeTeleportService.DEFAULT_LANDING_SIZE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -87,6 +94,9 @@ class SafeTeleportServiceTest {
         when(player.getUniqueId()).thenReturn(playerId);
         when(player.getName()).thenReturn("TestPlayer");
         when(player.getLocation()).thenReturn(origin);
+        when(player.getPose()).thenReturn(Pose.STANDING);
+        when(player.getWidth()).thenReturn(0.6);
+        when(player.getHeight()).thenReturn(1.8);
         when(player.isOnline()).thenReturn(true);
         when(player.hasPermission(SafeTeleportService.INSTANT_PERMISSION)).thenReturn(false);
         when(originWorld.getUID()).thenReturn(UUID.randomUUID());
@@ -98,14 +108,12 @@ class SafeTeleportServiceTest {
     void successfulWarmupTeleportsAndStartsCooldown() {
         World destinationWorld = safeWorld();
         Location destination = new Location(destinationWorld, 100.5, 70, -20.5);
-        when(player.teleportAsync(
+        when(player.teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
-        )).thenReturn(
-                CompletableFuture.completedFuture(true)
-        );
+        )).thenReturn(true);
         SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ofSeconds(30), 0);
-        assertTrue(service.findSafeDestination(destination).isPresent());
+        assertTrue(service.findSafeDestination(destination, 0, DEFAULT_LANDING_SIZE).isPresent());
 
         assertTrue(service.begin(player, destination::clone, SUCCESS));
         assertTrue(service.isPending(player.getUniqueId()));
@@ -114,10 +122,11 @@ class SafeTeleportServiceTest {
         scheduledWarmup().run();
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player).teleportAsync(
+        verify(player).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
+        verify(player, never()).teleportAsync(any(Location.class), any(PlayerTeleportEvent.TeleportCause.class));
         verify(player).sendMessage(SUCCESS);
         assertFalse(service.ensureAvailable(player));
         verify(messages).send(eq(player), eq("teleport.safety.cooldown"), any());
@@ -227,7 +236,7 @@ class SafeTeleportServiceTest {
         scheduledWarmup().run();
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player, never()).teleportAsync(
+        verify(player, never()).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
@@ -268,7 +277,7 @@ class SafeTeleportServiceTest {
         Location requested = new Location(world, 100.5, 70, -20.5);
         SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
 
-        Location resolved = service.findSafeDestination(requested).orElseThrow();
+        Location resolved = service.findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).orElseThrow();
 
         // Scanning the vertical range from its bottom would have dropped the
         // player at 67, far below the block they actually asked for.
@@ -281,7 +290,100 @@ class SafeTeleportServiceTest {
         Location requested = new Location(world, 100.5, 70, -20.5);
         SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
 
-        assertEquals(69, service.findSafeDestination(requested).orElseThrow().getBlockY());
+        assertEquals(69, service.findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).orElseThrow().getBlockY());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Material.class, names = {"END_PORTAL", "END_GATEWAY", "KELP", "KELP_PLANT",
+            "SEAGRASS", "TALL_SEAGRASS", "BUBBLE_COLUMN"})
+    void passableHazardsAreNotSafeLandings(Material hazard) {
+        World world = safeWorld();
+        Location requested = new Location(world, 100.5, 70, -20.5);
+        when(world.getBlockAt(requested).getType()).thenReturn(hazard);
+        assertTrue(service(Duration.ofSeconds(3), Duration.ZERO, 0)
+                .findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).isEmpty());
+    }
+
+    @Test
+    void waterloggedHeadBlockIsNotASafeLanding() {
+        World world = safeWorld();
+        Location requested = new Location(world, 100.5, 70, -20.5);
+        var waterlogged = mock(Waterlogged.class);
+        when(waterlogged.isWaterlogged()).thenReturn(true);
+        when(world.getBlockAt(requested).getRelative(0, 1, 0).getBlockData()).thenReturn(waterlogged);
+        assertTrue(service(Duration.ofSeconds(3), Duration.ZERO, 0)
+                .findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).isEmpty());
+    }
+
+    @Test
+    void aLandingOverlappingLavaIsCenteredOnDryGround() {
+        World world = safeWorld();
+        Location requested = new Location(world, 100.9, 70, -20.5);
+        Block lava = mock(Block.class);
+        when(lava.isPassable()).thenReturn(true);
+        when(lava.isLiquid()).thenReturn(true);
+        when(world.getBlockAt(requested).getRelative(1, 0, 0)).thenReturn(lava);
+
+        Location landing = service(Duration.ofSeconds(3), Duration.ZERO, 0)
+                .findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).orElseThrow();
+
+        assertEquals(100.5, landing.getX());
+        assertEquals(70, landing.getBlockY());
+    }
+
+    @Test
+    void anOpenTrapdoorOutsideTheFootprintCannotSupportALanding() {
+        World world = safeWorld();
+        Location requested = new Location(world, 100.5, 70, -20.5);
+        Block floor = world.getBlockAt(requested).getRelative(0, -1, 0);
+        when(floor.getType()).thenReturn(Material.OAK_TRAPDOOR);
+        floorShape(floor, new BoundingBox(0, 0, 0.8125, 1, 1, 1));
+
+        assertTrue(service(Duration.ofSeconds(3), Duration.ZERO, 0)
+                .findSafeDestination(requested, 0, DEFAULT_LANDING_SIZE).isEmpty());
+    }
+
+    @Test
+    void aRadiusReloadDoesNotExpandAnInFlightSearchBeyondItsLoadedChunks() {
+        World world = unsafeWorld();
+        Location requested = new Location(world, 15.5, 70, 8.5);
+        CompletableFuture<Chunk> chunk = new CompletableFuture<>();
+        when(world.getChunkAtAsync(0, 0)).thenReturn(chunk);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, requested::clone, SUCCESS));
+        scheduledWarmup().run();
+        verify(world).getChunkAtAsync(0, 0);
+
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("teleport.safe-search-radius", 2);
+        settingsService.apply(PluginSettings.load(config, Logger.getAnonymousLogger()));
+        Block blocked = world.getBlockAt(requested);
+        when(world.getBlockAt(any(Location.class))).thenAnswer(invocation -> {
+            assertEquals(0, invocation.getArgument(0, Location.class).getBlockX() >> 4);
+            return blocked;
+        });
+
+        chunk.complete(mock(Chunk.class));
+        verify(messages).send(player, "teleport.safety.unsafe");
+    }
+
+    @Test
+    void aPlayerGrowingDuringChunkLoadingPreloadsTheLargerFootprint() {
+        World world = unsafeWorld();
+        Location requested = new Location(world, 14.75, 70, 8.5);
+        CompletableFuture<Chunk> initialChunk = new CompletableFuture<>();
+        when(world.getChunkAtAsync(0, 0)).thenReturn(initialChunk);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, requested::clone, SUCCESS));
+        scheduledWarmup().run();
+        verify(world, never()).getChunkAtAsync(1, 0);
+
+        when(player.getWidth()).thenReturn(3.0);
+        when(player.getHeight()).thenReturn(9.0);
+        initialChunk.complete(mock(Chunk.class));
+
+        verify(world).getChunkAtAsync(1, 0);
+        verify(messages).send(player, "teleport.safety.unsafe");
     }
 
     @Test
@@ -294,7 +396,7 @@ class SafeTeleportServiceTest {
         scheduledWarmup().run();
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player, never()).teleportAsync(
+        verify(player, never()).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
@@ -309,7 +411,7 @@ class SafeTeleportServiceTest {
         scheduledWarmup().run();
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player, never()).teleportAsync(
+        verify(player, never()).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
@@ -326,7 +428,7 @@ class SafeTeleportServiceTest {
         scheduledWarmup().run();
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player, never()).teleportAsync(
+        verify(player, never()).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
@@ -337,23 +439,66 @@ class SafeTeleportServiceTest {
     void crossWorldDestinationIsUsed() {
         World destinationWorld = safeWorld();
         Location destination = new Location(destinationWorld, 8.5, 72, 9.5);
-        when(player.teleportAsync(
+        when(player.teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
-        )).thenReturn(
-                CompletableFuture.completedFuture(true)
-        );
+        )).thenReturn(true);
         SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
         assertTrue(service.begin(player, destination::clone, SUCCESS));
 
         scheduledWarmup().run();
 
         ArgumentCaptor<Location> teleported = ArgumentCaptor.forClass(Location.class);
-        verify(player).teleportAsync(
+        verify(player).teleport(
                 teleported.capture(),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
         assertSame(destinationWorld, teleported.getValue().getWorld());
+    }
+
+    @Test
+    void retriesAtTheCurrentTargetBlockAndCancelsIfItMovesAgain() {
+        World world = safeWorld();
+        CompletableFuture<Chunk> firstChunk = new CompletableFuture<>();
+        CompletableFuture<Chunk> secondChunk = new CompletableFuture<>();
+        when(world.getChunkAtAsync(0, 0)).thenReturn(firstChunk);
+        when(world.getChunkAtAsync(7, 0)).thenReturn(secondChunk);
+        Location target = new Location(world, 8.5, 72, 9.5);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, () -> target, SUCCESS));
+        scheduledWarmup().run();
+
+        target.setX(112.5);
+        firstChunk.complete(mock(Chunk.class));
+        verify(world).getChunkAtAsync(7, 0);
+        assertTrue(service.isPending(player.getUniqueId()));
+
+        target.setX(160.5);
+        secondChunk.complete(mock(Chunk.class));
+        assertFalse(service.isPending(player.getUniqueId()));
+        verify(world, never()).getChunkAtAsync(10, 0);
+        verify(player, never()).teleport(any(Location.class), any(PlayerTeleportEvent.TeleportCause.class));
+        verify(messages).send(player, "teleport.safety.destination-moved");
+    }
+
+    @Test
+    void teleportsToTheNewTargetWhenItStopsMovingAfterOneChunkLoad() {
+        World world = safeWorld();
+        CompletableFuture<Chunk> firstChunk = new CompletableFuture<>();
+        when(world.getChunkAtAsync(0, 0)).thenReturn(firstChunk);
+        Location target = new Location(world, 8.5, 72, 9.5);
+        when(player.teleport(any(Location.class), any(PlayerTeleportEvent.TeleportCause.class)))
+                .thenReturn(true);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, target::clone, SUCCESS));
+        scheduledWarmup().run();
+
+        target.setX(112.5);
+        firstChunk.complete(mock(Chunk.class));
+
+        ArgumentCaptor<Location> destination = ArgumentCaptor.forClass(Location.class);
+        verify(player).teleport(destination.capture(), any(PlayerTeleportEvent.TeleportCause.class));
+        assertEquals(112.5, destination.getValue().getX());
     }
 
     @Test
@@ -372,10 +517,28 @@ class SafeTeleportServiceTest {
         chunkLoad.complete(mock(Chunk.class));
 
         assertFalse(service.isPending(player.getUniqueId()));
-        verify(player, never()).teleportAsync(
+        verify(player, never()).teleport(
                 any(Location.class),
                 any(PlayerTeleportEvent.TeleportCause.class)
         );
+    }
+
+    @Test
+    void damageDuringChunkLoadingStillCancelsBeforeThePlayerMoves() {
+        World world = safeWorld();
+        CompletableFuture<Chunk> chunk = new CompletableFuture<>();
+        when(world.getChunkAtAsync(0, 0)).thenReturn(chunk);
+        SafeTeleportService service = service(Duration.ofSeconds(3), Duration.ZERO, 0);
+        assertTrue(service.begin(player, () -> new Location(world, 8.5, 70, 8.5), SUCCESS));
+        scheduledWarmup().run();
+        assertTrue(service.isPending(player.getUniqueId()));
+
+        service.handleDamage(player);
+        chunk.complete(mock(Chunk.class));
+
+        assertFalse(service.isPending(player.getUniqueId()));
+        verify(player, never()).teleport(any(Location.class), any(PlayerTeleportEvent.TeleportCause.class));
+        verify(messages).send(player, "teleport.safety.cancelled-damage");
     }
 
     private void enableContainerGuard() {
@@ -452,6 +615,7 @@ class SafeTeleportServiceTest {
         when(head.getType()).thenReturn(Material.AIR);
         when(floor.isSolid()).thenReturn(true);
         when(floor.getType()).thenReturn(Material.STONE);
+        floorShape(floor, new BoundingBox(0, 0, 0, 1, 1, 1));
         return feet;
     }
 
@@ -481,7 +645,14 @@ class SafeTeleportServiceTest {
         when(head.getType()).thenReturn(Material.AIR);
         when(floor.isSolid()).thenReturn(true);
         when(floor.getType()).thenReturn(Material.STONE);
+        floorShape(floor, new BoundingBox(0, 0, 0, 1, 1, 1));
         return world;
+    }
+
+    private void floorShape(Block floor, BoundingBox box) {
+        VoxelShape shape = mock(VoxelShape.class);
+        when(floor.getCollisionShape()).thenReturn(shape);
+        when(shape.getBoundingBoxes()).thenReturn(java.util.List.of(box));
     }
 
     private World unsafeWorld() {

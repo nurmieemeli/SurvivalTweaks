@@ -1,10 +1,19 @@
 package gg.nurmi.survivaltweaks.service;
 
+import gg.nurmi.survivaltweaks.object.BlockKey;
+import gg.nurmi.survivaltweaks.object.ContainerLockSnapshot;
+import gg.nurmi.survivaltweaks.object.DeathMarker;
+import gg.nurmi.survivaltweaks.object.Home;
+import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
+import gg.nurmi.survivaltweaks.storage.StorageManager;
 import org.bukkit.Server;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,131 +47,136 @@ class DiagnosticServiceTest {
     @TempDir
     Path dataFolder;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"player-only: [wrong-type]\n", "admin: 42\n"})
+    void matchingCatalogKeysCannotHideInvalidValueTypes(String catalog) throws IOException {
+        copyResource("config.yml");
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups())) {
+            Files.writeString(dataFolder.resolve("messages_en.yml"), catalog);
+            Files.writeString(dataFolder.resolve("messages_fi.yml"), catalog);
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(report.errors() > 0);
+            assertTrue(report.issues().stream().anyMatch(issue ->
+                    issue.detail().contains("Language catalog validation failed:")
+                            && issue.detail().contains(catalog.startsWith("admin") ? "admin must be a section" : "player-only must be text")));
+        }
+    }
+
+    @Test
+    void catalogValidationStillReportsDifferentKeysAndMissingFiles() throws IOException {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        Path english = dataFolder.resolve("messages_en.yml");
+        var customized = YamlConfiguration.loadConfiguration(english.toFile());
+        customized.set("custom-message", "Operator message");
+        customized.save(english.toFile());
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups())) {
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("different message keys")));
+            Files.delete(english);
+            var missing = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(missing.issues().stream().anyMatch(issue -> issue.detail().contains("language catalogs are missing")));
+        }
+    }
+
     @Test
     void healthyDataProducesACleanReport() throws IOException {
         copyResource("config.yml");
         copyResource("messages_en.yml");
         copyResource("messages_fi.yml");
-        new BackupService(
-                dataFolder,
-                Clock.fixed(NOW, ZoneOffset.UTC),
-                Logger.getAnonymousLogger()
-        ).create("startup");
+        BackupService backups = backups();
 
-        DiagnosticService service = new DiagnosticService(
-                dataFolder,
-                Clock.fixed(NOW, ZoneOffset.UTC)
-        );
-        DiagnosticService.Report report = service.inspect(new DiagnosticService.Snapshot(
-                Set.of(),
-                Set.of(),
-                NOW
-        ));
-
-        assertTrue(report.healthy());
-        assertEquals(1, report.backups());
-        assertTrue(report.issues().isEmpty());
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups)) {
+            backups.snapshotLeaseFactory(() -> storage.acquireSnapshotLease()::close);
+            backups.create("startup");
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(report.healthy());
+            assertEquals(1, report.backups());
+            assertTrue(report.issues().isEmpty());
+        }
     }
 
     @Test
-    void reportsMigrationsOverlappingLocksAndExpiredMarkers() throws IOException {
+    void reportsMissingWorldsAndExpiredMarkersInSqlite() throws IOException {
         copyResource("config.yml");
         copyResource("messages_en.yml");
         copyResource("messages_fi.yml");
-        Files.createDirectories(dataFolder.resolve("userdata"));
         UUID playerId = UUID.randomUUID();
         UUID worldId = UUID.randomUUID();
-        Files.writeString(
-                dataFolder.resolve("userdata/" + playerId + ".yml"),
-                """
-                schema-version: 3
-                homes:
-                  - name: legacy
-                    world-uuid: "%s"
-                    world: missing_world
-                    x: 0.0
-                    y: 64.0
-                    z: 0.0
-                    yaw: 0.0
-                    pitch: 0.0
-                """.formatted(worldId)
-        );
-        UUID firstLock = UUID.randomUUID();
-        UUID secondLock = UUID.randomUUID();
-        Files.writeString(
-                dataFolder.resolve("locked-containers.yml"),
-                """
-                schema-version: 3
-                locks:
-                  - id: "%s"
-                    owner: "%s"
-                    blocks:
-                      - { world: "%s", x: 1, y: 64, z: 1 }
-                  - id: "%s"
-                    owner: "%s"
-                    blocks:
-                      - { world: "%s", x: 1, y: 64, z: 1 }
-                """.formatted(firstLock, playerId, worldId, secondLock, playerId, worldId)
-        );
-        String marker = NOW.minusSeconds(120).toString();
-        Files.writeString(
-                dataFolder.resolve("death-markers.yml"),
-                """
-                schema-version: 1
-                markers:
-                  - player: "%s"
-                    world-uuid: "%s"
-                    world: missing_world
-                    x: 0.0
-                    y: 64.0
-                    z: 0.0
-                    created-at: "%s"
-                    expires-at: "%s"
-                """.formatted(playerId, worldId, marker, NOW.minusSeconds(60))
-        );
-        Files.writeString(
-                dataFolder.resolve("new-player-spawns.yml"),
-                """
-                schema-version: 2
-                available:
-                  - { world-uuid: "%s", world: missing_world, x: 5, y: 70, z: 5, yaw: 0.0 }
-                assignments:
-                  - player: "%s"
-                    completed: true
-                    location: { world-uuid: "%s", world: missing_world, x: 5, y: 70, z: 5, yaw: 0.0 }
-                retired: []
-                awaiting-replacement: []
-                """.formatted(worldId, playerId, worldId)
-        );
 
-        DiagnosticService service = new DiagnosticService(
-                dataFolder,
-                Clock.fixed(NOW, ZoneOffset.UTC)
-        );
-        DiagnosticService.Report report = service.inspect(new DiagnosticService.Snapshot(
-                Set.of(),
-                Set.of(),
-                NOW
-        ));
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups())) {
+            storage.store().save(new ProfileSnapshot(playerId,
+                    List.of(new Home("base", worldId, "missing_world", 0, 64, 0, 0, 0))));
+            storage.store().saveLocks(List.of(new ContainerLockSnapshot(UUID.randomUUID(), playerId,
+                    Set.of(new BlockKey(worldId, 1, 64, 1)), Set.of())));
+            storage.store().saveDeathMarkers(List.of(new DeathMarker(playerId, worldId, "missing_world", 0, 64, 0,
+                    NOW.minusSeconds(120), NOW.minusSeconds(60), "FALL")));
 
-        assertFalse(report.healthy());
-        assertTrue(report.errors() >= 1);
-        assertTrue(report.warnings() >= 4);
-        assertEquals(1, report.profiles());
-        assertEquals(2, report.locks());
-        assertEquals(1, report.deathMarkers());
-        assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("overlap")));
-        assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("duplicates location")));
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+
+            assertEquals(0, report.errors());
+            assertEquals(1, report.profiles());
+            assertEquals(1, report.locks());
+            assertEquals(1, report.deathMarkers());
+            assertEquals(3L, report.issues().stream().filter(issue -> issue.detail().contains("unloaded world")).count());
+            assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("Expired death marker")));
+        }
+    }
+
+    @Test
+    void malformedPasswordIsAbsentFromDoctorReport() throws IOException {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        Path config = dataFolder.resolve("config.yml");
+        String password = "fake-secret";
+        Files.writeString(config, Files.readString(config).replaceFirst("(?m)^    password:.*$",
+                "    password: \"" + password + "\" garbage"));
+
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups())) {
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("Could not parse config.yml at line")));
+            assertFalse(report.issues().stream().anyMatch(issue -> issue.detail().contains(password)));
+        }
+    }
+
+    @Test
+    void reportsInvalidSqliteFilenameAndUnrestorableArchive() throws IOException {
+        copyResource("config.yml");
+        copyResource("messages_en.yml");
+        copyResource("messages_fi.yml");
+        BackupService backups = backups();
+        String archive = backups.create("config-only").orElseThrow().getFileName().toString();
+        Path config = dataFolder.resolve("config.yml");
+        Files.writeString(config, Files.readString(config).replaceFirst("(?m)^    file:.*$", "    file: ../invalid.db"));
+
+        try (var storage = openStorage();
+             var service = new DiagnosticService(plugin(), Clock.fixed(NOW, ZoneOffset.UTC), null, null, storage, backups)) {
+            var report = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertEquals(2, report.errors());
+            assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("storage.sqlite.file must be a .db filename")));
+            assertTrue(report.issues().stream().anyMatch(issue -> issue.detail().contains("Backup " + archive + " is invalid")
+                    && issue.detail().contains("no SQLite database or usable legacy player data")));
+
+            Files.writeString(config, Files.readString(config).replace("../invalid.db", "older-copy.db"));
+            var stale = service.inspect(new DiagnosticService.Snapshot(Set.of(), Set.of(), NOW));
+            assertTrue(stale.issues().stream().anyMatch(issue -> issue.detail().contains("Keep the pinned SQLite filename")));
+        }
     }
 
     @Test
     void closingCancelsQueuedScansAndSuppressesLateCallbacks() throws Exception {
-        JavaPlugin plugin = mock(JavaPlugin.class);
+        JavaPlugin plugin = plugin();
         Server server = mock(Server.class);
         BukkitScheduler scheduler = mock(BukkitScheduler.class);
         when(plugin.getName()).thenReturn("SurvivalTweaks");
         when(plugin.namespace()).thenReturn("survivaltweaks");
-        when(plugin.getDataFolder()).thenReturn(dataFolder.toFile());
         when(plugin.getServer()).thenReturn(server);
         when(server.getScheduler()).thenReturn(scheduler);
         doReturn(List.of()).when(server).getWorlds();
@@ -180,7 +194,8 @@ class DiagnosticServiceTest {
         });
         assertTrue(blockerStarted.await(2, TimeUnit.SECONDS));
 
-        DiagnosticService service = new DiagnosticService(plugin, Clock.systemUTC(), executor);
+        DiagnosticService service = new DiagnosticService(
+                plugin, Clock.systemUTC(), executor, null, null, mock(StorageManager.class), backups());
         assertTrue(service.run(report -> {
             throw new AssertionError("Closed diagnostics must not deliver a report");
         }));
@@ -192,6 +207,22 @@ class DiagnosticServiceTest {
                 org.mockito.ArgumentMatchers.eq(plugin),
                 org.mockito.ArgumentMatchers.any(Runnable.class)
         );
+    }
+
+    private JavaPlugin plugin() {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getDataFolder()).thenReturn(dataFolder.toFile());
+        when(plugin.getLogger()).thenReturn(Logger.getAnonymousLogger());
+        when(plugin.getResource("config.yml")).thenAnswer(ignored -> getClass().getResourceAsStream("/config.yml"));
+        return plugin;
+    }
+
+    private BackupService backups() {
+        return new BackupService(dataFolder, Clock.fixed(NOW, ZoneOffset.UTC), Logger.getAnonymousLogger());
+    }
+
+    private StorageManager openStorage() throws IOException {
+        return StorageManager.open(new YamlConfiguration(), dataFolder, Logger.getAnonymousLogger(), name -> null);
     }
 
     private void copyResource(String name) throws IOException {

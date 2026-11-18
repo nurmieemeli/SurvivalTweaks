@@ -428,7 +428,7 @@ public final class DeathRecoveryService
                 && activeMarker(playerId).isPresent();
     }
 
-    public void prepareMaintenance(Instant now) {
+    public void reconcileMaintenance(Instant now) {
         Objects.requireNonNull(now, "now");
         boolean changed = markers.values().removeIf(marker -> marker.expired(now));
         if (changed) {
@@ -452,6 +452,8 @@ public final class DeathRecoveryService
             guideTask = null;
         }
         clearFloatingGuides();
+        Instant now = clock.instant();
+        markers.values().removeIf(marker -> marker.expired(now));
         persist();
         writer.close();
         markers.clear();

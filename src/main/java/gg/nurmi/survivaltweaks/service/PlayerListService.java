@@ -5,6 +5,7 @@ import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.LanguagePreference;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.JoinConfiguration;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
@@ -456,7 +457,8 @@ public final class PlayerListService implements Listener, AutoCloseable {
 
         Component footer = firstLine;
         if (!performance.isEmpty()) {
-            footer = footer.append(Component.newline()).append(join(performance));
+            footer = footer.append(Component.newline())
+                    .append(Component.join(JoinConfiguration.separator(SEPARATOR), performance));
         }
         long unread = state.unread();
         if (current.playerListShowUnreadNotifications() && unread > 0) {
@@ -598,17 +600,6 @@ public final class PlayerListService implements Listener, AutoCloseable {
             return NamedTextColor.YELLOW;
         }
         return NamedTextColor.RED;
-    }
-
-    private Component join(List<Component> components) {
-        Component result = Component.empty();
-        for (int index = 0; index < components.size(); index++) {
-            if (index > 0) {
-                result = result.append(SEPARATOR);
-            }
-            result = result.append(components.get(index));
-        }
-        return result;
     }
 
     private void clearPresentation() {

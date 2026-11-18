@@ -9,6 +9,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Tag;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.type.Leaves;
 import org.bukkit.entity.Player;
@@ -16,6 +17,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
@@ -26,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -88,6 +92,32 @@ public class TreeFellerService implements Listener, AutoCloseable {
         if (event.canBuild() && isLog(event.getBlockPlaced().getType())) {
             markPlayerPlaced(event.getBlockPlaced());
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent event) {
+        movePlacementMarks(event.getBlocks(), event.getDirection());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent event) {
+        movePlacementMarks(event.getBlocks(), event.getDirection());
+    }
+
+    private void movePlacementMarks(List<Block> movedBlocks, BlockFace direction) {
+        List<Block> logs = movedBlocks.stream().filter(block -> isLog(block.getType())).toList();
+        List<Block> placedDestinations = new ArrayList<>();
+        // Read every source first because a destination can also be a source of this move.
+        for (Block source : logs) {
+            if (isPlayerPlaced(source)) {
+                placedDestinations.add(source.getRelative(direction));
+            }
+        }
+        for (Block source : logs) {
+            removePlayerPlaced(source);
+            removePlayerPlaced(source.getRelative(direction));
+        }
+        placedDestinations.forEach(this::markPlayerPlaced);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

@@ -26,10 +26,4 @@ public record NewPlayerSpawnLocation(
     public Location toLocation(World world) {
         return new Location(world, x + 0.5, y, z + 0.5, yaw, 0.0f);
     }
-
-    public long horizontalDistanceSquared(NewPlayerSpawnLocation other) {
-        long deltaX = (long) x - other.x;
-        long deltaZ = (long) z - other.z;
-        return deltaX * deltaX + deltaZ * deltaZ;
-    }
 }

@@ -10,14 +10,19 @@ import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Pose;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -40,16 +45,24 @@ public final class SafeTeleportService implements AutoCloseable {
     public static final String INSTANT_PERMISSION = "survivaltweaks.teleport.instant";
 
     private static final int VERTICAL_SEARCH_DISTANCE = 3;
+    static final LandingSize DEFAULT_LANDING_SIZE = new LandingSize(0.6f / 2.0, 1.8f);
     private static final Set<Material> HAZARDOUS_BLOCKS = Set.of(
+            Material.BUBBLE_COLUMN,
             Material.CACTUS,
             Material.CAMPFIRE,
+            Material.END_GATEWAY,
+            Material.END_PORTAL,
             Material.FIRE,
+            Material.KELP,
+            Material.KELP_PLANT,
             Material.MAGMA_BLOCK,
             Material.NETHER_PORTAL,
             Material.POWDER_SNOW,
+            Material.SEAGRASS,
             Material.SOUL_CAMPFIRE,
             Material.SOUL_FIRE,
             Material.SWEET_BERRY_BUSH,
+            Material.TALL_SEAGRASS,
             Material.WITHER_ROSE
     );
 
@@ -175,6 +188,17 @@ public final class SafeTeleportService implements AutoCloseable {
             String completionCue,
             Duration warmup
     ) {
+        return begin(player, destination, successMessage, destinationLabel, completionCue, warmup, null);
+    }
+
+    public boolean beginWithCompletion(Player player, Supplier<Location> destination, Component successMessage,
+                                       Component destinationLabel, String completionCue, Runnable onEnd) {
+        return begin(player, destination, successMessage, destinationLabel, completionCue,
+                settings.current().teleportWarmup(), onEnd);
+    }
+
+    private boolean begin(Player player, Supplier<Location> destination, Component successMessage,
+                          Component destinationLabel, String completionCue, Duration warmup, Runnable onEnd) {
         if (!ensureAvailable(player)) {
             return false;
         }
@@ -188,19 +212,31 @@ public final class SafeTeleportService implements AutoCloseable {
                 destinationLabel == null ? Component.empty() : destinationLabel,
                 completionCue == null ? FeedbackService.TELEPORT_COMPLETE : completionCue,
                 clock.instant().plus(warmup),
-                warmup
+                warmup,
+                onEnd
         );
         pending.put(uniqueId, teleport);
+        try {
+            start(player, teleport);
+        } catch (RuntimeException | Error failure) {
+            finish(player, teleport);
+            throw failure;
+        }
+        return true;
+    }
+
+    private void start(Player player, PendingTeleport teleport) {
         ensureStatusTask();
 
+        Duration warmup = teleport.warmup();
         if (warmup.isZero() || player.hasPermission(INSTANT_PERMISSION)) {
             teleport(player, teleport);
-            return true;
+            return;
         }
 
         BukkitTask task = plugin.getServer().getScheduler().runTaskLater(
                 plugin,
-                () -> completeWarmup(uniqueId),
+                () -> completeWarmup(player.getUniqueId()),
                 warmup.toSeconds() * 20L
         );
         teleport.task(task);
@@ -222,7 +258,6 @@ public final class SafeTeleportService implements AutoCloseable {
         );
         feedback.play(player, FeedbackService.TELEPORT_WARMUP);
         showWarmup(player, teleport, warmup.toSeconds());
-        return true;
     }
 
     public void handleMove(Player player, Location destination) {
@@ -256,7 +291,7 @@ public final class SafeTeleportService implements AutoCloseable {
     public void playerDisconnected(UUID uniqueId) {
         PendingTeleport teleport = pending.remove(uniqueId);
         if (teleport != null) {
-            teleport.cancelTask();
+            teleport.dispose();
         }
         cooldowns.remove(uniqueId);
         cooldownActionBarSeconds.remove(uniqueId);
@@ -305,7 +340,7 @@ public final class SafeTeleportService implements AutoCloseable {
         for (Map.Entry<UUID, PendingTeleport> entry : pending.entrySet()) {
             PendingTeleport teleport = entry.getValue();
             if (teleport != null) {
-                teleport.cancelTask();
+                teleport.dispose();
                 Player player = plugin.getServer().getPlayer(entry.getKey());
                 if (player != null) {
                     teleport.hideBossBar(player);
@@ -333,7 +368,7 @@ public final class SafeTeleportService implements AutoCloseable {
             teleport(player, teleport);
         } else {
             pending.remove(uniqueId, teleport);
-            teleport.cancelTask();
+            teleport.dispose();
             stopStatusTaskIfIdle();
         }
     }
@@ -343,7 +378,7 @@ public final class SafeTeleportService implements AutoCloseable {
         if (teleport == null) {
             return;
         }
-        teleport.cancelTask();
+        teleport.dispose();
         teleport.hideBossBar(player);
         messages.send(player, message);
         feedback.play(player, FeedbackService.TELEPORT_CANCELLED);
@@ -352,13 +387,18 @@ public final class SafeTeleportService implements AutoCloseable {
     }
 
     private void teleport(Player player, PendingTeleport pendingTeleport) {
+        teleport(player, pendingTeleport, true);
+    }
+
+    private void teleport(Player player, PendingTeleport pendingTeleport, boolean retryChangedSearch) {
         if (!isActive(player, pendingTeleport)) {
             return;
         }
 
         Location requested;
         try {
-            requested = pendingTeleport.destination().get();
+            Location destination = pendingTeleport.destination().get();
+            requested = destination == null ? null : destination.clone();
         } catch (RuntimeException exception) {
             fail(player, pendingTeleport, "Could not resolve teleport destination", exception);
             return;
@@ -370,9 +410,12 @@ public final class SafeTeleportService implements AutoCloseable {
             return;
         }
 
+        int searchRadius = settings.current().safeTeleportSearchRadius();
+        LandingSize requestedSize;
         CompletableFuture<Void> chunkLoad;
         try {
-            chunkLoad = loadSearchChunks(requested);
+            requestedSize = landingSize(player);
+            chunkLoad = loadSearchChunks(requested, searchRadius, requestedSize);
         } catch (RuntimeException exception) {
             fail(player, pendingTeleport, "Could not start destination chunk loading", exception);
             return;
@@ -397,7 +440,17 @@ public final class SafeTeleportService implements AutoCloseable {
                     feedback.play(player, FeedbackService.TELEPORT_CANCELLED);
                     return;
                 }
-                safeDestination = findSafeDestination(requested);
+                boolean moved = !BlockPosition.at(current).equals(BlockPosition.at(requested));
+                LandingSize currentSize = landingSize(player);
+                if (moved || currentSize.halfWidth() > requestedSize.halfWidth()) {
+                    if (retryChangedSearch) {
+                        teleport(player, pendingTeleport, false);
+                    } else {
+                        cancel(player, moved ? "teleport.safety.destination-moved" : "teleport.safety.unsafe");
+                    }
+                    return;
+                }
+                safeDestination = findSafeDestination(current, searchRadius, currentSize);
             } catch (RuntimeException exception) {
                 fail(player, pendingTeleport, "Could not evaluate teleport destination safety", exception);
                 return;
@@ -414,45 +467,53 @@ public final class SafeTeleportService implements AutoCloseable {
                 return;
             }
 
+            // The safety search already waited for its chunks. Move in this tick so the
+            // final checks and the teleport cannot be separated by Paper's async queue.
             pendingTeleport.teleporting(true);
-            CompletableFuture<Boolean> result;
+            boolean successful;
             try {
-                result = player.teleportAsync(
-                        safeDestination.orElseThrow(),
-                        PlayerTeleportEvent.TeleportCause.COMMAND
-                );
+                successful = player.teleport(safeDestination.orElseThrow(), PlayerTeleportEvent.TeleportCause.COMMAND);
             } catch (RuntimeException exception) {
-                fail(player, pendingTeleport, "Could not start player teleport", exception);
+                fail(player, pendingTeleport, "Could not teleport player", exception);
                 return;
             }
 
-            result.whenComplete((successful, teleportError) -> runOnMainThread(() -> {
-                if (!isActive(player, pendingTeleport)) {
-                    return;
-                }
-                if (teleportError != null || !successful) {
-                    fail(player, pendingTeleport, "Player teleport did not complete", teleportError);
-                    return;
-                }
-                finish(player, pendingTeleport);
-                Duration cooldown = settings.current().teleportCooldown();
-                if (!cooldown.isZero()) {
-                    cooldowns.put(player.getUniqueId(), clock.instant().plus(cooldown));
-                    ensureStatusTask();
-                }
-                player.sendMessage(pendingTeleport.successMessage());
-                showArrival(player, pendingTeleport);
-            }));
+            if (!isActive(player, pendingTeleport)) {
+                return;
+            }
+            if (!successful) {
+                fail(player, pendingTeleport, "Player teleport did not complete", null);
+                return;
+            }
+            finish(player, pendingTeleport);
+            Duration cooldown = settings.current().teleportCooldown();
+            if (!cooldown.isZero()) {
+                cooldowns.put(player.getUniqueId(), clock.instant().plus(cooldown));
+                ensureStatusTask();
+            }
+            player.sendMessage(pendingTeleport.successMessage());
+            showArrival(player, pendingTeleport);
         }));
     }
 
-    private CompletableFuture<Void> loadSearchChunks(Location destination) {
+    private static LandingSize landingSize(Player player) {
+        if (player.getPose() == Pose.STANDING) {
+            return new LandingSize(player.getWidth() / 2, player.getHeight());
+        }
+        AttributeInstance scaleAttribute = player.getAttribute(Attribute.SCALE);
+        double scale = scaleAttribute == null ? 1 : scaleAttribute.getValue();
+        return new LandingSize(DEFAULT_LANDING_SIZE.halfWidth() * scale, DEFAULT_LANDING_SIZE.height() * scale);
+    }
+
+    private CompletableFuture<Void> loadSearchChunks(Location destination, int searchRadius, LandingSize size) {
         World world = destination.getWorld();
-        int searchRadius = settings.current().safeTeleportSearchRadius();
-        int minChunkX = Math.floorDiv(destination.getBlockX() - searchRadius, 16);
-        int maxChunkX = Math.floorDiv(destination.getBlockX() + searchRadius, 16);
-        int minChunkZ = Math.floorDiv(destination.getBlockZ() - searchRadius, 16);
-        int maxChunkZ = Math.floorDiv(destination.getBlockZ() + searchRadius, 16);
+        // Fallback positions are centered, but the exact destination can be at a block edge.
+        int chunkRadius = Math.max((int) Math.ceil(size.halfWidth()),
+                searchRadius + (int) Math.ceil(size.halfWidth() - 0.5));
+        int minChunkX = Math.floorDiv(destination.getBlockX() - chunkRadius, 16);
+        int maxChunkX = Math.floorDiv(destination.getBlockX() + chunkRadius, 16);
+        int minChunkZ = Math.floorDiv(destination.getBlockZ() - chunkRadius, 16);
+        int maxChunkZ = Math.floorDiv(destination.getBlockZ() + chunkRadius, 16);
 
         List<CompletableFuture<Chunk>> chunks = new ArrayList<>();
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
@@ -463,8 +524,8 @@ public final class SafeTeleportService implements AutoCloseable {
         return CompletableFuture.allOf(chunks.toArray(CompletableFuture[]::new));
     }
 
-    Optional<Location> findSafeDestination(Location requested) {
-        if (isSafe(requested)) {
+    Optional<Location> findSafeDestination(Location requested, int searchRadius, LandingSize size) {
+        if (isSafe(requested, size)) {
             return Optional.of(requested.clone());
         }
 
@@ -472,7 +533,6 @@ public final class SafeTeleportService implements AutoCloseable {
         int baseX = requested.getBlockX();
         int baseY = requested.getBlockY();
         int baseZ = requested.getBlockZ();
-        int searchRadius = settings.current().safeTeleportSearchRadius();
         Location candidate = requested.clone();
         for (int radius = 0; radius <= searchRadius; radius++) {
             for (int step = 0; step <= VERTICAL_SEARCH_DISTANCE * 2; step++) {
@@ -485,7 +545,7 @@ public final class SafeTeleportService implements AutoCloseable {
                         candidate.setX(baseX + xOffset + 0.5);
                         candidate.setY(baseY + yOffset);
                         candidate.setZ(baseZ + zOffset + 0.5);
-                        if (isSafe(candidate)) {
+                        if (isSafe(candidate, size)) {
                             return Optional.of(candidate.clone());
                         }
                     }
@@ -507,25 +567,64 @@ public final class SafeTeleportService implements AutoCloseable {
         return step % 2 == 0 ? distance : -distance;
     }
 
-    private boolean isSafe(Location location) {
+    private boolean isSafe(Location location, LandingSize size) {
         World world = location.getWorld();
+        int maxY = Location.locToBlock(Math.nextDown(location.getY() + size.height()));
         if (world == null || location.getBlockY() <= world.getMinHeight()
-                || location.getBlockY() + 1 >= world.getMaxHeight()
+                || maxY >= world.getMaxHeight()
                 || !world.getWorldBorder().isInside(location)) {
             return false;
         }
 
         Block feet = world.getBlockAt(location);
-        Block head = feet.getRelative(0, 1, 0);
         Block floor = feet.getRelative(0, -1, 0);
-        return feet.isPassable()
-                && !feet.isLiquid()
-                && !HAZARDOUS_BLOCKS.contains(feet.getType())
-                && head.isPassable()
-                && !head.isLiquid()
-                && !HAZARDOUS_BLOCKS.contains(head.getType())
-                && floor.isSolid()
-                && !HAZARDOUS_BLOCKS.contains(floor.getType());
+        if (!isClearForLanding(feet) || !floor.isSolid() || HAZARDOUS_BLOCKS.contains(floor.getType())
+                || !hasLandingSupport(floor, location, size)) {
+            return false;
+        }
+
+        int minX = Location.locToBlock(location.getX() - size.halfWidth()) - location.getBlockX();
+        int maxX = Location.locToBlock(Math.nextDown(location.getX() + size.halfWidth())) - location.getBlockX();
+        int minZ = Location.locToBlock(location.getZ() - size.halfWidth()) - location.getBlockZ();
+        int maxZ = Location.locToBlock(Math.nextDown(location.getZ() + size.halfWidth())) - location.getBlockZ();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = 0; y <= maxY - location.getBlockY(); y++) {
+                    if ((x != 0 || y != 0 || z != 0) && !isClearForLanding(feet.getRelative(x, y, z))) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    static boolean hasLandingSupport(Block floor, Location location, LandingSize size) {
+        // Bukkit reports block collision boxes in coordinates relative to the floor block.
+        double x = location.getX() - location.getBlockX();
+        double z = location.getZ() - location.getBlockZ();
+        double feetY = location.getY() - location.getBlockY() + 1;
+        double width = size.halfWidth();
+        boolean supported = false;
+        for (BoundingBox box : floor.getCollisionShape().getBoundingBoxes()) {
+            if (box.getMaxX() <= x - width || box.getMinX() >= x + width
+                    || box.getMaxZ() <= z - width || box.getMinZ() >= z + width) {
+                continue;
+            }
+            if (box.getMaxY() <= feetY) {
+                supported = true;
+            } else if (box.getMinY() < feetY + size.height()) {
+                return false;
+            }
+        }
+        return supported;
+    }
+
+    private boolean isClearForLanding(Block block) {
+        return block.isPassable()
+                && !block.isLiquid()
+                && !HAZARDOUS_BLOCKS.contains(block.getType())
+                && !(block.getBlockData() instanceof Waterlogged waterlogged && waterlogged.isWaterlogged());
     }
 
     private long secondsUntil(Instant now, Instant availableAt) {
@@ -539,7 +638,7 @@ public final class SafeTeleportService implements AutoCloseable {
 
     private void finish(Player player, PendingTeleport teleport) {
         pending.remove(player.getUniqueId(), teleport);
-        teleport.cancelTask();
+        teleport.dispose();
         teleport.hideBossBar(player);
         actionBars.clear(player, ActionBarService.TELEPORT_PRIORITY);
     }
@@ -707,20 +806,6 @@ public final class SafeTeleportService implements AutoCloseable {
         }
     }
 
-    private void clearTeleportActionBar(UUID playerId) {
-        Player player = plugin.getServer().getPlayer(playerId);
-        if (player != null) {
-            actionBars.clear(player, ActionBarService.TELEPORT_PRIORITY);
-        }
-    }
-
-    private void clearCooldownActionBar(UUID playerId) {
-        Player player = plugin.getServer().getPlayer(playerId);
-        if (player != null) {
-            actionBars.clear(player, ActionBarService.TELEPORT_COOLDOWN_PRIORITY);
-        }
-    }
-
     private void ensureStatusTask() {
         if (statusTask == null && (!pending.isEmpty() || !cooldowns.isEmpty())) {
             statusTask = plugin.getServer().getScheduler().runTaskTimer(
@@ -748,6 +833,7 @@ public final class SafeTeleportService implements AutoCloseable {
         private final String completionCue;
         private final Instant readyAt;
         private final Duration warmup;
+        private Runnable onEnd;
         private BukkitTask task;
         private BossBar bossBar;
         private long lastCountdownSecond = Long.MIN_VALUE;
@@ -762,7 +848,8 @@ public final class SafeTeleportService implements AutoCloseable {
                 Component destinationLabel,
                 String completionCue,
                 Instant readyAt,
-                Duration warmup
+                Duration warmup,
+                Runnable onEnd
         ) {
             this.origin = origin;
             this.originLocation = originLocation;
@@ -772,6 +859,7 @@ public final class SafeTeleportService implements AutoCloseable {
             this.completionCue = completionCue;
             this.readyAt = readyAt;
             this.warmup = warmup;
+            this.onEnd = onEnd;
         }
 
         private BlockPosition origin() {
@@ -842,9 +930,15 @@ public final class SafeTeleportService implements AutoCloseable {
             this.teleporting = teleporting;
         }
 
-        private void cancelTask() {
+        private void dispose() {
             if (task != null) {
                 task.cancel();
+                task = null;
+            }
+            Runnable completion = onEnd;
+            onEnd = null;
+            if (completion != null) {
+                completion.run();
             }
         }
 
@@ -853,6 +947,9 @@ public final class SafeTeleportService implements AutoCloseable {
                 player.hideBossBar(bossBar);
             }
         }
+    }
+
+    record LandingSize(double halfWidth, double height) {
     }
 
     private record BlockPosition(UUID worldId, int x, int y, int z) {

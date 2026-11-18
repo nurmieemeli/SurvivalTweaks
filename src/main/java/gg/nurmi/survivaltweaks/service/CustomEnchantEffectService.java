@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.SurvivalTweaks;
 import gg.nurmi.survivaltweaks.object.CustomEnchantment;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.TileState;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.BlockData;
@@ -17,9 +18,12 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.util.Vector;
@@ -113,8 +117,11 @@ public final class CustomEnchantEffectService implements Listener {
     public void onProjectileDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player player)
                 || !(event.getDamager() instanceof Projectile projectile)
-                || !player.isBlocking()
-                || !hasDeflectionShield(player)) {
+                || event.getDamage(DamageModifier.BLOCKING) >= 0) {
+            return;
+        }
+        ItemStack shield = player.getActiveItem();
+        if (shield.getType() != Material.SHIELD || !items.has(shield, CustomEnchantment.DEFLECTION)) {
             return;
         }
 
@@ -141,8 +148,8 @@ public final class CustomEnchantEffectService implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityDeath(EntityDeathEvent event) {
-        Entity attributed = CustomDeathMessageService.resolveKiller(event.getDamageSource());
-        if (!(attributed instanceof Player killer)) {
+        var damage = event.getDamageSource();
+        if (damage == null || !(damage.getDirectEntity() instanceof Player killer)) {
             return;
         }
 
@@ -286,15 +293,12 @@ public final class CustomEnchantEffectService implements Listener {
                         }
                         Material cropType = crop.getType();
                         Material seed = CROP_SEEDS.get(cropType);
-                        if (seed == null || !consume(player, seed)) {
+                        if (seed == null || !player.getInventory().contains(seed)) {
                             continue;
                         }
-                        if (!player.breakBlock(crop)) {
-                            player.getInventory().addItem(new ItemStack(seed));
-                            continue;
+                        if (player.breakBlock(crop) && replant(player, crop, cropType)) {
+                            harvested++;
                         }
-                        plant(crop, cropType);
-                        harvested++;
                     }
                 }
             } finally {
@@ -308,11 +312,28 @@ public final class CustomEnchantEffectService implements Listener {
 
     private boolean replant(Player player, Block block, Material cropType) {
         Material seed = CROP_SEEDS.get(cropType);
-        if (seed == null || !consume(player, seed)) {
+        if (seed == null || !block.isEmpty()) {
             return false;
         }
-        plant(block, cropType);
-        return true;
+        var inventory = player.getInventory();
+        int slot = inventory.first(seed);
+        if (slot < 0) {
+            return false;
+        }
+        var replaced = block.getState();
+        var placement = new BlockPlaceEvent(block, replaced, block.getRelative(BlockFace.DOWN),
+                inventory.getItem(slot).asOne(), player, true, EquipmentSlot.HAND);
+        boolean planted = false;
+        try {
+            plant(block, cropType);
+            plugin.getServer().getPluginManager().callEvent(placement);
+            planted = !placement.isCancelled() && placement.canBuild() && consume(player, seed);
+            return planted;
+        } finally {
+            if (!planted) {
+                replaced.update(true, false);
+            }
+        }
     }
 
     private void plant(Block block, Material cropType) {
@@ -345,15 +366,6 @@ public final class CustomEnchantEffectService implements Listener {
             return true;
         }
         return false;
-    }
-
-    private boolean hasDeflectionShield(Player player) {
-        ItemStack main = player.getInventory().getItemInMainHand();
-        ItemStack off = player.getInventory().getItemInOffHand();
-        return (main.getType() == Material.SHIELD
-                && items.has(main, CustomEnchantment.DEFLECTION))
-                || (off.getType() == Material.SHIELD
-                && items.has(off, CustomEnchantment.DEFLECTION));
     }
 
     static Material headMaterial(EntityType type) {

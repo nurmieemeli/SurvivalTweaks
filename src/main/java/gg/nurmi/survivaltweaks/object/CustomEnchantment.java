@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.object;
 
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -96,7 +97,13 @@ public enum CustomEnchantment {
     }
 
     public boolean conflictsWith(ItemStack item) {
-        return this == BEHEADING && item.getEnchantments().keySet().stream()
+        if (!conflictsWithLooting()) {
+            return false;
+        }
+        var enchantments = item.getType() == Material.ENCHANTED_BOOK
+                && item.getItemMeta() instanceof EnchantmentStorageMeta book
+                ? book.getStoredEnchants() : item.getEnchantments();
+        return enchantments.keySet().stream()
                 .anyMatch(enchantment -> conflictsWithNativeKey(enchantment.getKey().asString()));
     }
 

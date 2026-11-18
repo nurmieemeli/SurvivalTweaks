@@ -2,18 +2,17 @@ package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.object.Home;
 import gg.nurmi.survivaltweaks.service.MessageService;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
 
 final class HomeCustomizationMenu implements SurvivalTweaksMenu {
 
@@ -75,7 +74,7 @@ final class HomeCustomizationMenu implements SurvivalTweaksMenu {
                                 "category",
                                 messages.component(
                                         player,
-                                        "ui.home-editor.category." + home.category().name().toLowerCase()
+                                        "ui.home-editor.category." + home.category().name().toLowerCase(Locale.ROOT)
                                 )
                         )
                 )
@@ -98,7 +97,7 @@ final class HomeCustomizationMenu implements SurvivalTweaksMenu {
                                 messages.component(
                                         player,
                                         "ui.home-editor.arrival-style."
-                                                + home.arrivalStyle().name().toLowerCase()
+                                                + home.arrivalStyle().name().toLowerCase(Locale.ROOT)
                                 )
                         )
                 )
@@ -134,12 +133,4 @@ final class HomeCustomizationMenu implements SurvivalTweaksMenu {
         return inventory;
     }
 
-    private ItemStack item(Material material, Component name) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(List.of());
-        item.setItemMeta(meta);
-        return item;
-    }
 }

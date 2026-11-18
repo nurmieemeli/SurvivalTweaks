@@ -4,16 +4,23 @@ import gg.nurmi.survivaltweaks.object.LanguagePreference;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -36,6 +43,34 @@ class MessageServiceTest {
                 new org.bukkit.configuration.file.YamlConfiguration();
         config.set("default-language", "FI");
         return config;
+    }
+
+    @Test
+    void startupUsesBundledMessagesAndPreservesInvalidCatalogs(@TempDir Path directory) throws IOException {
+        StringBuilder english = new StringBuilder("a0: &a0 {leaf: value}\n");
+        for (int level = 1; level < 24; level++) {
+            english.append("a%d: &a%d {left: *a%d, right: *a%d}\n".formatted(level, level, level - 1, level - 1));
+        }
+        String finnish = "player-only: false\n";
+        Path englishFile = directory.resolve("messages_en.yml");
+        Path finnishFile = directory.resolve("messages_fi.yml");
+        Files.writeString(englishFile, english);
+        Files.writeString(finnishFile, finnish);
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getDataFolder()).thenReturn(directory.toFile());
+        when(plugin.getResource("messages_en.yml")).thenAnswer(ignored -> getClass().getResourceAsStream("/messages_en.yml"));
+        when(plugin.getResource("messages_fi.yml")).thenAnswer(ignored -> getClass().getResourceAsStream("/messages_fi.yml"));
+        YamlConfiguration config = new YamlConfiguration();
+        config.set("messages.player-only", "legacy value");
+
+        MessageService service = new MessageService(plugin, config, Logger.getAnonymousLogger());
+
+        assertEquals("This command can only be used by a player.", service.plain(null, "player-only"));
+        assertEquals("Tätä komentoa voi käyttää vain pelaajana.", service.plain(player(Locale.forLanguageTag("fi-FI")), "player-only"));
+        assertEquals(english.toString(), Files.readString(englishFile));
+        assertEquals(finnish, Files.readString(finnishFile));
+        assertFalse(service.migratedLegacyMessages());
+        assertEquals("legacy value", config.getString("messages.player-only"));
     }
 
     @Test

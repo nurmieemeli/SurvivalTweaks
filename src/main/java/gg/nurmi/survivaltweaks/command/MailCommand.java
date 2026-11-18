@@ -3,6 +3,7 @@ package gg.nurmi.survivaltweaks.command;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.MailService;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.ui.MailboxController;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.OfflinePlayer;
@@ -118,14 +119,7 @@ public final class MailCommand implements CommandExecutor, TabCompleter {
         if (arguments.length == 2
                 && List.of("send", "block", "unblock").contains(
                 arguments[0].toLowerCase(Locale.ROOT))) {
-            String prefix = arguments[1].toLowerCase(Locale.ROOT);
-            return server.getOnlinePlayers().stream()
-                    .filter(player -> !(sender instanceof Player source)
-                            || !player.getUniqueId().equals(source.getUniqueId()))
-                    .map(Player::getName)
-                    .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                    .sorted(String.CASE_INSENSITIVE_ORDER)
-                    .toList();
+            return PlayerNameLookup.otherPlayerSuggestions(server, sender, arguments[1], String.CASE_INSENSITIVE_ORDER);
         }
         return List.of();
     }

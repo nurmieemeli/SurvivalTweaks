@@ -32,8 +32,9 @@ public class PetProtectionService implements Listener {
             return;
         }
 
-        Player attacker = getPlayerAttacker(event.getDamager());
-        if (attacker != null) {
+        var source = event.getDamageSource();
+        if ((source != null && source.getCausingEntity() instanceof Player)
+                || getPlayerAttacker(event.getDamager()) != null) {
             event.setCancelled(true);
         }
     }

@@ -8,6 +8,7 @@ import gg.nurmi.survivaltweaks.service.DiagnosticService;
 import gg.nurmi.survivaltweaks.service.DisplayFormat;
 import gg.nurmi.survivaltweaks.service.MessageService;
 import gg.nurmi.survivaltweaks.service.MaintenanceService;
+import gg.nurmi.survivaltweaks.service.MaintenanceService.ExclusiveOperation;
 import gg.nurmi.survivaltweaks.service.NewPlayerSpawnService;
 import gg.nurmi.survivaltweaks.service.FastLeafDecayService;
 import gg.nurmi.survivaltweaks.service.PerformanceGovernor;
@@ -485,9 +486,12 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             return true;
         }
         boolean storagePath = path.equals("storage") || path.startsWith("storage.");
-        boolean password = path.equals("storage.remote.password");
+        if (path.equals("storage.remote.password")) {
+            messages.send(sender, "admin.config.password-file-only");
+            return true;
+        }
         if (action.equalsIgnoreCase("get")) {
-            if (password || (storagePath && !sender.hasPermission(STORAGE_PERMISSION))) {
+            if (storagePath && !sender.hasPermission(STORAGE_PERMISSION)) {
                 messages.send(sender, "admin.no-permission");
                 return true;
             }
@@ -521,11 +525,11 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     }
                 }
             }
-            if (!reloads.setConfigAsync(path, password ? valueStr : parsedValue, result -> {
+            if (!reloads.setConfigAsync(path, parsedValue, result -> {
                 if (result.successful()) {
                     messages.send(sender, "admin.config.set-success",
                             Placeholder.unparsed("path", path),
-                            Placeholder.unparsed("value", password ? "********" : valueStr));
+                            Placeholder.unparsed("value", valueStr));
                     return;
                 }
                 messages.send(sender, "admin.reload-failed", Placeholder.unparsed("reason", result.reason()));
@@ -634,7 +638,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             return true;
         }
         if (arguments.length == 3 && arguments[1].equalsIgnoreCase("restore")) {
-            runBackupOperation(sender, () -> backups.verify(arguments[2]), verification -> {
+            runBackupOperation(sender, () -> backups.checkRestore(arguments[2]), verification -> {
                 if (!verification.valid()) {
                     showBackupVerification(sender, arguments[2], verification);
                     return;
@@ -654,35 +658,42 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 messages.send(sender, "admin.backup.console-only");
                 return true;
             }
-            if (!maintenance.status().maintenanceMode()) {
-                messages.send(sender, "admin.backup.maintenance-required");
+            if (!canStageRestore(sender)) {
                 return true;
             }
-            int online = plugin.getServer().getOnlinePlayers().size();
-            if (online > 0) {
-                messages.send(
-                        sender,
-                        MessageService.plural("admin.backup.players-online", online),
-                        Placeholder.unparsed("count", Integer.toString(online))
-                );
-                return true;
-            }
-            runBackupOperation(sender, () -> backups.stageRestore(arguments[2]), verification -> {
-                messages.send(
-                        sender,
-                        "admin.backup.restore-staged",
-                        Placeholder.unparsed("file", arguments[2]),
-                        Placeholder.unparsed("sha", verification.sha256())
-                );
-                plugin.getServer().getScheduler().runTaskLater(
-                        plugin,
-                        plugin.getServer()::shutdown,
-                        1L
-                );
-            });
+            runExclusiveOperation(sender, backupOperation, "admin.backup", ExclusiveOperation.RESTART_STAGING,
+                    () -> backups.prepareRestore(arguments[2]), prepared -> {
+                try (prepared) {
+                    if (!canStageRestore(sender)) {
+                        return;
+                    }
+                    var verification = prepared.publish();
+                    maintenance.blockJoinsForShutdown();
+                    messages.send(sender, "admin.backup.restore-staged",
+                            Placeholder.unparsed("file", arguments[2]),
+                            Placeholder.unparsed("sha", verification.sha256()));
+                    plugin.getServer().getScheduler().runTaskLater(plugin, plugin.getServer()::shutdown, 1L);
+                } catch (IOException exception) {
+                    backupFailed(sender, exception);
+                }
+            }, failure -> backupFailed(sender, failure));
             return true;
         }
         messages.send(sender, "admin.backup.usage");
+        return true;
+    }
+
+    private boolean canStageRestore(CommandSender sender) {
+        if (!maintenance.status().maintenanceMode()) {
+            messages.send(sender, "admin.backup.maintenance-required");
+            return false;
+        }
+        int online = plugin.getServer().getOnlinePlayers().size();
+        if (online > 0) {
+            messages.send(sender, MessageService.plural("admin.backup.players-online", online),
+                    Placeholder.unparsed("count", Integer.toString(online)));
+            return false;
+        }
         return true;
     }
 
@@ -799,15 +810,17 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             }
             int purgeDays = settings.current().mailPurgeInactiveDays();
             Instant maintenanceAt = Instant.now();
-            runStorageOperation(
+            runExclusiveOperation(
                     sender,
+                    storageOperation,
+                    "admin.storage",
+                    ExclusiveOperation.DATABASE_MAINTENANCE,
                     () -> storage.maintain(maintenanceAt, purgeDays, () -> {
                         Future<Void> preparation = plugin.getServer().getScheduler().callSyncMethod(plugin, () -> {
                             if (!maintenance.status().maintenanceMode()
                                     || !plugin.getServer().getOnlinePlayers().isEmpty()) {
                                 throw new IllegalStateException("Maintenance requires maintenance mode and an empty server");
                             }
-                            persistence.prepareMaintenance(maintenanceAt, purgeDays);
                             return null;
                         });
                         try {
@@ -824,6 +837,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                         }
                     }),
                     result -> {
+                        persistence.reconcileMaintenance(maintenanceAt, purgeDays);
                         messages.send(
                                 sender,
                                 "admin.storage.maintenance-complete",
@@ -840,7 +854,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                                         result.safetyExport().checksum()
                                 )
                         );
-                    }
+                    },
+                    exception -> storageFailed(sender, exception)
             );
             return true;
         }
@@ -852,44 +867,6 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                 target = StorageBackend.parse(arguments[2]);
             } catch (IllegalArgumentException exception) {
                 messages.send(sender, "admin.storage.unknown-backend");
-                return true;
-            }
-            if (target != StorageBackend.SQLITE) {
-                String configuredType = plugin.getConfig()
-                        .getString("storage.remote.type", "")
-                        .strip();
-                if (!configuredType.equalsIgnoreCase(target.key())) {
-                    messages.send(
-                            sender,
-                            "admin.storage.remote-not-configured",
-                            Placeholder.unparsed("backend", target.key())
-                    );
-                    return true;
-                }
-            }
-            StorageConfiguration configured;
-            try {
-                configured = StorageConfiguration.load(plugin.getConfig(), storage.dataFolder());
-            } catch (IllegalArgumentException exception) {
-                messages.send(sender, "admin.storage.failed", Placeholder.unparsed("reason", exception.getMessage()));
-                return true;
-            }
-            if (arguments[1].equalsIgnoreCase("test")) {
-                runStorageOperation(sender, () -> storage.testBackend(configured.forBackend(target)), result ->
-                        messages.send(
-                                sender,
-                                "admin.storage.test-success",
-                                Placeholder.unparsed("backend", result.backend().key()),
-                                Placeholder.unparsed(
-                                        "empty",
-                                        Boolean.toString(result.empty())
-                                ),
-                                Placeholder.unparsed(
-                                        "latency",
-                                        Long.toString(result.latencyMillis())
-                                )
-                        )
-                );
                 return true;
             }
             if (arguments[1].equalsIgnoreCase("migrate")) {
@@ -906,27 +883,59 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
                     );
                     return true;
                 }
-                runStorageOperation(sender, () -> storage.stageMigration(configured, target), migration -> {
-                    plugin.getConfig().set("storage.backend", target.key());
-                    plugin.saveConfig();
-                    messages.send(
-                            sender,
-                            "admin.storage.migration-staged",
-                            Placeholder.unparsed("source", migration.source().key()),
-                            Placeholder.unparsed("target", migration.target().key()),
-                            Placeholder.unparsed("id", migration.id().toString())
-                    );
-                    plugin.getServer().getScheduler().runTaskLater(
-                            plugin,
-                            plugin.getServer()::shutdown,
-                            20L
-                    );
-                });
+                stageStorageMigration(sender, target);
+                return true;
+            }
+            if (arguments[1].equalsIgnoreCase("test")) {
+                runStorageOperation(sender, () -> storage.testBackend(reloads.prepareStorageTest(target.key())), result ->
+                        messages.send(
+                                sender,
+                                "admin.storage.test-success",
+                                Placeholder.unparsed("backend", result.backend().key()),
+                                Placeholder.unparsed(
+                                        "empty",
+                                        Boolean.toString(result.empty())
+                                ),
+                                Placeholder.unparsed(
+                                        "latency",
+                                        Long.toString(result.latencyMillis())
+                                )
+                        )
+                );
                 return true;
             }
         }
         messages.send(sender, "admin.storage.usage");
         return true;
+    }
+
+    private void stageStorageMigration(CommandSender sender, StorageBackend target) {
+        record StagedMigration(StorageManager.MigrationPlan migration, ReloadService.Candidate config) {}
+        runExclusiveOperation(sender, storageOperation, "admin.storage", ExclusiveOperation.RESTART_STAGING, () -> {
+                    ReloadService.Candidate candidate = reloads.prepareStorageBackend(target.key());
+                    StorageConfiguration configured = StorageConfiguration.load(candidate.configuration(), storage.dataFolder());
+                    return new StagedMigration(storage.stageMigration(configured, target), candidate);
+                }, staged -> {
+                    StorageManager.MigrationPlan migration = staged.migration();
+                    try {
+                        reloads.publishStorageBackend(staged.config());
+                    } catch (IOException | RuntimeException failure) {
+                        try {
+                            storage.cancelStagedMigration(migration);
+                        } catch (IOException cleanupFailure) {
+                            plugin.getLogger().warning("Could not remove the incomplete migration marker: "
+                                    + cleanupFailure.getMessage());
+                        }
+                        storageFailed(sender, failure);
+                        return;
+                    }
+                    plugin.getServer().getScheduler().runTaskLater(plugin, plugin.getServer()::shutdown, 20L);
+                    maintenance.blockJoinsForShutdown();
+                    messages.send(sender, "admin.storage.migration-staged",
+                            Placeholder.unparsed("source", migration.source().key()),
+                            Placeholder.unparsed("target", migration.target().key()),
+                            Placeholder.unparsed("id", migration.id().toString()));
+                }, failure -> storageFailed(sender, failure));
     }
 
     private void showMaintenancePreview(
@@ -955,35 +964,13 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             CheckedSupplier<T> operation,
             Consumer<T> completion
     ) {
-        if (!storageOperation.compareAndSet(false, true)) {
-            messages.send(sender, "admin.storage.busy");
-            return;
-        }
-        messages.send(sender, "admin.storage.working");
-        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
-            T result;
-            try {
-                result = operation.get();
-            } catch (Exception exception) {
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    storageOperation.set(false);
-                    String reason = Objects.requireNonNullElse(
-                            exception.getMessage(),
-                            exception.getClass().getSimpleName()
-                    );
-                    messages.send(
-                            sender,
-                            "admin.storage.failed",
-                            Placeholder.unparsed("reason", reason)
-                    );
-                });
-                return;
-            }
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                storageOperation.set(false);
-                completion.accept(result);
-            });
-        });
+        runOperation(sender, storageOperation, "admin.storage", operation, completion,
+                exception -> storageFailed(sender, exception));
+    }
+
+    private void storageFailed(CommandSender sender, Exception exception) {
+        String reason = Objects.requireNonNullElse(exception.getMessage(), exception.getClass().getSimpleName());
+        messages.send(sender, "admin.storage.failed", Placeholder.unparsed("reason", reason));
     }
 
     private void backupFailed(CommandSender sender, Exception exception) {
@@ -1032,24 +1019,72 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             CheckedSupplier<T> operation,
             Consumer<T> completion
     ) {
-        if (!backupOperation.compareAndSet(false, true)) {
-            messages.send(sender, "admin.backup.busy");
+        runOperation(sender, backupOperation, "admin.backup", operation, completion,
+                exception -> backupFailed(sender, exception));
+    }
+
+    private <T> void runExclusiveOperation(
+            CommandSender sender, AtomicBoolean busy, String messagePrefix, ExclusiveOperation reservation,
+            CheckedSupplier<T> operation,
+            Consumer<T> completion, Consumer<Exception> failure
+    ) {
+        if (busy.get()) {
+            messages.send(sender, messagePrefix + ".busy");
             return;
         }
-        messages.send(sender, "admin.backup.working");
-        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+        if (maintenance.status().restartScheduled()) {
+            messages.send(sender, "admin.restart.already-scheduled");
+            return;
+        }
+        if (backups.hasPendingRestore() || storage.hasPendingMigration() || !maintenance.beginExclusiveOperation(reservation)) {
+            messages.send(sender, "admin.restart.staging-busy");
+            return;
+        }
+        try {
+            runOperation(sender, busy, messagePrefix, operation, result -> {
+                try {
+                    completion.accept(result);
+                } finally {
+                    maintenance.finishExclusiveOperation();
+                }
+            }, exception -> {
+                maintenance.finishExclusiveOperation();
+                failure.accept(exception);
+            });
+        } catch (RuntimeException exception) {
+            busy.set(false);
+            maintenance.finishExclusiveOperation();
+            throw exception;
+        }
+    }
+
+    private <T> void runOperation(
+            CommandSender sender,
+            AtomicBoolean busy,
+            String messagePrefix,
+            CheckedSupplier<T> operation,
+            Consumer<T> completion,
+            Consumer<Exception> failure
+    ) {
+        if (!busy.compareAndSet(false, true)) {
+            messages.send(sender, messagePrefix + ".busy");
+            return;
+        }
+        messages.send(sender, messagePrefix + ".working");
+        var scheduler = plugin.getServer().getScheduler();
+        scheduler.runTaskAsynchronously(plugin, () -> {
             T result;
             try {
                 result = operation.get();
             } catch (Exception exception) {
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    backupOperation.set(false);
-                    backupFailed(sender, exception);
+                scheduler.runTask(plugin, () -> {
+                    busy.set(false);
+                    failure.accept(exception);
                 });
                 return;
             }
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                backupOperation.set(false);
+            scheduler.runTask(plugin, () -> {
+                busy.set(false);
                 completion.accept(result);
             });
         });
@@ -1073,7 +1108,8 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
         }
         if (arguments.length == 2 && arguments[1].equalsIgnoreCase("off")) {
             maintenance.maintenanceMode(false);
-            messages.send(sender, "admin.maintenance.disabled");
+            messages.send(sender, maintenance.status().joinBlocked()
+                    ? "admin.maintenance.disabled-joins-blocked" : "admin.maintenance.disabled");
             return true;
         }
         if (arguments.length == 2 && arguments[1].equalsIgnoreCase("status")) {
@@ -1112,6 +1148,7 @@ public final class SurvivalTweaksCommand implements CommandExecutor, TabComplete
             String key = switch (result) {
                 case SCHEDULED -> MessageService.plural("admin.restart.scheduled", delay.toSeconds());
                 case ALREADY_SCHEDULED -> "admin.restart.already-scheduled";
+                case STAGING_IN_PROGRESS -> "admin.restart.staging-busy";
                 case INVALID -> "admin.restart.invalid";
             };
             messages.send(

@@ -17,13 +17,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
 
 public final class LockListController implements Listener {
 
@@ -170,15 +170,6 @@ public final class LockListController implements Listener {
         if (event.getView().getTopInventory().getHolder(false) instanceof LockListHolder) {
             event.setCancelled(true);
         }
-    }
-
-    private ItemStack item(Material material, Component name, List<Component> lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
     }
 
     private static final class LockListHolder implements SurvivalTweaksMenu {

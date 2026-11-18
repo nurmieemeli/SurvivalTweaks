@@ -12,10 +12,14 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
 
 final class HomeMenu implements SurvivalTweaksMenu {
 
@@ -127,14 +131,12 @@ final class HomeMenu implements SurvivalTweaksMenu {
     }
 
     private ItemStack homeItem(MessageService messages, Player owner, Home home) {
-        ItemStack item = new ItemStack(home.icon());
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(messages.component(
+        Component name = messages.component(
                 owner,
                 "ui.home-menu.home-name",
                 Placeholder.unparsed("home", home.name())
-        ));
-        java.util.ArrayList<Component> lore = new java.util.ArrayList<>();
+        );
+        List<Component> lore = new ArrayList<>();
         if (home.favorite()) {
             lore.add(messages.component(owner, "ui.home-menu.favorite"));
         }
@@ -152,7 +154,7 @@ final class HomeMenu implements SurvivalTweaksMenu {
                         "category",
                         messages.component(
                                 owner,
-                                "ui.home-editor.category." + home.category().name().toLowerCase()
+                                "ui.home-editor.category." + home.category().name().toLowerCase(Locale.ROOT)
                         )
                 )
         ));
@@ -171,9 +173,7 @@ final class HomeMenu implements SurvivalTweaksMenu {
         lore.add(messages.component(owner, "ui.home-menu.home-action"));
         lore.add(messages.component(owner, "ui.home-menu.home-edit-action"));
         lore.add(messages.component(owner, "ui.home-menu.home-reorder-action"));
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
+        return item(home.icon(), name, lore);
     }
 
     static int compareHomes(Home left, Home right) {

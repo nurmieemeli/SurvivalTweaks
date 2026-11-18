@@ -3,7 +3,7 @@ package gg.nurmi.survivaltweaks.service;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.Profile;
-import gg.nurmi.survivaltweaks.storage.ProfileStore;
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.ProfileFiles;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -48,7 +48,7 @@ class MentionServiceTest {
 
     @BeforeEach
     void openProfiles() {
-        profiles = new ProfileRepository(new ProfileStore(directory, logger), logger);
+        profiles = new ProfileRepository(new ProfileFiles(directory, logger), logger);
     }
 
     @AfterEach

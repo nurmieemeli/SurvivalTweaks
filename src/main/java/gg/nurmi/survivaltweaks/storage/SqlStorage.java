@@ -22,11 +22,13 @@ import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.Material;
 import org.sqlite.JDBC;
 import org.sqlite.SQLiteConfig;
+import org.sqlite.SQLiteOpenMode;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -44,7 +46,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -71,6 +72,7 @@ public final class SqlStorage implements
     private final Logger logger;
     private final HikariDataSource dataSource;
     private final ReentrantReadWriteLock snapshotGate = new ReentrantReadWriteLock();
+    private long mailPurgedBefore = Long.MIN_VALUE;
     private Connection instanceLeaseConnection;
     private List<?> leaseKeys = List.of();
     private ScheduledExecutorService leaseMonitor;
@@ -78,11 +80,19 @@ public final class SqlStorage implements
     private volatile String leaseFailure = "";
 
     public SqlStorage(StorageConfiguration configuration, Logger logger) {
+        this(configuration, logger, false);
+    }
+
+    private SqlStorage(StorageConfiguration configuration, Logger logger, boolean readOnlySnapshot) {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
         this.logger = Objects.requireNonNull(logger, "logger");
         HikariConfig hikari = new HikariConfig();
         hikari.setPoolName("SurvivalTweaks-" + configuration.backend().key());
-        hikari.setJdbcUrl(configuration.jdbcUrl());
+        // A backup contains a checkpointed database with no WAL. Immutable mode also
+        // prevents SQLite from creating new sidecars in the staged restore directory.
+        hikari.setJdbcUrl(readOnlySnapshot
+                ? "jdbc:sqlite:" + configuration.sqliteFile().toUri().toASCIIString() + "?immutable=1"
+                : configuration.jdbcUrl());
         hikari.setDriverClassName(configuration.driverClassName());
         hikari.setMaximumPoolSize(
                 configuration.backend() == StorageBackend.SQLITE
@@ -99,8 +109,19 @@ public final class SqlStorage implements
             hikari.setPassword(configuration.password());
         }
         configureDriver(hikari);
+        if (readOnlySnapshot) {
+            SQLiteConfig options = new SQLiteConfig();
+            options.setReadOnly(true);
+            options.toProperties().forEach((key, value) ->
+                    hikari.addDataSourceProperty(key.toString(), value));
+            hikari.setReadOnly(true);
+        }
         dataSource = new HikariDataSource(hikari);
+        if (readOnlySnapshot) {
+            return;
+        }
         try (Connection connection = dataSource.getConnection()) {
+            validateExistingSchema(connection);
             configureConnection(connection);
             initializeDatabaseDefaults(connection);
             initializeSchema(connection);
@@ -151,11 +172,30 @@ public final class SqlStorage implements
 
     static UUID sqliteInstanceId(Path file) throws IOException {
         SQLiteConfig options = new SQLiteConfig();
-        options.setReadOnly(true);
-        try (Connection connection = new JDBC().connect("jdbc:sqlite:" + file, options.toProperties())) {
+        // SQLite needs write access to recover a hot rollback journal before reading the identity.
+        options.setReadOnly(!hasSqliteSidecar(file, "-journal"));
+        try (Connection connection = openExistingSqlite(file, options)) {
             return readInstanceId(connection);
         } catch (SQLException | IllegalArgumentException exception) {
             throw new IOException("Could not read SQLite instance identity", exception);
+        }
+    }
+
+    static StorageSnapshot verifySqliteRestore(StorageConfiguration configuration, UUID expected, Logger logger)
+            throws IOException {
+        try (SqlStorage copy = new SqlStorage(configuration, logger, true)) {
+            Inspection inspection = copy.inspect(expected == null);
+            Verification verification = inspection.verification();
+            if (!verification.healthy()) {
+                throw new IOException(String.join("; ", verification.problems()));
+            }
+            if (expected != null && !expected.equals(copy.instanceId())) {
+                throw new IOException("SQLite database does not match the archived storage identity");
+            }
+            return inspection.snapshot().orElseThrow();
+        } catch (IOException | RuntimeException exception) {
+            throw new IOException("Cannot restore " + configuration.sqliteFile().getFileName()
+                    + ": " + exception.getMessage(), exception);
         }
     }
 
@@ -247,84 +287,93 @@ public final class SqlStorage implements
     public Profile load(UUID uniqueId) {
         Objects.requireNonNull(uniqueId, "uniqueId");
         try (Connection connection = connection()) {
-            Profile profile = new Profile(uniqueId);
-            try (PreparedStatement statement = connection.prepareStatement(
-                    """
-                    SELECT sounds, particles, dialogs, action_bar, reduced_effects,
-                           player_list, mention_notifications, journey_guidance,
-                           public_profile, mail_enabled, language, last_known_name,
-                           last_seen_at, play_time_ticks
-                    FROM st_profiles WHERE player_id = ?
-                    """
-            )) {
-                statement.setString(1, uniqueId.toString());
-                try (ResultSet results = statement.executeQuery()) {
-                    if (!results.next()) {
-                        return profile;
-                    }
-                    profile.preferences(new PlayerPreferences(
-                            bool(results, "sounds"),
-                            bool(results, "particles"),
-                            bool(results, "dialogs"),
-                            bool(results, "action_bar"),
-                            bool(results, "reduced_effects"),
-                            bool(results, "player_list"),
-                            bool(results, "mention_notifications"),
-                            bool(results, "journey_guidance"),
-                            bool(results, "public_profile"),
-                            bool(results, "mail_enabled"),
-                            enumValue(
-                                    LanguagePreference.class,
-                                    results.getString("language"),
-                                    LanguagePreference.AUTO
-                            )
-                    ));
-                    profile.lastKnownName(results.getString("last_known_name"));
-                    long lastSeen = results.getLong("last_seen_at");
-                    if (!results.wasNull()) {
-                        profile.lastSeenAt(Instant.ofEpochMilli(lastSeen));
-                    }
-                    profile.playTimeTicks(results.getLong("play_time_ticks"));
-                }
-            }
-            loadHomes(connection, profile);
-            loadHints(connection, profile);
-            loadNotifications(connection, profile);
-            loadMailBlocks(connection, profile);
-            loadProfileTrusted(connection, profile);
+            beginSnapshotRead(connection);
+            Profile profile = readProfile(connection, uniqueId);
+            connection.commit();
             return profile;
         } catch (SQLException | RuntimeException exception) {
             throw new IllegalStateException("Could not load profile " + uniqueId, exception);
         }
     }
 
-    @Override
-    public java.util.Map<UUID, java.util.Set<UUID>> loadAllGlobalTrusts() throws IOException {
-        try (Connection connection = connection()) {
-            java.util.Map<UUID, java.util.Set<UUID>> trusted = new java.util.LinkedHashMap<>();
-            try (PreparedStatement statement = connection.prepareStatement(
-                    """
-                    SELECT player_id, trusted_player_id FROM st_profile_trusted
-                    ORDER BY player_id, trusted_player_id
-                    """
-            ); ResultSet results = statement.executeQuery()) {
-                while (results.next()) {
-                    trusted.computeIfAbsent(
-                            UUID.fromString(results.getString("player_id")),
-                            ignored -> new java.util.LinkedHashSet<>()
-                    ).add(UUID.fromString(results.getString("trusted_player_id")));
+    private Profile readProfile(Connection connection, UUID uniqueId) throws SQLException {
+        Profile profile = new Profile(uniqueId);
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                SELECT sounds, particles, dialogs, action_bar, reduced_effects,
+                       player_list, mention_notifications, journey_guidance,
+                       public_profile, mail_enabled, language, last_known_name,
+                       last_seen_at, play_time_ticks
+                FROM st_profiles WHERE player_id = ?
+                """
+        )) {
+            statement.setString(1, uniqueId.toString());
+            try (ResultSet results = statement.executeQuery()) {
+                if (!results.next()) {
+                    return profile;
                 }
+                readProfileRow(results, profile);
             }
-            return trusted;
+        }
+        loadHomes(connection, profile);
+        loadHints(connection, profile);
+        loadNotifications(connection, profile);
+        loadMailBlocks(connection, profile);
+        loadProfileTrusted(connection, profile);
+        return profile;
+    }
+
+    private void readProfileRow(ResultSet row, Profile profile) throws SQLException {
+        profile.preferences(new PlayerPreferences(
+                bool(row, "sounds"),
+                bool(row, "particles"),
+                bool(row, "dialogs"),
+                bool(row, "action_bar"),
+                bool(row, "reduced_effects"),
+                bool(row, "player_list"),
+                bool(row, "mention_notifications"),
+                bool(row, "journey_guidance"),
+                bool(row, "public_profile"),
+                bool(row, "mail_enabled"),
+                enumValue(LanguagePreference.class, row.getString("language"), LanguagePreference.AUTO)
+        ));
+        profile.lastKnownName(row.getString("last_known_name"));
+        long lastSeen = row.getLong("last_seen_at");
+        if (!row.wasNull()) {
+            profile.lastSeenAt(Instant.ofEpochMilli(lastSeen));
+        }
+        profile.playTimeTicks(row.getLong("play_time_ticks"));
+    }
+
+    @Override
+    public Map<UUID, Set<UUID>> loadAllGlobalTrusts() throws IOException {
+        try (Connection connection = connection()) {
+            return loadAllGlobalTrusts(connection);
         } catch (SQLException | RuntimeException exception) {
             throw io("Could not load global trusts", exception);
         }
     }
 
     @Override
+    public Map<UUID, String> loadKnownPlayerNames() throws IOException {
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT player_id, last_known_name FROM st_profiles WHERE last_known_name <> ''");
+             ResultSet results = statement.executeQuery()) {
+            Map<UUID, String> names = new java.util.HashMap<>();
+            while (results.next()) {
+                names.put(UUID.fromString(results.getString("player_id")), results.getString("last_known_name"));
+            }
+            return names;
+        } catch (SQLException | RuntimeException exception) {
+            throw io("Could not load saved player names", exception);
+        }
+    }
+
+    @Override
     public void save(ProfileSnapshot snapshot) throws IOException {
         Objects.requireNonNull(snapshot, "snapshot");
-        transaction(connection -> replaceProfile(connection, snapshot));
+        transaction(connection -> replaceProfile(connection, snapshot, mailPurgedBefore));
     }
 
     @Override
@@ -375,18 +424,9 @@ public final class SqlStorage implements
     public StorageSnapshot exportSnapshot() throws IOException {
         snapshotGate.writeLock().lock();
         try (Connection connection = connection()) {
-            connection.setAutoCommit(false);
-            if (configuration.backend() != StorageBackend.SQLITE) {
-                connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
-                connection.setReadOnly(true);
-            }
+            beginSnapshotRead(connection);
             try {
-                StorageSnapshot snapshot = new StorageSnapshot(
-                        loadAllProfiles(connection),
-                        loadLocks(connection),
-                        loadDeathMarkers(connection),
-                        loadSpawnState(connection)
-                );
+                StorageSnapshot snapshot = readSnapshot(connection);
                 connection.commit();
                 return snapshot;
             } catch (Exception exception) {
@@ -394,10 +434,23 @@ public final class SqlStorage implements
                 throw exception;
             }
         } catch (Exception exception) {
-            throw io("Could not export storage snapshot", exception);
+            throw io("Could not export storage snapshot: " + exception.getMessage(), exception);
         } finally {
             snapshotGate.writeLock().unlock();
         }
+    }
+
+    private void beginSnapshotRead(Connection connection) throws SQLException {
+        if (configuration.backend() != StorageBackend.SQLITE) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+            connection.setReadOnly(true);
+        }
+        connection.setAutoCommit(false);
+    }
+
+    private StorageSnapshot readSnapshot(Connection connection) throws SQLException {
+        return new StorageSnapshot(loadAllProfiles(connection), loadLocks(connection),
+                loadDeathMarkers(connection), loadSpawnState(connection));
     }
 
     public void replaceAll(StorageSnapshot snapshot, UUID instanceId) throws IOException {
@@ -406,7 +459,7 @@ public final class SqlStorage implements
         transaction(connection -> {
             clearAll(connection);
             for (ProfileSnapshot profile : snapshot.profiles()) {
-                replaceProfile(connection, profile);
+                replaceProfile(connection, profile, Long.MIN_VALUE);
             }
             replaceLocks(connection, snapshot.locks());
             replaceDeathMarkers(connection, snapshot.deathMarkers());
@@ -508,8 +561,10 @@ public final class SqlStorage implements
             try {
                 MaintenancePreview before = maintenancePreview(connection, now, mailPurgeInactiveDays);
                 int oldMailRemoved = 0;
+                long mailCutoff = Long.MIN_VALUE;
                 if (mailPurgeInactiveDays > 0) {
-                    oldMailRemoved = delete(connection, "DELETE FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli());
+                    mailCutoff = now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli();
+                    oldMailRemoved = delete(connection, "DELETE FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", mailCutoff);
                 }
                 MaintenancePreview removed = new MaintenancePreview(
                         delete(connection, "DELETE FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
@@ -532,7 +587,15 @@ public final class SqlStorage implements
                                     + " invalid or expired row(s)"
                     );
                 }
+                List<String> problems = new ArrayList<>();
+                inspectSchema(connection, false, problems);
+                if (!problems.isEmpty()) {
+                    throw new SQLException("Maintenance verification failed: " + String.join("; ", problems));
+                }
+                readSnapshot(connection);
                 connection.commit();
+                // Queued profile snapshots may still contain mail that this transaction deleted.
+                mailPurgedBefore = Math.max(mailPurgedBefore, mailCutoff);
                 return new MaintenanceResult(before, removed, now);
             } catch (Exception exception) {
                 connection.rollback();
@@ -555,77 +618,7 @@ public final class SqlStorage implements
             problems.add("Database instance lease failed: " + leaseFailure);
         }
         try (Connection connection = connection()) {
-            for (String requiredQuery : requiredSchemaQueries()) {
-                try (Statement statement = connection.createStatement()) {
-                    statement.executeQuery(requiredQuery).close();
-                }
-            }
-            if (configuration.backend() == StorageBackend.SQLITE) {
-                try (Statement statement = connection.createStatement();
-                     ResultSet result = statement.executeQuery("PRAGMA quick_check")) {
-                    while (result.next()) {
-                        String value = result.getString(1);
-                        if (!value.equalsIgnoreCase("ok")) {
-                            problems.add(value);
-                        }
-                    }
-                }
-            }
-            orphanCount(connection, "st_homes", "player_id", "st_profiles", "player_id", problems);
-            orphanCount(connection, "st_hints", "player_id", "st_profiles", "player_id", problems);
-            orphanCount(connection, "st_notifications", "player_id", "st_profiles", "player_id", problems);
-            orphanCount(connection, "st_mail_blocks", "player_id", "st_profiles", "player_id", problems);
-            orphanCount(connection, "st_profile_trusted", "player_id", "st_profiles", "player_id", problems);
-            orphanCount(connection, "st_lock_blocks", "lock_id", "st_locks", "lock_id", problems);
-            orphanCount(connection, "st_lock_trusted", "lock_id", "st_locks", "lock_id", problems);
-            problemCount(
-                    connection,
-                    "SELECT COUNT(*) FROM st_home_shares s LEFT JOIN st_homes h "
-                            + "ON s.player_id = h.player_id AND s.home_key = h.home_key "
-                            + "WHERE h.player_id IS NULL",
-                    "st_home_shares contains %d orphan row(s)",
-                    problems
-            );
-            problemCount(
-                    connection,
-                    "SELECT COUNT(*) FROM st_locks l LEFT JOIN st_lock_blocks b "
-                            + "ON l.lock_id = b.lock_id WHERE b.lock_id IS NULL",
-                    "st_locks contains %d lock(s) without blocks",
-                    problems
-            );
-            problemCount(
-                    connection,
-                    "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN "
-                            + "('available', 'assignment', 'retired') OR "
-                            + "(location_kind = 'assignment' AND player_id IS NULL) OR "
-                            + "(location_kind <> 'assignment' AND player_id IS NOT NULL)",
-                    "st_spawn_locations contains %d invalid row(s)",
-                    problems
-            );
-            invalidEnumCount(connection, "st_profiles", "language", LanguagePreference.class, problems);
-            invalidEnumCount(connection, "st_homes", "category", HomeCategory.class, problems);
-            invalidEnumCount(connection, "st_homes", "arrival_style", HomeArrivalStyle.class, problems);
-            invalidEnumCount(connection, "st_hints", "hint", OnboardingHint.class, problems);
-            invalidEnumCount(
-                    connection,
-                    "st_notifications",
-                    "notification_type",
-                    NotificationType.class,
-                    problems
-            );
-            invalidEnumCount(connection, "st_locks", "access_mode", LockAccessMode.class, problems);
-            int schema = Integer.parseInt(meta(connection, META_SCHEMA_VERSION).orElse("0"));
-            if (schema != SCHEMA_VERSION) {
-                problems.add("Expected schema " + SCHEMA_VERSION + " but found " + schema);
-            }
-            Optional<String> instance = meta(connection, META_INSTANCE_ID);
-            if (instance.isEmpty()) {
-                if (!allowMissingInstanceId) {
-                    problems.add("Storage instance identity is missing");
-                }
-            } else {
-                UUID.fromString(instance.get());
-            }
+            inspectSchema(connection, allowMissingInstanceId, problems);
         } catch (Exception exception) {
             problems.add(exception.getClass().getSimpleName() + ": "
                     + Objects.requireNonNullElse(exception.getMessage(), "verification failed"));
@@ -641,6 +634,81 @@ public final class SqlStorage implements
                 new Verification(problems.isEmpty(), List.copyOf(problems)),
                 Optional.ofNullable(snapshot)
         );
+    }
+
+    private void inspectSchema(Connection connection, boolean allowMissingInstanceId, List<String> problems)
+            throws SQLException {
+        for (String requiredQuery : requiredSchemaQueries()) {
+            try (Statement statement = connection.createStatement()) {
+                statement.executeQuery(requiredQuery).close();
+            }
+        }
+        if (configuration.backend() == StorageBackend.SQLITE) {
+            try (Statement statement = connection.createStatement();
+                 ResultSet result = statement.executeQuery("PRAGMA quick_check")) {
+                while (result.next()) {
+                    String value = result.getString(1);
+                    if (!value.equalsIgnoreCase("ok")) {
+                        problems.add(value);
+                    }
+                }
+            }
+        }
+        orphanCount(connection, "st_homes", "player_id", "st_profiles", "player_id", problems);
+        orphanCount(connection, "st_hints", "player_id", "st_profiles", "player_id", problems);
+        orphanCount(connection, "st_notifications", "player_id", "st_profiles", "player_id", problems);
+        orphanCount(connection, "st_mail_blocks", "player_id", "st_profiles", "player_id", problems);
+        orphanCount(connection, "st_profile_trusted", "player_id", "st_profiles", "player_id", problems);
+        orphanCount(connection, "st_lock_blocks", "lock_id", "st_locks", "lock_id", problems);
+        orphanCount(connection, "st_lock_trusted", "lock_id", "st_locks", "lock_id", problems);
+        problemCount(
+                connection,
+                "SELECT COUNT(*) FROM st_home_shares s LEFT JOIN st_homes h "
+                        + "ON s.player_id = h.player_id AND s.home_key = h.home_key "
+                        + "WHERE h.player_id IS NULL",
+                "st_home_shares contains %d orphan row(s)",
+                problems
+        );
+        problemCount(
+                connection,
+                "SELECT COUNT(*) FROM st_locks l LEFT JOIN st_lock_blocks b "
+                        + "ON l.lock_id = b.lock_id WHERE b.lock_id IS NULL",
+                "st_locks contains %d lock(s) without blocks",
+                problems
+        );
+        problemCount(
+                connection,
+                "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN "
+                        + "('available', 'assignment', 'retired') OR "
+                        + "(location_kind = 'assignment' AND player_id IS NULL) OR "
+                        + "(location_kind <> 'assignment' AND player_id IS NOT NULL)",
+                "st_spawn_locations contains %d invalid row(s)",
+                problems
+        );
+        invalidEnumCount(connection, "st_profiles", "language", LanguagePreference.class, problems);
+        invalidEnumCount(connection, "st_homes", "category", HomeCategory.class, problems);
+        invalidEnumCount(connection, "st_homes", "arrival_style", HomeArrivalStyle.class, problems);
+        invalidEnumCount(connection, "st_hints", "hint", OnboardingHint.class, problems);
+        invalidEnumCount(
+                connection,
+                "st_notifications",
+                "notification_type",
+                NotificationType.class,
+                problems
+        );
+        invalidEnumCount(connection, "st_locks", "access_mode", LockAccessMode.class, problems);
+        int schema = Integer.parseInt(meta(connection, META_SCHEMA_VERSION).orElse("0"));
+        if (schema != SCHEMA_VERSION) {
+            problems.add("Expected schema " + SCHEMA_VERSION + " but found " + schema);
+        }
+        Optional<String> instance = meta(connection, META_INSTANCE_ID);
+        if (instance.isEmpty()) {
+            if (!allowMissingInstanceId) {
+                problems.add("Storage instance identity is missing");
+            }
+        } else {
+            UUID.fromString(instance.get());
+        }
     }
 
     private List<String> requiredSchemaQueries() {
@@ -736,17 +804,36 @@ public final class SqlStorage implements
     }
 
     public static void checkpointBeforeStartupBackup(Path database) throws IOException {
+        boolean hasJournal = hasSqliteSidecar(database, "-journal");
         if (!Files.isRegularFile(database) || Files.isSymbolicLink(database)
-                || !Files.exists(database.resolveSibling(database.getFileName() + "-wal"))) {
+                || (!hasJournal && !hasSqliteSidecar(database, "-wal"))) {
             return;
         }
-        Properties settings = new Properties();
-        settings.setProperty("busy_timeout", "0");
-        try (Connection connection = new JDBC().connect("jdbc:sqlite:" + database, settings)) {
+        SQLiteConfig options = new SQLiteConfig();
+        options.setBusyTimeout(0);
+        try (Connection connection = openExistingSqlite(database, options)) {
+            if (hasJournal) {
+                // Touch the database so SQLite resolves the journal before we copy the main file.
+                try (Statement statement = connection.createStatement();
+                     ResultSet version = statement.executeQuery("PRAGMA schema_version")) {
+                    if (!version.next()) {
+                        throw new CheckpointUnavailableException(null);
+                    }
+                }
+            }
             checkpoint(connection);
         } catch (SQLException exception) {
             throw new CheckpointUnavailableException(exception);
         }
+    }
+
+    private static Connection openExistingSqlite(Path database, SQLiteConfig options) throws SQLException {
+        options.resetOpenMode(SQLiteOpenMode.CREATE);
+        return new JDBC().connect("jdbc:sqlite:" + database, options.toProperties());
+    }
+
+    private static boolean hasSqliteSidecar(Path database, String suffix) {
+        return !Files.notExists(database.resolveSibling(database.getFileName() + suffix), LinkOption.NOFOLLOW_LINKS);
     }
 
     private static void checkpoint(Connection connection) throws SQLException, CheckpointUnavailableException {
@@ -761,7 +848,7 @@ public final class SqlStorage implements
     public static final class CheckpointUnavailableException extends IOException {
 
         private CheckpointUnavailableException(SQLException cause) {
-            super("SQLite WAL checkpoint did not finish", cause);
+            super("SQLite could not recover its rollback journal or checkpoint its WAL", cause);
         }
     }
 
@@ -975,7 +1062,7 @@ public final class SqlStorage implements
      * which run once per physical connection rather than once per borrow.
      */
     private void configureConnection(Connection connection) throws SQLException {
-        if (configuration.backend() != StorageBackend.SQLITE) {
+        if (configuration.backend() != StorageBackend.SQLITE || connection.isReadOnly()) {
             return;
         }
         try (Statement statement = connection.createStatement()) {
@@ -998,19 +1085,25 @@ public final class SqlStorage implements
         }
     }
 
-    private void initializeSchema(Connection connection) throws SQLException {
-        if (configuration.backend() == StorageBackend.POSTGRESQL) {
-            ensurePostgresqlSchema(connection);
-        }
-        for (String ddl : schema()) {
-            try (Statement statement = connection.createStatement()) {
-                statement.execute(ddl);
+    private void validateExistingSchema(Connection connection) throws SQLException {
+        try (ResultSet tables = connection.getMetaData().getTables(
+                connection.getCatalog(),
+                configuration.backend() == StorageBackend.POSTGRESQL ? configuration.postgresqlSchema() : null,
+                "st_meta", null
+        )) {
+            boolean exists = false;
+            while (tables.next()) {
+                if ("st_meta".equalsIgnoreCase(tables.getString("TABLE_NAME"))) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                return;
             }
         }
-        ensureIndex(connection, "st_lock_blocks", "st_lock_blocks_lock_id_idx", "lock_id");
         Optional<String> stored = meta(connection, META_SCHEMA_VERSION);
         if (stored.isEmpty()) {
-            setMeta(connection, META_SCHEMA_VERSION, Integer.toString(SCHEMA_VERSION));
             return;
         }
         int version = Integer.parseInt(stored.get());
@@ -1025,6 +1118,21 @@ public final class SqlStorage implements
                     "No migration path from database schema " + version + " to "
                             + SCHEMA_VERSION
             );
+        }
+    }
+
+    private void initializeSchema(Connection connection) throws SQLException {
+        if (configuration.backend() == StorageBackend.POSTGRESQL) {
+            ensurePostgresqlSchema(connection);
+        }
+        for (String ddl : schema()) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(ddl);
+            }
+        }
+        ensureIndex(connection, "st_lock_blocks", "st_lock_blocks_lock_id_idx", "lock_id");
+        if (meta(connection, META_SCHEMA_VERSION).isEmpty()) {
+            setMeta(connection, META_SCHEMA_VERSION, Integer.toString(SCHEMA_VERSION));
         }
     }
 
@@ -1246,7 +1354,7 @@ public final class SqlStorage implements
         );
     }
 
-    private void replaceProfile(Connection connection, ProfileSnapshot snapshot) throws SQLException {
+    private void replaceProfile(Connection connection, ProfileSnapshot snapshot, long mailCutoff) throws SQLException {
         String playerId = snapshot.uniqueId().toString();
         PlayerPreferences preferences = snapshot.preferences();
         int updated;
@@ -1319,7 +1427,7 @@ public final class SqlStorage implements
         }
         insertHomes(connection, snapshot);
         insertHints(connection, snapshot);
-        insertNotifications(connection, snapshot);
+        insertNotifications(connection, snapshot, mailCutoff);
         insertMailBlocks(connection, snapshot);
         insertProfileTrusted(connection, snapshot);
     }
@@ -1410,7 +1518,7 @@ public final class SqlStorage implements
         }
     }
 
-    private void insertNotifications(Connection connection, ProfileSnapshot snapshot)
+    private void insertNotifications(Connection connection, ProfileSnapshot snapshot, long mailCutoff)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 """
@@ -1422,6 +1530,9 @@ public final class SqlStorage implements
         )) {
             int position = 0;
             for (PlayerNotification notification : snapshot.notifications()) {
+                if (notification.type() == NotificationType.MAIL && notification.createdAt().toEpochMilli() < mailCutoff) {
+                    continue;
+                }
                 int index = 1;
                 statement.setString(index++, snapshot.uniqueId().toString());
                 statement.setString(index++, notification.id().toString());
@@ -1484,29 +1595,7 @@ public final class SqlStorage implements
             while (results.next()) {
                 UUID playerId = UUID.fromString(results.getString("player_id"));
                 Profile profile = new Profile(playerId);
-                profile.preferences(new PlayerPreferences(
-                        bool(results, "sounds"),
-                        bool(results, "particles"),
-                        bool(results, "dialogs"),
-                        bool(results, "action_bar"),
-                        bool(results, "reduced_effects"),
-                        bool(results, "player_list"),
-                        bool(results, "mention_notifications"),
-                        bool(results, "journey_guidance"),
-                        bool(results, "public_profile"),
-                        bool(results, "mail_enabled"),
-                        enumValue(
-                                LanguagePreference.class,
-                                results.getString("language"),
-                                LanguagePreference.AUTO
-                        )
-                ));
-                profile.lastKnownName(results.getString("last_known_name"));
-                long lastSeen = results.getLong("last_seen_at");
-                if (!results.wasNull()) {
-                    profile.lastSeenAt(Instant.ofEpochMilli(lastSeen));
-                }
-                profile.playTimeTicks(results.getLong("play_time_ticks"));
+                readProfileRow(results, profile);
                 profiles.put(playerId, profile);
             }
         }
@@ -1526,32 +1615,8 @@ public final class SqlStorage implements
                 if (profile == null) {
                     continue;
                 }
-                String worldId = results.getString("world_id");
-                Material icon = Material.matchMaterial(results.getString("icon"));
-                profile.addHome(new Home(
-                        results.getString("display_name"),
-                        worldId == null ? null : UUID.fromString(worldId),
-                        results.getString("world_name"),
-                        results.getDouble("x"),
-                        results.getDouble("y"),
-                        results.getDouble("z"),
-                        results.getFloat("yaw"),
-                        results.getFloat("pitch"),
-                        icon == null ? Material.ENDER_PEARL : icon,
-                        results.getString("description"),
-                        bool(results, "favorite"),
-                        results.getInt("sort_order"),
-                        enumValue(HomeCategory.class, results.getString("category"), HomeCategory.OTHER),
-                        enumValue(
-                                HomeArrivalStyle.class,
-                                results.getString("arrival_style"),
-                                HomeArrivalStyle.DEFAULT
-                        ),
-                        shares.getOrDefault(
-                                new HomeShareKey(playerId, results.getString("home_key")),
-                                Set.of()
-                        )
-                ));
+                HomeShareKey key = new HomeShareKey(playerId, results.getString("home_key"));
+                addLoadedHome(profile, readHomeRow(results, shares.getOrDefault(key, Set.of())));
             }
         }
 
@@ -1579,27 +1644,11 @@ public final class SqlStorage implements
                 """
         ); ResultSet results = statement.executeQuery()) {
             while (results.next()) {
-                NotificationType type = enumValue(
-                        NotificationType.class,
-                        results.getString("notification_type"),
-                        null
-                );
-                if (type == null) {
-                    continue;
+                PlayerNotification notification = readNotificationRow(results);
+                if (notification != null) {
+                    UUID playerId = UUID.fromString(results.getString("player_id"));
+                    notifications.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(notification);
                 }
-                String actorId = results.getString("actor_id");
-                UUID playerId = UUID.fromString(results.getString("player_id"));
-                notifications.computeIfAbsent(playerId, ignored -> new ArrayList<>()).add(
-                        new PlayerNotification(
-                                UUID.fromString(results.getString("notification_id")),
-                                type,
-                                Instant.ofEpochMilli(results.getLong("created_at")),
-                                actorId == null ? null : UUID.fromString(actorId),
-                                results.getString("actor_name"),
-                                results.getString("detail"),
-                                bool(results, "is_read")
-                        )
-                );
             }
         }
 
@@ -1618,6 +1667,20 @@ public final class SqlStorage implements
             }
         }
 
+        Map<UUID, Set<UUID>> trusted = loadAllGlobalTrusts(connection);
+
+        for (Map.Entry<UUID, Profile> entry : profiles.entrySet()) {
+            UUID playerId = entry.getKey();
+            Profile profile = entry.getValue();
+            profile.seenHints(hints.getOrDefault(playerId, Set.of()));
+            profile.notifications(notifications.getOrDefault(playerId, List.of()));
+            profile.blockedMailSenders(blocked.getOrDefault(playerId, Set.of()));
+            profile.trustedPlayers(trusted.getOrDefault(playerId, Set.of()));
+        }
+        return profiles.values().stream().map(Profile::snapshot).toList();
+    }
+
+    private Map<UUID, Set<UUID>> loadAllGlobalTrusts(Connection connection) throws SQLException {
         Map<UUID, Set<UUID>> trusted = new LinkedHashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(
                 """
@@ -1633,15 +1696,7 @@ public final class SqlStorage implements
             }
         }
 
-        for (Map.Entry<UUID, Profile> entry : profiles.entrySet()) {
-            UUID playerId = entry.getKey();
-            Profile profile = entry.getValue();
-            profile.seenHints(hints.getOrDefault(playerId, Set.of()));
-            profile.notifications(notifications.getOrDefault(playerId, List.of()));
-            profile.blockedMailSenders(blocked.getOrDefault(playerId, Set.of()));
-            profile.trustedPlayers(trusted.getOrDefault(playerId, Set.of()));
-        }
-        return profiles.values().stream().map(Profile::snapshot).toList();
+        return trusted;
     }
 
     private Map<HomeShareKey, Set<UUID>> loadAllHomeShares(Connection connection)
@@ -1679,35 +1734,39 @@ public final class SqlStorage implements
             statement.setString(1, profile.uniqueId().toString());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
-                    String worldId = results.getString("world_id");
-                    Material icon = Material.matchMaterial(results.getString("icon"));
-                    profile.addHome(new Home(
-                            results.getString("display_name"),
-                            worldId == null ? null : UUID.fromString(worldId),
-                            results.getString("world_name"),
-                            results.getDouble("x"),
-                            results.getDouble("y"),
-                            results.getDouble("z"),
-                            results.getFloat("yaw"),
-                            results.getFloat("pitch"),
-                            icon == null ? Material.ENDER_PEARL : icon,
-                            results.getString("description"),
-                            bool(results, "favorite"),
-                            results.getInt("sort_order"),
-                            enumValue(
-                                    HomeCategory.class,
-                                    results.getString("category"),
-                                    HomeCategory.OTHER
-                            ),
-                            enumValue(
-                                    HomeArrivalStyle.class,
-                                    results.getString("arrival_style"),
-                                    HomeArrivalStyle.DEFAULT
-                            ),
-                            shares.getOrDefault(results.getString("home_key"), Set.of())
-                    ));
+                    String key = results.getString("home_key");
+                    addLoadedHome(profile, readHomeRow(results, shares.getOrDefault(key, Set.of())));
                 }
             }
+        }
+    }
+
+    private Home readHomeRow(ResultSet row, Set<UUID> sharedWith) throws SQLException {
+        String worldId = row.getString("world_id");
+        Material icon = Material.matchMaterial(row.getString("icon"));
+        return new Home(
+                row.getString("display_name"),
+                worldId == null ? null : UUID.fromString(worldId),
+                row.getString("world_name"),
+                row.getDouble("x"),
+                row.getDouble("y"),
+                row.getDouble("z"),
+                row.getFloat("yaw"),
+                row.getFloat("pitch"),
+                icon == null ? Material.ENDER_PEARL : icon,
+                row.getString("description"),
+                bool(row, "favorite"),
+                row.getInt("sort_order"),
+                enumValue(HomeCategory.class, row.getString("category"), HomeCategory.OTHER),
+                enumValue(HomeArrivalStyle.class, row.getString("arrival_style"), HomeArrivalStyle.DEFAULT),
+                sharedWith
+        );
+    }
+
+    private static void addLoadedHome(Profile profile, Home home) throws SQLException {
+        if (!profile.addHome(home)) {
+            throw new SQLException("Conflicting home rows for player " + profile.uniqueId()
+                    + ": duplicate home name '" + home.name() + "'");
         }
     }
 
@@ -1766,28 +1825,31 @@ public final class SqlStorage implements
             statement.setString(1, profile.uniqueId().toString());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
-                    String actorId = results.getString("actor_id");
-                    NotificationType type = enumValue(
-                            NotificationType.class,
-                            results.getString("notification_type"),
-                            null
-                    );
-                    if (type == null) {
-                        continue;
+                    PlayerNotification notification = readNotificationRow(results);
+                    if (notification != null) {
+                        notifications.add(notification);
                     }
-                    notifications.add(new PlayerNotification(
-                            UUID.fromString(results.getString("notification_id")),
-                            type,
-                            Instant.ofEpochMilli(results.getLong("created_at")),
-                            actorId == null ? null : UUID.fromString(actorId),
-                            results.getString("actor_name"),
-                            results.getString("detail"),
-                            bool(results, "is_read")
-                    ));
                 }
             }
         }
         profile.notifications(notifications);
+    }
+
+    private PlayerNotification readNotificationRow(ResultSet row) throws SQLException {
+        NotificationType type = enumValue(NotificationType.class, row.getString("notification_type"), null);
+        if (type == null) {
+            return null;
+        }
+        String actorId = row.getString("actor_id");
+        return new PlayerNotification(
+                UUID.fromString(row.getString("notification_id")),
+                type,
+                Instant.ofEpochMilli(row.getLong("created_at")),
+                actorId == null ? null : UUID.fromString(actorId),
+                row.getString("actor_name"),
+                row.getString("detail"),
+                bool(row, "is_read")
+        );
     }
 
     private void loadMailBlocks(Connection connection, Profile profile) throws SQLException {
@@ -2031,14 +2093,10 @@ public final class SqlStorage implements
                     case "retired" -> retired.add(location);
                     case "assignment" -> {
                         UUID playerId = UUID.fromString(results.getString("player_id"));
-                        assignments.put(
-                                playerId,
-                                new NewPlayerSpawnAssignment(
-                                        playerId,
-                                        location,
-                                        bool(results, "completed")
-                                )
-                        );
+                        var assignment = new NewPlayerSpawnAssignment(playerId, location, bool(results, "completed"));
+                        if (assignments.putIfAbsent(playerId, assignment) != null) {
+                            throw new SQLException("Conflicting spawn assignments for player " + playerId);
+                        }
                     }
                     default -> logger.warning(
                             "Skipped unknown SQL spawn location kind "

@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.config.StrictYaml;
 import gg.nurmi.survivaltweaks.object.LanguagePreference;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
@@ -19,9 +20,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -97,15 +102,15 @@ public final class MessageService {
     public MessageService(JavaPlugin plugin, FileConfiguration config, Logger logger) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.logger = Objects.requireNonNull(logger, "logger");
-        YamlConfiguration english = loadCatalog(plugin, "messages_en.yml");
-        YamlConfiguration finnish = loadCatalog(plugin, "messages_fi.yml");
-        this.migratedLegacyMessages = migrateLegacyFinnishMessages(
+        StartupCatalog english = loadCatalog("messages_en.yml");
+        StartupCatalog finnish = loadCatalog("messages_fi.yml");
+        this.migratedLegacyMessages = finnish.writable() && migrateLegacyFinnishMessages(
                 config,
-                finnish,
+                finnish.configuration(),
                 new File(plugin.getDataFolder(), "messages_fi.yml")
         );
-        this.englishTemplates = loadTemplates(english);
-        this.finnishTemplates = loadTemplates(finnish);
+        this.englishTemplates = loadTemplates(english.configuration());
+        this.finnishTemplates = loadTemplates(finnish.configuration());
         this.finnishByDefault = finnishByDefault(config);
     }
 
@@ -290,20 +295,21 @@ public final class MessageService {
         return readsFinnish(audience) ? finnish : english;
     }
 
-    private YamlConfiguration loadCatalog(JavaPlugin plugin, String resourceName) {
+    private StartupCatalog loadCatalog(String resourceName) {
         File file = new File(plugin.getDataFolder(), resourceName);
-        if (!file.isFile()) {
+        YamlConfiguration defaults = readBundledCatalog(plugin.getResource(resourceName), resourceName);
+        if (Files.notExists(file.toPath())) {
             plugin.saveResource(resourceName, false);
+            return new StartupCatalog(defaults, true);
         }
 
-        YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
-                Objects.requireNonNull(
-                        plugin.getResource(resourceName),
-                        "Missing bundled resource " + resourceName
-                ),
-                StandardCharsets.UTF_8
-        ));
-        YamlConfiguration catalog = YamlConfiguration.loadConfiguration(file);
+        YamlConfiguration catalog;
+        try {
+            catalog = readCatalog(file.toPath(), defaults);
+        } catch (IOException | InvalidConfigurationException | IllegalArgumentException exception) {
+            logger.warning("Using bundled messages for " + resourceName + ": " + exception.getMessage());
+            return new StartupCatalog(defaults, false);
+        }
         boolean missingDefaults = defaults.getKeys(true).stream()
                 .anyMatch(path -> !catalog.contains(path, true));
         catalog.setDefaults(defaults);
@@ -311,27 +317,87 @@ public final class MessageService {
         if (missingDefaults) {
             saveCatalog(catalog, file);
         }
-        return catalog;
+        return new StartupCatalog(catalog, true);
     }
 
     private Map<String, String> loadReloadCatalog(
             String resourceName
     ) throws IOException, InvalidConfigurationException {
-        YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
-                Objects.requireNonNull(plugin.getResource(resourceName), "Missing bundled resource " + resourceName),
-                StandardCharsets.UTF_8
-        ));
-        YamlConfiguration catalog = new YamlConfiguration();
-        catalog.load(new File(plugin.getDataFolder(), resourceName));
+        YamlConfiguration defaults = readBundledCatalog(plugin.getResource(resourceName), resourceName);
+        YamlConfiguration catalog = readCatalog(plugin.getDataFolder().toPath().resolve(resourceName), defaults);
         catalog.setDefaults(defaults);
         catalog.options().copyDefaults(true);
         return loadTemplates(catalog);
     }
 
-    private void validateTemplates(Map<String, String> templates, String resourceName) {
+    private static YamlConfiguration readCatalog(Path file, YamlConfiguration defaults)
+            throws IOException, InvalidConfigurationException {
+        YamlConfiguration catalog = StrictYaml.load(file);
+        validateCatalogTypes(catalog, defaults);
+        return catalog;
+    }
+
+    private record StartupCatalog(YamlConfiguration configuration, boolean writable) {
+    }
+
+    static void validateCatalog(YamlConfiguration catalog, String resourceName) {
+        YamlConfiguration defaults = readBundledCatalog(
+                MessageService.class.getResourceAsStream("/" + resourceName), resourceName);
+        validateCatalog(catalog, defaults, resourceName);
+    }
+
+    private static void validateCatalog(YamlConfiguration catalog, YamlConfiguration defaults, String resourceName) {
+        validateCatalogTypes(catalog, defaults);
+        validateTemplates(loadTemplates(catalog), resourceName);
+    }
+
+    static void validateArchivedCatalogs(Path directory, Configuration config) throws IOException {
+        for (String name : List.of("messages_en.yml", "messages_fi.yml")) {
+            Path file = directory.resolve(name);
+            ConfigurationSection legacy = name.equals("messages_fi.yml") ? config.getConfigurationSection("messages") : null;
+            boolean present = !Files.notExists(file);
+            if (!present && legacy == null) {
+                continue;
+            }
+            try {
+                YamlConfiguration catalog = present ? StrictYaml.load(file) : new YamlConfiguration();
+                YamlConfiguration defaults = readBundledCatalog(MessageService.class.getResourceAsStream("/" + name), name);
+                if (legacy != null) {
+                    validateCatalogTypes(catalog, defaults);
+                    copyLegacyMessages(legacy, catalog);
+                }
+                validateCatalog(catalog, defaults, name);
+            } catch (InvalidConfigurationException | IllegalArgumentException exception) {
+                throw new IOException("Invalid archived language catalog " + name + ": "
+                        + exception.getMessage(), exception);
+            }
+        }
+    }
+
+    private static YamlConfiguration readBundledCatalog(InputStream resource, String name) {
+        return YamlConfiguration.loadConfiguration(new InputStreamReader(
+                Objects.requireNonNull(resource, "Missing bundled resource " + name), StandardCharsets.UTF_8));
+    }
+
+    private static void validateCatalogTypes(YamlConfiguration catalog, YamlConfiguration defaults) {
+        for (String path : defaults.getKeys(true)) {
+            Object value = catalog.get(path, null);
+            if (value == null) {
+                continue;
+            }
+            if (defaults.isString(path) && !(value instanceof String)) {
+                throw new IllegalArgumentException(path + " must be text");
+            }
+            if (defaults.isConfigurationSection(path) && !(value instanceof ConfigurationSection)) {
+                throw new IllegalArgumentException(path + " must be a section");
+            }
+        }
+    }
+
+    private static void validateTemplates(Map<String, String> templates, String resourceName) {
         for (Map.Entry<String, String> entry : templates.entrySet()) {
             try {
-                miniMessage.deserialize(entry.getValue());
+                MiniMessage.miniMessage().deserialize(entry.getValue());
             } catch (RuntimeException exception) {
                 throw new IllegalArgumentException(
                         resourceName + " contains invalid MiniMessage at " + entry.getKey(),
@@ -351,11 +417,7 @@ public final class MessageService {
             return false;
         }
 
-        for (String key : legacy.getKeys(true)) {
-            if (legacy.isString(key)) {
-                finnish.set(key, legacy.getString(key));
-            }
-        }
+        copyLegacyMessages(legacy, finnish);
         if (!saveCatalog(finnish, file)) {
             logger.warning("Kept legacy messages in config.yml because messages_fi.yml could not be saved.");
             return false;
@@ -363,6 +425,14 @@ public final class MessageService {
         config.set("messages", null);
         logger.info("Migrated legacy Finnish messages from config.yml to messages_fi.yml.");
         return true;
+    }
+
+    private static void copyLegacyMessages(ConfigurationSection legacy, YamlConfiguration catalog) {
+        for (String key : legacy.getKeys(true)) {
+            if (legacy.isString(key)) {
+                catalog.set(key, legacy.getString(key));
+            }
+        }
     }
 
     private boolean saveCatalog(YamlConfiguration catalog, File file) {
@@ -375,7 +445,7 @@ public final class MessageService {
         }
     }
 
-    private Map<String, String> loadTemplates(ConfigurationSection section) {
+    private static Map<String, String> loadTemplates(ConfigurationSection section) {
         if (section == null) {
             return Map.of();
         }

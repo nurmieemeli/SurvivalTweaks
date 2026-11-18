@@ -15,11 +15,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.regex.Pattern;
-
 public final class SetHomeCommand implements CommandExecutor {
-
-    private static final Pattern VALID_NAME = Pattern.compile("[\\p{L}\\p{N}_-]{1,32}");
 
     private final ProfileRepository profiles;
     private final MessageService messages;
@@ -74,7 +70,7 @@ public final class SetHomeCommand implements CommandExecutor {
             return true;
         }
 
-        if (!VALID_NAME.matcher(name).matches()) {
+        if (!Home.isValidName(name)) {
             messages.send(player, "set-home.invalid-name");
             return true;
         }

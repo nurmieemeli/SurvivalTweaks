@@ -213,8 +213,9 @@ the hub, and the change applies immediately.
 
 Both `messages_fi.yml` and `messages_en.yml` are editable MiniMessage catalogs.
 New message keys merge into existing files without overwriting server
-customizations. Numbers, durations, distances, and item names are rendered for
-the receiving player's locale.
+customizations. At startup, an invalid catalog is kept on disk and the plugin
+uses the bundled messages for that language. Numbers, durations, distances, and
+item names are rendered for the receiving player's locale.
 
 Shared text that has no single viewer—such as server-list content, TAB row
 markers, restart login messages, and searchable operator diagnostics—uses the

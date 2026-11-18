@@ -22,7 +22,8 @@ public final class PlayerExperienceService {
     }
 
     public PlayerPreferences preferences(UUID playerId) {
-        return activeProfiles.computeIfAbsent(playerId, profiles::load).preferences();
+        Profile active = activeProfiles.get(playerId);
+        return (active == null ? profiles.load(playerId) : active).preferences();
     }
 
     public PlayerPreferences preferences(Player player) {
@@ -37,7 +38,6 @@ public final class PlayerExperienceService {
                     "updated preferences"
             );
             profile.preferences(updated);
-            activeProfiles.put(player.getUniqueId(), profile);
             profiles.save(profile);
             return updated;
         }
@@ -51,7 +51,6 @@ public final class PlayerExperienceService {
         synchronized (profile) {
             var saved = profile.stageLanguage(profile.preferences().language().next());
             if (saved.isPresent()) {
-                activeProfiles.put(playerId, profile);
                 profiles.save(profile);
             }
             return saved;

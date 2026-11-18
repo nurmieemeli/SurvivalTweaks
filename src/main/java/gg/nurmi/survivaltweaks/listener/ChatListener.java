@@ -31,7 +31,7 @@ public final class ChatListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onChatComplete(AsyncChatEvent event) {
         if (!event.isCancelled()) {
-            mentions.process(event.getPlayer(), event.message());
+            mentions.process(event.getPlayer(), event.message(), event.viewers());
         }
     }
 
@@ -50,17 +50,10 @@ public final class ChatListener implements Listener {
                             Placeholder.component("message", message)
                     )
             ));
-        } else {
-            event.renderer((sender, senderName, message, audience) -> {
-                Component rendered = Component.translatable(
-                        "chat.type.text",
-                        interactiveName(sender.getName(), senderName, audience),
-                        message
-                );
-                return settings.current().mentionsEnabled()
-                        ? mentions.highlight(audience, rendered)
-                        : rendered;
-            });
+        } else if (settings.current().mentionsEnabled()) {
+            var activeRenderer = event.renderer();
+            event.renderer((sender, senderName, message, audience) -> mentions.highlight(
+                    audience, activeRenderer.render(sender, senderName, message, audience)));
         }
     }
 

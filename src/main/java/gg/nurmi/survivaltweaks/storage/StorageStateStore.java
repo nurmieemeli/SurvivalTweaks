@@ -1,11 +1,14 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.config.StrictYaml;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Objects;
@@ -56,6 +59,10 @@ final class StorageStateStore {
         save(stateFile, yaml);
     }
 
+    boolean hasPendingMigration() {
+        return !Files.notExists(migrationFile, LinkOption.NOFOLLOW_LINKS);
+    }
+
     Optional<Migration> loadMigration() throws IOException {
         if (Files.notExists(migrationFile)) {
             return Optional.empty();
@@ -74,7 +81,7 @@ final class StorageStateStore {
     }
 
     void stage(Migration migration) throws IOException {
-        if (Files.exists(migrationFile)) {
+        if (hasPendingMigration()) {
             throw new IOException("A storage migration is already staged");
         }
         YamlConfiguration yaml = new YamlConfiguration();
@@ -90,12 +97,10 @@ final class StorageStateStore {
     }
 
     private YamlConfiguration load(Path file) throws IOException {
-        YamlConfiguration yaml = new YamlConfiguration();
         try {
-            yaml.loadFromString(Files.readString(file, StandardCharsets.UTF_8));
-            return yaml;
-        } catch (Exception exception) {
-            throw new IOException("Could not parse " + file.getFileName(), exception);
+            return StrictYaml.load(file);
+        } catch (InvalidConfigurationException exception) {
+            throw new IOException("Could not parse " + file.getFileName() + ": " + exception.getMessage(), exception);
         }
     }
 

@@ -9,15 +9,15 @@ making cross-feature behavior explicit.
 1. Async pre-login loads the profile or rejects login with a stable message.
 2. `PlayerSessionService` starts the online session and records identity.
 3. `NewPlayerSpawnService` claims a unique prepared Overworld destination. If
-   none is ready, its bounded fallback still applies the configured safety
-   checks.
+   none is ready, the player waits at Paper's normal spawn and remains eligible
+   for a prepared location if they reconnect.
 4. The experience service primes per-player locale and preference state.
 5. Onboarding and journey guidance begin after the player is placed safely.
 6. Operator health and update notices are shown only to authorized players.
 
-The player must never briefly appear at a random unsafe coordinate, receive a
-returning-player summary, or claim the same prepared location as another new
-player.
+The assigned destination must pass the configured safety checks. First-time
+players must not receive a returning-player summary or claim the same prepared
+location as another new player.
 
 ## Returning join
 

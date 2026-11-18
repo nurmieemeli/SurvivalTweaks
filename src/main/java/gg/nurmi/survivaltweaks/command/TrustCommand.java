@@ -2,6 +2,7 @@ package gg.nurmi.survivaltweaks.command;
 
 import gg.nurmi.survivaltweaks.object.Profile;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.service.ProfileRepository;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.OfflinePlayer;
@@ -24,18 +25,6 @@ public final class TrustCommand implements CommandExecutor {
         this.messages = messages;
     }
 
-    private OfflinePlayer findTarget(String name) {
-        if (name == null || name.isBlank()) {
-            return null;
-        }
-        Player online = server.getPlayerExact(name);
-        if (online != null) {
-            return online;
-        }
-        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
-        return cached != null && cached.hasPlayedBefore() ? cached : null;
-    }
-
     @Override
     public boolean onCommand(
             @NotNull CommandSender sender,
@@ -47,31 +36,34 @@ public final class TrustCommand implements CommandExecutor {
             messages.send(sender, "player-only");
             return true;
         }
+        boolean removing = command.getName().equalsIgnoreCase("untrust");
         if (arguments.length != 1) {
-            messages.send(player, "trust.usage");
+            messages.send(player, removing ? "untrust.usage" : "trust.usage");
             return true;
         }
-        OfflinePlayer target = findTarget(arguments[0]);
+        OfflinePlayer target = removing
+                ? PlayerNameLookup.find(server, profiles, arguments[0])
+                : PlayerNameLookup.findCached(server, arguments[0]);
         if (target == null) {
             messages.send(player, "trust.unknown-player");
             return true;
         }
-        if (target.getUniqueId().equals(player.getUniqueId())) {
-            messages.send(player, "trust.cannot-trust-self");
+        var targetId = target.getUniqueId();
+        if (targetId.equals(player.getUniqueId())) {
+            messages.send(player, removing ? "trust.cannot-untrust-self" : "trust.cannot-trust-self");
             return true;
         }
 
         String name = target.getName() == null ? arguments[0] : target.getName();
         Profile profile = profiles.load(player.getUniqueId());
-        boolean changed = profile.trustPlayer(target.getUniqueId());
+        boolean changed = removing ? profile.untrustPlayer(targetId) : profile.trustPlayer(targetId);
         if (changed) {
             profiles.save(profile);
         }
-        messages.send(
-                player,
-                changed ? "trust.trusted" : "trust.already-trusted",
-                Placeholder.unparsed("player", name)
-        );
+        String reply = removing
+                ? (changed ? "untrust.untrusted" : "untrust.not-trusted")
+                : (changed ? "trust.trusted" : "trust.already-trusted");
+        messages.send(player, reply, Placeholder.unparsed("player", name));
         return true;
     }
 }

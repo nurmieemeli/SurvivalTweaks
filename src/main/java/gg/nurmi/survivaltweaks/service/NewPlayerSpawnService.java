@@ -10,6 +10,7 @@ import net.kyori.adventure.title.Title;
 import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -18,6 +19,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -42,8 +44,10 @@ import java.util.logging.Logger;
 public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     private static final long RETRY_DELAY_TICKS = 40L;
+    private static final long RESERVATION_RECHECK_TICKS = 10L;
     private static final long GENERATION_RETRY_DELAY_TICKS = 200L;
     private static final int MAX_TELEPORT_ATTEMPTS = 3;
+    private static final NamespacedKey PLACEMENT_KEY = new NamespacedKey("survivaltweaks", "first_join_placement");
     private static final Set<Material> DANGEROUS_GROUND = Set.of(
             Material.LAVA,
             Material.FIRE,
@@ -61,7 +65,6 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     );
 
     private final JavaPlugin plugin;
-    private final NewPlayerSpawnDataStore store;
     private final MessageService messages;
     private final FeedbackService feedback;
     private final SettingsService settings;
@@ -70,12 +73,13 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     private final CoalescingSnapshotWriter<NewPlayerSpawnState> writer;
     private final List<NewPlayerSpawnLocation> available = new ArrayList<>();
     private final Map<UUID, NewPlayerSpawnAssignment> assignments = new LinkedHashMap<>();
+    private volatile Map<UUID, NewPlayerSpawnAssignment> committedAssignments;
     private final List<NewPlayerSpawnLocation> retired = new ArrayList<>();
     private final Set<UUID> awaitingReplacement = new HashSet<>();
     private final Map<Rejection, Long> rejections = new EnumMap<>(Rejection.class);
     private final Set<LocationKey> loaded = new HashSet<>();
     private final Set<UUID> waitingPlayers = new HashSet<>();
-    private final Set<UUID> teleportingPlayers = new HashSet<>();
+    private final Map<UUID, Object> teleportingPlayers = new HashMap<>();
     private final Map<UUID, Integer> teleportAttempts = new HashMap<>();
     private boolean generationInProgress;
     private int failedSurfaceAttempts;
@@ -125,7 +129,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             PersistenceMonitor monitor
     ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
-        this.store = Objects.requireNonNull(store, "store");
+        Objects.requireNonNull(store, "store");
         this.messages = Objects.requireNonNull(messages, "messages");
         this.feedback = Objects.requireNonNull(feedback, "feedback");
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -134,7 +138,10 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         this.writer = new CoalescingSnapshotWriter<>(
                 "SurvivalTweaks-new-player-spawn-writer",
                 "new-player spawn state",
-                store::saveSpawnState,
+                snapshot -> {
+                    store.saveSpawnState(snapshot);
+                    committedAssignments = snapshot.assignments();
+                },
                 plugin.getLogger() == null
                         ? Logger.getLogger(NewPlayerSpawnService.class.getName())
                         : plugin.getLogger(),
@@ -142,6 +149,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 "new-player-spawns"
         );
         NewPlayerSpawnState state = store.loadSpawnState();
+        committedAssignments = state.assignments();
         available.addAll(state.available());
         assignments.putAll(state.assignments());
         retired.addAll(state.retired());
@@ -179,6 +187,10 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             }
             waitingPlayers.add(playerId);
             if (!allocate(player)) {
+                // Paper will report this player as returning after the first disconnect.
+                if (awaitingReplacement.add(playerId)) {
+                    saveState();
+                }
                 messages.send(player, "new-player-spawn.preparing");
                 refill();
             }
@@ -202,7 +214,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         }
         Player player = event.getPlayer();
         NewPlayerSpawnAssignment assignment = assignments.get(player.getUniqueId());
-        if (assignment == null) {
+        if (assignment == null || !reservationCommitted(assignment)) {
             return;
         }
         resolveWorld(assignment.location()).ifPresent(world -> {
@@ -259,11 +271,20 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         cancelScheduledRefill();
         releaseTickets();
         loaded.clear();
+        if (!settings.current().newPlayerSpawnEnabled()) {
+            teleportingPlayers.clear();
+            teleportAttempts.clear();
+            return;
+        }
         refresh();
-    }
-
-    public int availableLocations() {
-        return available.size();
+        for (NewPlayerSpawnAssignment assignment : List.copyOf(assignments.values())) {
+            if (!assignment.completed()) {
+                Player player = plugin.getServer().getPlayer(assignment.playerId());
+                if (player != null) {
+                    teleportReserved(player, assignment);
+                }
+            }
+        }
     }
 
     public int completedAssignments() {
@@ -459,6 +480,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 .filter(location -> !isCurrentPreparedLocation(location, world, current))
                 .toList();
         if (!stale.isEmpty()) {
+            stale.forEach(this::releaseTicket);
             available.removeAll(stale);
             saveState();
         }
@@ -543,7 +565,34 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
 
     private void teleportReserved(Player player, NewPlayerSpawnAssignment assignment) {
         UUID playerId = player.getUniqueId();
-        if (!player.isOnline() || !teleportingPlayers.add(playerId)) {
+        Object attempt = new Object();
+        if (closed || !settings.current().newPlayerSpawnEnabled() || !player.isOnline()
+                || !assignment.equals(assignments.get(playerId))
+                || teleportingPlayers.putIfAbsent(playerId, attempt) != null) {
+            return;
+        }
+        awaitReservation(player, assignment, attempt);
+    }
+
+    private boolean reservationCommitted(NewPlayerSpawnAssignment assignment) {
+        NewPlayerSpawnAssignment committed = committedAssignments.get(assignment.playerId());
+        return committed != null && committed.location().equals(assignment.location());
+    }
+
+    private void awaitReservation(Player player, NewPlayerSpawnAssignment assignment, Object attempt) {
+        if (!isCurrentTeleport(player, assignment, attempt)) {
+            return;
+        }
+        if (!reservationCommitted(assignment)) {
+            plugin.getServer().getScheduler().runTaskLater(plugin,
+                    () -> awaitReservation(player, assignment, attempt), RESERVATION_RECHECK_TICKS);
+            return;
+        }
+        UUID playerId = assignment.playerId();
+        NewPlayerSpawnLocation destination = assignment.location();
+        String placement = destination.worldId() + "/" + destination.x() + "/" + destination.y() + "/" + destination.z();
+        if (placement.equals(player.getPersistentDataContainer().get(PLACEMENT_KEY, PersistentDataType.STRING))) {
+            restoreAssignedRespawnIfMissing(player, completeReservation(assignment));
             return;
         }
         World world = resolveWorld(assignment.location()).orElse(null);
@@ -556,19 +605,17 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
             replaceReservation(player, assignment);
             return;
         }
-        NewPlayerSpawnLocation destination = assignment.location();
         loadLandingChunks(
                 world,
                 destination.x(),
                 destination.z(),
                 settings.current().newPlayerSpawnLandingRadius()
         ).whenComplete((ignored, loadError) -> runOnMainThread(() -> {
-                    if (closed || !player.isOnline()) {
-                        teleportingPlayers.remove(playerId);
+                    if (!isCurrentTeleport(player, assignment, attempt)) {
                         return;
                     }
                     if (loadError != null) {
-                        failTeleport(player, assignment, loadError);
+                        failTeleport(player, assignment, attempt, loadError);
                         return;
                     }
                     Rejection rejection = validateLanding(world, destination, settings.current());
@@ -582,36 +629,52 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                         replaceReservation(player, assignment);
                         return;
                     }
-                    player.teleportAsync(
-                            destination.toLocation(world),
-                            PlayerTeleportEvent.TeleportCause.PLUGIN
-                    ).whenComplete((successful, teleportError) -> runOnMainThread(() -> {
-                        if (closed) {
-                            return;
-                        }
-                        if (teleportError != null || !Boolean.TRUE.equals(successful)) {
-                            failTeleport(player, assignment, teleportError);
-                            return;
-                        }
-                        teleportingPlayers.remove(playerId);
-                        teleportAttempts.remove(playerId);
-                        NewPlayerSpawnAssignment completed = assignment.complete();
-                        assignments.put(playerId, completed);
-                        saveState();
-                        setAssignedRespawn(player, completed);
-                        messages.send(player, "new-player-spawn.arrived");
-                        player.showTitle(Title.title(
-                                messages.component(player, "new-player-spawn.title"),
-                                messages.component(player, "new-player-spawn.subtitle"),
-                                Title.Times.times(
-                                        Duration.ofMillis(250),
-                                        Duration.ofMillis(2_500),
-                                        Duration.ofMillis(500)
-                                )
-                        ));
-                        feedback.play(player, FeedbackService.NEW_PLAYER_ARRIVAL);
-                    }));
+                    // The landing chunks are ready. Keep validation and movement in the same tick.
+                    boolean successful = false;
+                    RuntimeException teleportError = null;
+                    try {
+                        successful = player.teleport(destination.toLocation(world), PlayerTeleportEvent.TeleportCause.PLUGIN);
+                    } catch (RuntimeException exception) {
+                        teleportError = exception;
+                    }
+                    if (!isCurrentTeleport(player, assignment, attempt)) {
+                        return;
+                    }
+                    if (!successful) {
+                        failTeleport(player, assignment, attempt, teleportError);
+                        return;
+                    }
+                    // Paper saves this marker alongside the player's position.
+                    player.getPersistentDataContainer().set(PLACEMENT_KEY, PersistentDataType.STRING, placement);
+                    setAssignedRespawn(player, completeReservation(assignment));
+                    messages.send(player, "new-player-spawn.arrived");
+                    player.showTitle(Title.title(
+                            messages.component(player, "new-player-spawn.title"),
+                            messages.component(player, "new-player-spawn.subtitle"),
+                            Title.Times.times(
+                                    Duration.ofMillis(250),
+                                    Duration.ofMillis(2_500),
+                                    Duration.ofMillis(500)
+                            )
+                    ));
+                    feedback.play(player, FeedbackService.NEW_PLAYER_ARRIVAL);
                 }));
+    }
+
+    private NewPlayerSpawnAssignment completeReservation(NewPlayerSpawnAssignment assignment) {
+        UUID playerId = assignment.playerId();
+        teleportingPlayers.remove(playerId);
+        teleportAttempts.remove(playerId);
+        NewPlayerSpawnAssignment completed = assignment.complete();
+        assignments.put(playerId, completed);
+        saveState();
+        return completed;
+    }
+
+    private boolean isCurrentTeleport(Player player, NewPlayerSpawnAssignment assignment, Object attempt) {
+        UUID playerId = player.getUniqueId();
+        return !closed && settings.current().newPlayerSpawnEnabled() && player.isOnline()
+                && teleportingPlayers.get(playerId) == attempt && assignment.equals(assignments.get(playerId));
     }
 
     private void replaceReservation(Player player, NewPlayerSpawnAssignment assignment) {
@@ -642,10 +705,10 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
     private void failTeleport(
             Player player,
             NewPlayerSpawnAssignment assignment,
+            Object attempt,
             Throwable error
     ) {
         UUID playerId = player.getUniqueId();
-        teleportingPlayers.remove(playerId);
         int attempts = teleportAttempts.merge(playerId, 1, Integer::sum);
         if (error != null) {
             plugin.getLogger().log(
@@ -658,11 +721,19 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         if (player.isOnline() && attempts < MAX_TELEPORT_ATTEMPTS) {
             plugin.getServer().getScheduler().runTaskLater(
                     plugin,
-                    () -> teleportReserved(player, assignment),
+                    () -> {
+                        if (isCurrentTeleport(player, assignment, attempt)) {
+                            teleportingPlayers.remove(playerId);
+                            teleportReserved(player, assignment);
+                        }
+                    },
                     RETRY_DELAY_TICKS
             );
-        } else if (player.isOnline()) {
-            messages.send(player, "new-player-spawn.failed");
+        } else {
+            teleportingPlayers.remove(playerId);
+            if (player.isOnline()) {
+                messages.send(player, "new-player-spawn.failed");
+            }
         }
     }
 
@@ -862,7 +933,8 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
                 && ground.getType().isSolid()
                 && !DANGEROUS_GROUND.contains(ground.getType())
                 && !DANGEROUS_GROUND.contains(feet.getType())
-                && !DANGEROUS_GROUND.contains(head.getType());
+                && !DANGEROUS_GROUND.contains(head.getType())
+                && SafeTeleportService.hasLandingSupport(ground, borderProbe, SafeTeleportService.DEFAULT_LANDING_SIZE);
     }
 
     private CompletableFuture<Void> loadLandingChunks(
@@ -925,7 +997,7 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         }
         long deltaX = (long) existing.x() - x;
         long deltaZ = (long) existing.z() - z;
-        return deltaX * deltaX + deltaZ * deltaZ < minimumSquared;
+        return (deltaX == 0 && deltaZ == 0) || deltaX * deltaX + deltaZ * deltaZ < minimumSquared;
     }
 
     private void serveWaitingPlayers() {
@@ -1082,11 +1154,13 @@ public final class NewPlayerSpawnService implements Listener, AutoCloseable {
         if (!loaded.remove(LocationKey.of(location))) {
             return;
         }
-        resolveWorld(location).ifPresent(world -> world.removePluginChunkTicket(
-                location.x() >> 4,
-                location.z() >> 4,
-                plugin
-        ));
+        int chunkX = location.x() >> 4;
+        int chunkZ = location.z() >> 4;
+        boolean stillNeeded = loaded.stream().anyMatch(key -> key.worldId().equals(location.worldId())
+                && (key.x() >> 4) == chunkX && (key.z() >> 4) == chunkZ);
+        if (!stillNeeded) {
+            resolveWorld(location).ifPresent(world -> world.removePluginChunkTicket(chunkX, chunkZ, plugin));
+        }
     }
 
     private void releaseTickets() {

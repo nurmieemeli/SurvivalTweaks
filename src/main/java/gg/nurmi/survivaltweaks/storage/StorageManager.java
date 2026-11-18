@@ -12,6 +12,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -26,7 +27,7 @@ public final class StorageManager implements AutoCloseable {
     private final StorageStateStore stateStore;
     private final SqlStorage storage;
     private final StorageStateStore.State state;
-    private final ImportResult startupImport;
+    private final boolean importedLegacyAtStartup;
     private volatile PersistenceBarrier persistenceBarrier = timeout -> {
     };
 
@@ -37,7 +38,7 @@ public final class StorageManager implements AutoCloseable {
             StorageStateStore stateStore,
             SqlStorage storage,
             StorageStateStore.State state,
-            ImportResult startupImport
+            boolean importedLegacyAtStartup
     ) {
         this.dataFolder = dataFolder;
         this.logger = logger;
@@ -45,7 +46,7 @@ public final class StorageManager implements AutoCloseable {
         this.stateStore = stateStore;
         this.storage = storage;
         this.state = state;
-        this.startupImport = startupImport;
+        this.importedLegacyAtStartup = importedLegacyAtStartup;
     }
 
     public static StorageManager open(
@@ -54,6 +55,22 @@ public final class StorageManager implements AutoCloseable {
             Logger logger,
             Function<String, UUID> worldResolver
     ) throws IOException {
+        return open(config, dataFolder, logger, worldResolver, false);
+    }
+
+    /** Opens files installed by a verified, explicitly staged restore. */
+    public static StorageManager openRestored(Configuration config, Path dataFolder, Logger logger,
+                                              Function<String, UUID> worldResolver) throws IOException {
+        return open(config, dataFolder, logger, worldResolver, true);
+    }
+
+    private static StorageManager open(
+            Configuration config,
+            Path dataFolder,
+            Logger logger,
+            Function<String, UUID> worldResolver,
+            boolean restoring
+    ) throws IOException {
         Path normalized = Objects.requireNonNull(dataFolder, "dataFolder")
                 .toAbsolutePath()
                 .normalize();
@@ -61,44 +78,17 @@ public final class StorageManager implements AutoCloseable {
         StorageStateStore states = new StorageStateStore(normalized);
         StorageStateStore.State previous = states.loadState().orElse(null);
         StorageStateStore.Migration migration = states.loadMigration().orElse(null);
-        if (migration != null) {
-            if (previous != null
-                    && previous.backend() == migration.target()
-                    && configured.backend() == migration.target()
-                    && endpointMatches(configured, previous.endpointFingerprint())
-                    && endpointMatches(configured, migration.targetFingerprint())) {
-                return recoverCompletedMigration(
-                        normalized,
-                        logger,
-                        configured,
-                        states,
-                        previous,
-                        migration
-                );
-            }
-            if (previous == null || configured.backend() != migration.source()
-                    || previous.backend() != migration.source()
-                    || !endpointMatches(configured, previous.endpointFingerprint())) {
-                return migrate(normalized, logger, configured, states, previous, migration);
-            }
+        StartupAction action = startupAction(configured, previous, migration,
+                restoring && Files.isRegularFile(configured.sqliteFile()));
+        if (action == StartupAction.RECOVER_COMPLETED_MIGRATION) {
+            return recoverCompletedMigration(normalized, logger, configured, states, previous, migration);
+        }
+        if (action == StartupAction.MIGRATE) {
+            return migrate(normalized, logger, configured, states, previous, migration);
+        }
+        if (action == StartupAction.DISCARD_STAGED_MIGRATION) {
             states.completeMigration();
             logger.warning("Discarded an incomplete storage migration request. The source remains active.");
-        }
-
-        if (previous != null && previous.backend() != configured.backend()) {
-            throw new IOException(
-                    "Storage is pinned to " + previous.backend().key()
-                            + "; stage an explicit storage migration before selecting "
-                            + configured.backend().key()
-            );
-        }
-        boolean changedEndpoint = previous != null && !endpointMatches(configured, previous.endpointFingerprint());
-        if (changedEndpoint && (configured.backend() != StorageBackend.SQLITE
-                || !Files.isRegularFile(configured.sqliteFile()))) {
-            throw new IOException(
-                    "The configured storage endpoint differs from the pinned endpoint; "
-                            + "use the storage migration command instead of changing it directly"
-            );
         }
 
         if (previous != null) {
@@ -113,7 +103,7 @@ public final class StorageManager implements AutoCloseable {
             } else {
                 instanceId = requireInstance(storage.instanceId(), previous.instanceId());
             }
-            ImportResult imported = importLegacyIfNeeded(
+            boolean imported = importLegacyIfNeeded(
                     normalized,
                     logger,
                     worldResolver,
@@ -145,6 +135,49 @@ public final class StorageManager implements AutoCloseable {
         }
     }
 
+    /** Verifies the local database in an extracted archive without opening a live endpoint. */
+    public static StorageConfiguration verifyRestore(Configuration config, Path staged, Path restoreFolder,
+                                                     Logger logger, Function<String, UUID> worldResolver) throws IOException {
+        StorageConfiguration configured = StorageConfiguration.load(config, staged);
+        StorageStateStore states = new StorageStateStore(staged);
+        StorageStateStore.State state = states.loadState().orElse(null);
+        StorageStateStore.Migration migration = states.loadMigration().orElse(null);
+        Path database = configured.sqliteFile();
+        try (var files = Files.list(staged)) {
+            if (files.anyMatch(file -> StorageConfiguration.validSqliteFilename(file.getFileName().toString())
+                    && !file.equals(database))) {
+                throw new IOException("Archive contains a database other than the one named in config.yml");
+            }
+        }
+        boolean pinnedSqlite = state != null && state.backend() == StorageBackend.SQLITE;
+        boolean hasDatabase = Files.isRegularFile(database);
+        // Fingerprints describe the installed endpoint. Read database contents only from the archive.
+        StartupAction action = startupAction(StorageConfiguration.load(config, restoreFolder), state, migration, hasDatabase);
+        if (action == StartupAction.MIGRATE || action == StartupAction.DISCARD_STAGED_MIGRATION) {
+            throw new IOException("Archive contains a pending storage migration");
+        }
+        if (pinnedSqlite && !hasDatabase) {
+            throw new IOException("Archive is missing its pinned SQLite database " + database.getFileName());
+        }
+        StorageSnapshot databaseSnapshot = hasDatabase
+                ? SqlStorage.verifySqliteRestore(configured.forBackend(StorageBackend.SQLITE),
+                        pinnedSqlite ? state.instanceId() : null, logger)
+                : null;
+        if (state == null) {
+            LegacyYamlImporter importer = new LegacyYamlImporter(staged, logger, worldResolver);
+            StorageSnapshot legacy = importer.hasData() ? importer.read() : null;
+            boolean hasLegacyData = legacy != null && !legacy.empty();
+            if (!hasDatabase && !hasLegacyData) {
+                throw new IOException("Archive contains no SQLite database or usable legacy player data");
+            }
+            if (hasLegacyData && configured.backend() == StorageBackend.SQLITE
+                    && databaseSnapshot != null && !databaseSnapshot.empty()) {
+                requireMatchingLegacy(legacy, databaseSnapshot);
+            }
+        }
+        return configured;
+    }
+
     public SqlStorage store() {
         return storage;
     }
@@ -153,8 +186,30 @@ public final class StorageManager implements AutoCloseable {
         return state.backend();
     }
 
-    public ImportResult startupImport() {
-        return startupImport;
+    /** Resolves the local storage pin without opening SQLite or altering its sidecars. */
+    public static Optional<Path> findPinnedSqliteFile(Path dataFolder) throws IOException {
+        Path directory = dataFolder.toAbsolutePath().normalize();
+        StorageStateStore.State pinned = new StorageStateStore(directory).loadState().orElse(null);
+        if (pinned == null || pinned.backend() != StorageBackend.SQLITE) {
+            return Optional.empty();
+        }
+        try (var files = Files.list(directory)) {
+            return files.filter(file -> StorageConfiguration.validSqliteFilename(file.getFileName().toString()))
+                    .filter(file -> StorageConfiguration.matchesSqliteEndpoint(file, pinned.endpointFingerprint()))
+                    .findFirst();
+        }
+    }
+
+    public void verifyReloadConfiguration(Configuration config) {
+        StorageConfiguration requested = StorageConfiguration.load(config, dataFolder);
+        if (backend() == StorageBackend.SQLITE
+                && !requested.forBackend(StorageBackend.SQLITE).endpointFingerprint().equals(state.endpointFingerprint())) {
+            throw new IllegalArgumentException("Keep the pinned SQLite filename while reloading; use a backup restore to switch SQLite files");
+        }
+    }
+
+    boolean importedLegacyAtStartup() {
+        return importedLegacyAtStartup;
     }
 
     public SqlStorage.Status status() {
@@ -215,13 +270,6 @@ public final class StorageManager implements AutoCloseable {
         preparation.prepare();
         flushPendingWrites();
         SqlStorage.MaintenanceResult result = storage.maintain(now, mailPurgeInactiveDays);
-        SqlStorage.Verification verification = storage.verify();
-        if (!verification.healthy()) {
-            throw new IOException(
-                    "Post-maintenance verification failed: "
-                            + String.join("; ", verification.problems())
-            );
-        }
         return new MaintenanceResult(result.preview(), result.removed(), safetyExport, now);
     }
 
@@ -308,6 +356,16 @@ public final class StorageManager implements AutoCloseable {
         }
     }
 
+    public boolean hasPendingMigration() {
+        return stateStore.hasPendingMigration();
+    }
+
+    public void cancelStagedMigration(MigrationPlan plan) throws IOException {
+        if (stateStore.loadMigration().filter(staged -> staged.id().equals(plan.id())).isPresent()) {
+            stateStore.completeMigration();
+        }
+    }
+
     public MigrationPlan stageMigration(StorageConfiguration configured, StorageBackend target)
             throws IOException {
         if (target == backend()) {
@@ -373,14 +431,53 @@ public final class StorageManager implements AutoCloseable {
         storage.close();
     }
 
-    private static StorageManager migrate(
-            Path dataFolder,
-            Logger logger,
+    private static StartupAction startupAction(
             StorageConfiguration configured,
-            StorageStateStore states,
             StorageStateStore.State previous,
-            StorageStateStore.Migration migration
+            StorageStateStore.Migration migration,
+            boolean restoringSqliteDatabase
     ) throws IOException {
+        if (migration != null) {
+            if (previous != null && previous.backend() == migration.target()
+                    && configured.backend() == migration.target()
+                    && endpointMatches(configured, previous.endpointFingerprint())
+                    && endpointMatches(configured, migration.targetFingerprint())) {
+                return StartupAction.RECOVER_COMPLETED_MIGRATION;
+            }
+            if (previous != null && previous.backend() == migration.source()
+                    && configured.backend() == migration.source()
+                    && endpointMatches(configured, previous.endpointFingerprint())) {
+                return StartupAction.DISCARD_STAGED_MIGRATION;
+            }
+            validateMigration(configured, previous, migration);
+            return StartupAction.MIGRATE;
+        }
+        if (previous != null && previous.backend() != configured.backend()) {
+            throw new IOException("Storage is pinned to " + previous.backend().key()
+                    + "; stage an explicit storage migration before selecting " + configured.backend().key());
+        }
+        if (previous != null && !endpointMatches(configured, previous.endpointFingerprint())) {
+            if (configured.backend() == StorageBackend.SQLITE) {
+                // Old backups pinned an absolute path that could belong to another data directory.
+                if (restoringSqliteDatabase
+                        && !previous.endpointFingerprint().startsWith(StorageConfiguration.SQLITE_FILE_FINGERPRINT_PREFIX)) {
+                    return StartupAction.OPEN;
+                }
+                throw new IOException("The configured SQLite file differs from the pinned endpoint; "
+                        + "use a verified backup restore to switch SQLite files");
+            }
+            throw new IOException("The configured storage endpoint differs from the pinned endpoint; "
+                    + "use the storage migration command instead of changing it directly");
+        }
+        return StartupAction.OPEN;
+    }
+
+    private enum StartupAction {
+        OPEN, DISCARD_STAGED_MIGRATION, MIGRATE, RECOVER_COMPLETED_MIGRATION
+    }
+
+    private static void validateMigration(StorageConfiguration configured, StorageStateStore.State previous,
+                                          StorageStateStore.Migration migration) throws IOException {
         if (previous == null || previous.backend() != migration.source()) {
             throw new IOException("Staged storage migration does not match active storage state");
         }
@@ -390,17 +487,19 @@ public final class StorageManager implements AutoCloseable {
                             + " to complete the staged migration"
             );
         }
-        StorageConfiguration sourceConfiguration =
-                configured.forBackend(migration.source());
-        StorageConfiguration targetConfiguration =
-                configured.forBackend(migration.target());
-        if (!endpointMatches(sourceConfiguration, previous.endpointFingerprint())) {
+        if (!endpointMatches(configured.forBackend(migration.source()), previous.endpointFingerprint())) {
             throw new IOException("Source storage endpoint no longer matches the pinned endpoint");
         }
-        if (!endpointMatches(targetConfiguration, migration.targetFingerprint())) {
+        if (!endpointMatches(configured.forBackend(migration.target()), migration.targetFingerprint())) {
             throw new IOException("Target storage configuration changed after migration was staged");
         }
+    }
 
+    private static StorageManager migrate(Path dataFolder, Logger logger, StorageConfiguration configured,
+                                          StorageStateStore states, StorageStateStore.State previous,
+                                          StorageStateStore.Migration migration) throws IOException {
+        StorageConfiguration sourceConfiguration = configured.forBackend(migration.source());
+        StorageConfiguration targetConfiguration = configured.forBackend(migration.target());
         requirePinnedSqlite(sourceConfiguration, previous.instanceId());
         SqlStorage target = new SqlStorage(targetConfiguration, logger);
         boolean keepTarget = false;
@@ -420,19 +519,18 @@ public final class StorageManager implements AutoCloseable {
                                 + "source remains authoritative"
                 );
             }
-            StorageSnapshot imported = target.exportSnapshot();
-            String targetChecksum = StorageChecksum.calculate(imported);
-            if (!snapshot.counts().equals(imported.counts())
-                    || !sourceChecksum.equals(targetChecksum)) {
+            SqlStorage.Inspection destination = target.inspect();
+            StorageSnapshot imported = destination.snapshot().orElse(null);
+            if (imported != null && (!snapshot.counts().equals(imported.counts())
+                    || !sourceChecksum.equals(StorageChecksum.calculate(imported)))) {
                 throw new IOException(
                         "Migration verification failed; source remains authoritative"
                 );
             }
-            SqlStorage.Verification verification = target.verify();
-            if (!verification.healthy()) {
+            if (imported == null || !destination.verification().healthy()) {
                 throw new IOException(
                         "Migration integrity check failed: "
-                                + String.join("; ", verification.problems())
+                                + String.join("; ", destination.verification().problems())
                 );
             }
             StorageStateStore.State active = new StorageStateStore.State(
@@ -465,7 +563,7 @@ public final class StorageManager implements AutoCloseable {
                     states,
                     target,
                     active,
-                    new ImportResult(false, snapshot.counts(), targetChecksum, Instant.now())
+                    false
             );
         } finally {
             if (!keepTarget) {
@@ -541,7 +639,6 @@ public final class StorageManager implements AutoCloseable {
                                 + String.join("; ", verification.problems())
                 );
             }
-            StorageSnapshot snapshot = target.exportSnapshot();
             StorageStateStore.State active = new StorageStateStore.State(
                     migration.target(),
                     configuration.endpointFingerprint(),
@@ -556,7 +653,6 @@ public final class StorageManager implements AutoCloseable {
                                 + "startup will retry cleanup: " + cleanupFailure.getMessage()
                 );
             }
-            String checksum = StorageChecksum.calculate(snapshot);
             logger.info(
                     "Recovered completed storage migration " + migration.id()
                             + " after an interrupted state-file cleanup"
@@ -568,7 +664,7 @@ public final class StorageManager implements AutoCloseable {
                     states,
                     target,
                     active,
-                    new ImportResult(false, snapshot.counts(), checksum, Instant.now())
+                    false
             );
         } catch (Exception exception) {
             target.close();
@@ -583,13 +679,15 @@ public final class StorageManager implements AutoCloseable {
             StorageConfiguration configuration,
             String fingerprint
     ) {
+        if (configuration.backend() == StorageBackend.SQLITE) {
+            return StorageConfiguration.matchesSqliteEndpoint(configuration.sqliteFile(), fingerprint);
+        }
+        boolean supportsLegacy = configuration.backend() == StorageBackend.POSTGRESQL && configuration.postgresqlSchema().equals("public");
         return configuration.endpointFingerprint().equals(fingerprint)
-                || (configuration.backend() == StorageBackend.POSTGRESQL
-                && configuration.postgresqlSchema().equals("public")
-                && configuration.legacyEndpointFingerprint().equals(fingerprint));
+                || (supportsLegacy && configuration.legacyEndpointFingerprint().equals(fingerprint));
     }
 
-    private static ImportResult importLegacyIfNeeded(
+    private static boolean importLegacyIfNeeded(
             Path dataFolder,
             Logger logger,
             Function<String, UUID> worldResolver,
@@ -599,33 +697,21 @@ public final class StorageManager implements AutoCloseable {
     ) throws IOException {
         LegacyYamlImporter importer =
                 new LegacyYamlImporter(dataFolder, logger, worldResolver);
-        boolean hasLegacy = importer.hasData();
-        if (!hasLegacy || (!storage.isEmpty() && !recoverUnpinned)) {
-            return new ImportResult(
-                    false,
-                    new StorageSnapshot.Counts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-                    "",
-                    Instant.now()
-            );
+        StorageSnapshot legacy = recoverUnpinned && importer.hasData() ? importer.read() : null;
+        if (legacy == null || legacy.empty()) {
+            return false;
         }
-        StorageSnapshot legacy = importer.read();
-        String expected = StorageChecksum.calculate(legacy);
         if (!storage.isEmpty()) {
             StorageSnapshot existing = storage.exportSnapshot();
-            String actual = StorageChecksum.calculate(existing);
-            if (!legacy.counts().equals(existing.counts()) || !expected.equals(actual)) {
-                throw new IOException(
-                        "The unpinned SQL database contains data that does not match "
-                                + "the preserved YAML files; refusing to choose either copy"
-                );
-            }
+            requireMatchingLegacy(legacy, existing);
             logger.info(
                     "Recovered a verified legacy YAML import into " + storage.backend().key()
                             + " after an interrupted first startup ("
                             + existing.counts().total() + " logical records)"
             );
-            return new ImportResult(true, existing.counts(), actual, Instant.now());
+            return true;
         }
+        String expected = StorageChecksum.calculate(legacy);
         storage.replaceAll(legacy, instanceId);
         StorageSnapshot imported = storage.exportSnapshot();
         String actual = StorageChecksum.calculate(imported);
@@ -647,15 +733,15 @@ public final class StorageManager implements AutoCloseable {
                         + " (" + imported.counts().total() + " logical records); "
                         + "original YAML files were preserved"
         );
-        return new ImportResult(true, imported.counts(), actual, Instant.now());
+        return true;
     }
 
-    public record ImportResult(
-            boolean imported,
-            StorageSnapshot.Counts counts,
-            String checksum,
-            Instant completedAt
-    ) {
+    private static void requireMatchingLegacy(StorageSnapshot legacy, StorageSnapshot existing) throws IOException {
+        String actual = StorageChecksum.calculate(existing);
+        if (!legacy.counts().equals(existing.counts()) || !StorageChecksum.calculate(legacy).equals(actual)) {
+            throw new IOException("The unpinned SQL database contains data that does not match "
+                    + "the preserved YAML files; refusing to choose either copy");
+        }
     }
 
     public record ExportResult(

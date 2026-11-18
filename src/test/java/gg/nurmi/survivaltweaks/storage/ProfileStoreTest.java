@@ -1,5 +1,6 @@
 package gg.nurmi.survivaltweaks.storage;
 
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.ProfileFiles;
 import gg.nurmi.survivaltweaks.object.Home;
 import gg.nurmi.survivaltweaks.object.HomeArrivalStyle;
 import gg.nurmi.survivaltweaks.object.HomeCategory;
@@ -34,7 +35,7 @@ class ProfileStoreTest {
     @Test
     void savesAndLoadsTheCurrentSchema() throws IOException {
         UUID uniqueId = UUID.randomUUID();
-        ProfileStore store = new ProfileStore(directory, logger);
+        ProfileFiles store = new ProfileFiles(directory, logger);
         Profile profile = new Profile(uniqueId);
         UUID worldId = UUID.randomUUID();
         profile.addHome(new Home(
@@ -129,7 +130,7 @@ class ProfileStoreTest {
                 StandardCharsets.UTF_8
         );
 
-        Profile loaded = new ProfileStore(directory, logger, world -> worldId).load(uniqueId);
+        Profile loaded = new ProfileFiles(directory, logger, world -> worldId).load(uniqueId);
 
         Home home = loaded.home("KAIVOS").orElseThrow();
         assertEquals("world", home.worldName());

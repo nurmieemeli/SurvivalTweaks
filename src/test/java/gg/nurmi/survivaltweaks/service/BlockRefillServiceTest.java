@@ -4,10 +4,13 @@ import gg.nurmi.survivaltweaks.SurvivalTweaks;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import org.bukkit.Material;
+import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -15,6 +18,8 @@ import org.mockito.MockitoAnnotations;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
@@ -38,6 +43,48 @@ public class BlockRefillServiceTest {
         MockitoAnnotations.openMocks(this);
         when(settingsService.current()).thenReturn(settings);
         service = new BlockRefillService(plugin, settingsService);
+    }
+
+    @Test
+    void placementRefillsWithAMatchingEmptyBoxAndLeavesTheFilledBoxInStorage() {
+        var server = mock(Server.class);
+        var scheduler = mock(BukkitScheduler.class);
+        var player = mock(Player.class);
+        var inventory = mock(PlayerInventory.class);
+        var event = mock(BlockPlaceEvent.class);
+        var placed = mock(ItemStack.class);
+        var filled = mock(ItemStack.class);
+        var empty = mock(ItemStack.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(settings.hotbarRefillEnabled()).thenReturn(true);
+        when(player.isOnline()).thenReturn(true);
+        when(player.getInventory()).thenReturn(inventory);
+        when(inventory.getHeldItemSlot()).thenReturn(2);
+        when(inventory.getItem(10)).thenReturn(filled);
+        when(inventory.getItem(11)).thenReturn(empty);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getHand()).thenReturn(EquipmentSlot.HAND);
+        when(event.getItemInHand()).thenReturn(placed);
+        when(placed.getType()).thenReturn(Material.SHULKER_BOX);
+        when(placed.clone()).thenReturn(placed);
+        when(filled.getType()).thenReturn(Material.SHULKER_BOX);
+        when(filled.getAmount()).thenReturn(1);
+        when(filled.clone()).thenReturn(filled);
+        when(empty.getType()).thenReturn(Material.SHULKER_BOX);
+        when(empty.getAmount()).thenReturn(1);
+        when(empty.clone()).thenReturn(empty);
+        when(placed.isSimilar(empty)).thenReturn(true);
+        when(scheduler.runTaskLater(eq(plugin), any(Runnable.class), eq(1L))).thenAnswer(invocation -> {
+            invocation.getArgument(1, Runnable.class).run();
+            return null;
+        });
+
+        service.onBlockPlace(event);
+
+        verify(inventory, never()).setItem(10, null);
+        verify(inventory).setItem(11, null);
+        verify(inventory).setItem(2, empty);
     }
 
     @Test

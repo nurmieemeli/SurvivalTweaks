@@ -29,13 +29,22 @@ public final class NotificationService {
         return notify(profiles.load(playerId), type, null, actor, detail, true);
     }
 
+    public boolean lockAdministrativeChange(UUID ownerId, UUID actorId, String actorName, String detail) {
+        return !actorId.equals(ownerId)
+                && notify(ownerId, NotificationType.LOCK_ADMIN_CHANGED, actorName, detail);
+    }
+
+    public void lockTransferred(UUID previousOwnerId, UUID recipientId, UUID actorId,
+                                String actorName, String recipientName, String lockName) {
+        lockAdministrativeChange(previousOwnerId, actorId, actorName, "transferred:" + recipientName);
+        notify(recipientId, NotificationType.LOCK_TRANSFERRED, actorName, lockName);
+    }
+
     public CompletableFuture<Boolean> notifyAsync(
             UUID playerId, NotificationType type, String actor, String detail, Executor mainThread
     ) {
-        return profiles.loadAsync(playerId).thenApplyAsync(
-                profile -> profiles.withCurrent(profile, current -> notify(current, type, null, actor, detail, true)),
-                mainThread
-        );
+        return profiles.withProfileAsync(playerId, mainThread,
+                profile -> notify(profile, type, null, actor, detail, true));
     }
 
     public boolean mail(
@@ -76,10 +85,12 @@ public final class NotificationService {
         if (duplicate) {
             return false;
         }
-        profile.addNotification(
+        if (!profile.addNotification(
                 PlayerNotification.create(type, now, actorId, actor, detail),
                 MAX_NOTIFICATIONS
-        );
+        )) {
+            return false;
+        }
         profiles.save(profile);
         return true;
     }

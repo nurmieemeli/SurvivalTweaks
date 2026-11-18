@@ -1,14 +1,15 @@
 package gg.nurmi.survivaltweaks.ui;
 
 import gg.nurmi.survivaltweaks.command.lock.LockCommand;
+import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.ContainerLock;
 import gg.nurmi.survivaltweaks.service.ContainerBlockResolver;
 import gg.nurmi.survivaltweaks.service.ContainerLockService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.service.NotificationService;
 import gg.nurmi.survivaltweaks.service.PlayerExperienceService;
-import gg.nurmi.survivaltweaks.object.NotificationType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Material;
@@ -27,19 +28,23 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.SkullMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.concurrent.ThreadLocalRandom;
+
+import static gg.nurmi.survivaltweaks.ui.MenuItems.item;
+import static gg.nurmi.survivaltweaks.ui.MenuItems.playerHead;
 
 public final class LockControlPanelController implements Listener {
 
@@ -55,11 +60,14 @@ public final class LockControlPanelController implements Listener {
     private static final int TRUSTED_START = 9;
     private static final int TRUSTED_END = 26;
     private static final int HISTORY_START = 36;
+    private static final int CANDIDATE_PAGE_SIZE = 45;
+    private static final int ROSTER_BATCH_SIZE = 32;
 
     private final JavaPlugin plugin;
     private final Server server;
     private final ContainerBlockResolver resolver;
     private final ContainerLockService locks;
+    private final SettingsService settings;
     private final MessageService messages;
     private final FeedbackService feedback;
     private final TextPromptService prompts;
@@ -68,12 +76,14 @@ public final class LockControlPanelController implements Listener {
     private final NotificationService notifications;
     private final PlayerExperienceService experience;
     private Consumer<Player> back = Player::closeInventory;
+    private long transferConfirmation = ThreadLocalRandom.current().nextLong();
 
     public LockControlPanelController(
             JavaPlugin plugin,
             Server server,
             ContainerBlockResolver resolver,
             ContainerLockService locks,
+            SettingsService settings,
             MessageService messages,
             FeedbackService feedback,
             TextPromptService prompts,
@@ -86,6 +96,7 @@ public final class LockControlPanelController implements Listener {
         this.server = server;
         this.resolver = resolver;
         this.locks = locks;
+        this.settings = settings;
         this.messages = messages;
         this.feedback = feedback;
         this.prompts = prompts;
@@ -204,7 +215,7 @@ public final class LockControlPanelController implements Listener {
                     return;
                 }
                 locks.rename(lock, text.equals("-") ? "" : text);
-                notifyAdministrativeChange(responding, lock, "renamed");
+                notifications.lockAdministrativeChange(lock.ownerId(), responding.getUniqueId(), responding.getName(), "renamed");
                 messages.send(responding, "ui.lock-panel.renamed");
                 feedback.play(responding, FeedbackService.LOCK_ACCESS_CHANGED);
                 open(responding, lock);
@@ -213,14 +224,14 @@ public final class LockControlPanelController implements Listener {
         }
         if (slot == ACCESS_MODE_SLOT) {
             locks.cycleAccessMode(lock);
-            notifyAdministrativeChange(player, lock, "access-mode");
+            notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "access-mode");
             feedback.play(player, FeedbackService.UI_CLICK);
             openPage(player, lock, panel.page());
             return;
         }
         if (slot == AUTOMATION_SLOT) {
             locks.toggleAutomation(lock);
-            notifyAdministrativeChange(player, lock, "automation");
+            notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "automation");
             feedback.play(player, FeedbackService.UI_CLICK);
             openPage(player, lock, panel.page());
             return;
@@ -236,11 +247,11 @@ public final class LockControlPanelController implements Listener {
             return;
         }
         if (slot == ADD_TRUSTED_SLOT) {
-            openCandidates(player, lock, CandidateAction.TRUST, 0);
+            openCandidates(player, lock, panel, CandidateAction.TRUST);
             return;
         }
         if (slot == TRANSFER_SLOT) {
-            openCandidates(player, lock, CandidateAction.TRANSFER, 0);
+            openCandidates(player, lock, panel, CandidateAction.TRANSFER);
             return;
         }
         if (slot == SEARCH_PLAYER_SLOT) {
@@ -248,21 +259,19 @@ public final class LockControlPanelController implements Listener {
             return;
         }
         if (slot >= TRUSTED_START && slot <= TRUSTED_END) {
-            int index = panel.page() * (TRUSTED_END - TRUSTED_START + 1)
-                    + slot - TRUSTED_START;
-            List<UUID> trusted = lock.trustedPlayers().stream()
-                    .sorted((left, right) -> playerName(left).compareToIgnoreCase(playerName(right)))
-                    .toList();
-            if (index < trusted.size()) {
-                UUID removed = trusted.get(index);
-                locks.untrust(lock, removed);
-                notifyAdministrativeChange(player, lock, "untrusted:" + playerName(removed));
-                messages.send(
-                        player,
-                        "lock.untrusted",
-                        Placeholder.unparsed("player", playerName(removed))
-                );
-                feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
+            int index = slot - TRUSTED_START;
+            if (index < panel.playerIds().size()) {
+                UUID removed = panel.playerIds().get(index);
+                if (locks.untrust(lock, removed)) {
+                    String name = playerName(removed);
+                    notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "untrusted:" + name);
+                    messages.send(
+                            player,
+                            "lock.untrusted",
+                            Placeholder.unparsed("player", name)
+                    );
+                    feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
+                }
                 openPage(player, lock, panel.page());
             }
         }
@@ -277,28 +286,31 @@ public final class LockControlPanelController implements Listener {
             return;
         }
         if (slot == 45 && panel.page() > 0) {
-            openCandidates(player, lock, panel.action(), panel.page() - 1);
+            showCandidates(player, lock, panel.action(), panel.page() - 1, panel.roster);
             return;
         }
         if (slot == 53 && panel.hasNextPage()) {
-            openCandidates(player, lock, panel.action(), panel.page() + 1);
+            showCandidates(player, lock, panel.action(), panel.page() + 1, panel.roster);
             return;
         }
         if (slot == 50) {
             searchPlayer(player, lock, panel.action());
             return;
         }
-        if (slot < 0 || slot >= panel.candidates().size()) {
+        if (slot < 0 || slot >= panel.playerIds().size()) {
             return;
         }
-        UUID candidateId = panel.candidates().get(slot);
+        UUID candidateId = panel.playerIds().get(slot);
         OfflinePlayer candidate = server.getOfflinePlayer(candidateId);
         String candidateName = candidate.getName() == null
                 ? candidateId.toString().substring(0, 8)
                 : candidate.getName();
         if (panel.action() == CandidateAction.TRUST) {
-            locks.trust(lock, candidateId);
-            notifyAdministrativeChange(player, lock, "trusted:" + candidateName);
+            if (!locks.trust(lock, candidateId)) {
+                open(player, lock);
+                return;
+            }
+            notifications.lockAdministrativeChange(lock.ownerId(), player.getUniqueId(), player.getName(), "trusted:" + candidateName);
             messages.send(
                     player,
                     "lock.trusted",
@@ -312,33 +324,35 @@ public final class LockControlPanelController implements Listener {
             if (!messages.requirePermission(player, "survivaltweaks.command.lock")) {
                 return;
             }
-            if (locks.contains(lock)
-                    && lock.canManage(
-                            player.getUniqueId(),
-                            player.hasPermission(LockCommand.ADMIN_PERMISSION)
-                    )
-                    && locks.transfer(lock, candidateId)) {
+            if (!locks.contains(lock)
+                    || !lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION))) {
+                messages.send(player, "lock.not-owner");
+                return;
+            }
+            UUID previousOwnerId = lock.ownerId();
+            ContainerLockService.TransferResult result = locks.transfer(
+                    lock, candidateId, settings.current().maxLocksPerPlayer());
+            if (result == ContainerLockService.TransferResult.LIMIT) {
+                messages.send(player, "lock.transfer-limit", Placeholder.unparsed("player", candidateName));
+            } else if (result == ContainerLockService.TransferResult.TRANSFERRED) {
                 messages.send(
                         player,
                         "ui.lock-panel.transferred",
                         Placeholder.unparsed("player", candidateName)
                 );
-                notifications.notify(
-                        candidateId,
-                        NotificationType.LOCK_TRANSFERRED,
-                        player.getName(),
-                        lock.name()
-                );
+                notifications.lockTransferred(previousOwnerId, candidateId, player.getUniqueId(),
+                        player.getName(), candidateName, lock.name());
                 feedback.play(player, FeedbackService.LOCK_ACCESS_CHANGED);
                 player.closeInventory();
             } else {
-                messages.send(player, "lock.not-owner");
+                messages.send(player, "lock.already-owner");
             }
         };
         player.closeInventory();
         if (!dialogs.showOwnershipTransfer(player, candidateName, ignored -> transfer.run())) {
-            prompts.request(player, "ui.lock-panel.transfer-prompt", (responding, text) -> {
-                if (text.equalsIgnoreCase(candidateName)) {
+            String code = Long.toUnsignedString(++transferConfirmation, 36);
+            prompts.request(player, "ui.lock-panel.transfer-code-prompt", (responding, text) -> {
+                if (text.equalsIgnoreCase(code)) {
                     transfer.run();
                     return;
                 }
@@ -349,18 +363,24 @@ public final class LockControlPanelController implements Listener {
                 )) {
                     open(responding, lock);
                 }
-            });
+            }, Placeholder.unparsed("player", candidateName), Placeholder.unparsed("code", code));
         }
     }
 
     private LockPanel mainPanel(Player player, ContainerLock lock, int page) {
+        List<UUID> trusted = lock.trustedPlayers().stream()
+                .sorted((left, right) -> playerName(left).compareToIgnoreCase(playerName(right)))
+                .skip((long) page * (TRUSTED_END - TRUSTED_START + 1))
+                .limit(TRUSTED_END - TRUSTED_START + 1L)
+                .toList();
         LockPanel panel = new LockPanel(
                 player.getUniqueId(),
                 lock.id(),
                 null,
-                List.of(),
+                trusted,
                 page,
                 false,
+                null,
                 server,
                 messages.component(player, "ui.lock-panel.title")
         );
@@ -378,15 +398,10 @@ public final class LockControlPanelController implements Listener {
                 List.of(messages.component(player, "ui.lock-panel.rename-action"))
         ));
 
-        List<UUID> trusted = lock.trustedPlayers().stream()
-                .sorted((left, right) -> playerName(left).compareToIgnoreCase(playerName(right)))
-                .skip((long) page * (TRUSTED_END - TRUSTED_START + 1))
-                .limit(TRUSTED_END - TRUSTED_START + 1L)
-                .toList();
         for (int index = 0; index < trusted.size(); index++) {
             UUID trustedId = trusted.get(index);
             inventory.setItem(TRUSTED_START + index, playerHead(
-                    trustedId,
+                    server.getOfflinePlayer(trustedId),
                     messages.component(
                             player,
                             "ui.lock-panel.trusted-player",
@@ -406,7 +421,7 @@ public final class LockControlPanelController implements Listener {
                 List.of()
         ));
         inventory.setItem(TRANSFER_SLOT, playerHead(
-                lock.ownerId(),
+                server.getOfflinePlayer(lock.ownerId()),
                 messages.component(
                         player,
                         "ui.lock-panel.owner",
@@ -427,7 +442,7 @@ public final class LockControlPanelController implements Listener {
                                 "mode",
                                 messages.component(
                                         player,
-                                        "ui.lock-panel.mode." + lock.accessMode().name().toLowerCase()
+                                        "ui.lock-panel.mode." + lock.accessMode().name().toLowerCase(Locale.ROOT)
                                 )
                         )
                 ),
@@ -482,54 +497,71 @@ public final class LockControlPanelController implements Listener {
         return panel;
     }
 
-    /**
-     * Builds the candidate roster off the server thread. Enumerating every
-     * player who has ever joined reads the player data directory, which is far
-     * too much work to do on a tick just because someone opened a menu. The
-     * lock is re-checked once the roster is back, because it can be deleted or
-     * transferred while the scan runs.
-     */
-    private void openCandidates(Player player, ContainerLock lock, CandidateAction action, int page) {
-        UUID ownerId = lock.ownerId();
-        Set<UUID> alreadyTrusted = action == CandidateAction.TRANSFER
-                ? Set.of()
-                : Set.copyOf(lock.trustedPlayers());
-        server.getScheduler().runTaskAsynchronously(plugin, () -> {
-            java.util.Map<UUID, String> names = new java.util.LinkedHashMap<>();
-            for (OfflinePlayer candidate : server.getOfflinePlayers()) {
-                if (!candidate.hasPlayedBefore() && !candidate.isOnline()) {
-                    continue;
-                }
-                UUID candidateId = candidate.getUniqueId();
-                if (candidateId.equals(ownerId) || alreadyTrusted.contains(candidateId)) {
-                    continue;
-                }
-                // Read each name once; resolving inside the comparator would
-                // repeat the lookup on every comparison.
-                names.putIfAbsent(candidateId, candidate.getName() == null
-                        ? candidateId.toString().substring(0, 8)
-                        : candidate.getName());
+    private void openCandidates(Player player, ContainerLock lock, LockPanel origin, CandidateAction action) {
+        RosterRequest request = new RosterRequest(player, lock, origin, action);
+        origin.rosterRequest = request;
+        request.collectBatch();
+    }
+
+    private final class RosterRequest {
+        private final Player player;
+        private final ContainerLock lock;
+        private final LockPanel origin;
+        private final CandidateAction action;
+        private final OfflinePlayer[] offlinePlayers;
+        private final Map<UUID, String> names = new LinkedHashMap<>();
+        private int index;
+
+        private RosterRequest(Player player, ContainerLock lock, LockPanel origin, CandidateAction action) {
+            this.player = player;
+            this.lock = lock;
+            this.origin = origin;
+            this.action = action;
+            this.offlinePlayers = server.getOfflinePlayers();
+        }
+
+        private boolean isCurrent() {
+            return origin.rosterRequest == this
+                    && player.isOnline()
+                    && player.getOpenInventory().getTopInventory().getHolder(false) == origin
+                    && locks.contains(lock)
+                    && player.hasPermission("survivaltweaks.command.lock")
+                    && lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION));
+        }
+
+        private void collectBatch() {
+            if (!isCurrent()) {
+                return;
             }
-            List<UUID> sorted = names.keySet().stream()
-                    .sorted((left, right) -> names.get(left).compareToIgnoreCase(names.get(right)))
-                    .toList();
-            server.getScheduler().runTask(plugin, () -> {
-                if (!player.isOnline() || !locks.contains(lock) || !lock.canManage(
-                        player.getUniqueId(),
-                        player.hasPermission(LockCommand.ADMIN_PERMISSION)
-                )) {
-                    return;
+            int end = Math.min(index + ROSTER_BATCH_SIZE, offlinePlayers.length);
+            while (index < end) {
+                OfflinePlayer candidate = offlinePlayers[index++];
+                if (candidate.isOnline() || candidate.hasPlayedBefore()) {
+                    UUID id = candidate.getUniqueId();
+                    String name = candidate.getName();
+                    names.putIfAbsent(id, name == null ? id.toString().substring(0, 8) : name);
                 }
-                // The player may have closed the menu or navigated elsewhere
-                // while the roster was being read; reopening it under them would
-                // be worse than doing nothing.
-                if (!(player.getOpenInventory().getTopInventory().getHolder(false)
-                        instanceof LockPanel open) || !open.lockId().equals(lock.id())) {
-                    return;
-                }
-                showCandidates(player, lock, action, page, sorted, names);
+            }
+            if (index < offlinePlayers.length) {
+                server.getScheduler().runTaskLater(plugin, this::collectBatch, 1L);
+                return;
+            }
+            server.getScheduler().runTaskAsynchronously(plugin, () -> {
+                List<UUID> sorted = names.keySet().stream()
+                        .sorted((left, right) -> names.get(left).compareToIgnoreCase(names.get(right)))
+                        .toList();
+                CandidateRoster roster = new CandidateRoster(sorted, Map.copyOf(names));
+                server.getScheduler().runTask(plugin, () -> {
+                    if (isCurrent()) {
+                        origin.rosterRequest = null;
+                        showCandidates(player, lock, action, 0, roster);
+                    }
+                });
             });
-        });
+        }
+    }
+
+    private record CandidateRoster(List<UUID> sortedIds, Map<UUID, String> names) {
     }
 
     private void showCandidates(
@@ -537,20 +569,25 @@ public final class LockControlPanelController implements Listener {
             ContainerLock lock,
             CandidateAction action,
             int page,
-            List<UUID> allCandidates,
-            java.util.Map<UUID, String> names
+            CandidateRoster roster
     ) {
-        List<UUID> candidates = allCandidates.stream()
-                .skip((long) page * 45)
-                .limit(45)
+        UUID ownerId = lock.ownerId();
+        Set<UUID> alreadyTrusted = action == CandidateAction.TRUST ? lock.trustedPlayers() : Set.of();
+        List<UUID> eligible = roster.sortedIds().stream()
+                .filter(id -> !id.equals(ownerId) && !alreadyTrusted.contains(id))
                 .toList();
+        int visiblePage = Math.min(page, Math.max(0, eligible.size() - 1) / CANDIDATE_PAGE_SIZE);
+        int start = visiblePage * CANDIDATE_PAGE_SIZE;
+        int end = Math.min(start + CANDIDATE_PAGE_SIZE, eligible.size());
+        List<UUID> candidates = eligible.subList(start, end);
         LockPanel panel = new LockPanel(
                 player.getUniqueId(),
                 lock.id(),
                 action,
                 candidates,
-                page,
-                (page + 1) * 45 < allCandidates.size(),
+                visiblePage,
+                end < eligible.size(),
+                roster,
                 server,
                 messages.component(
                         player,
@@ -562,8 +599,8 @@ public final class LockControlPanelController implements Listener {
         for (int index = 0; index < candidates.size(); index++) {
             UUID candidateId = candidates.get(index);
             panel.getInventory().setItem(index, playerHead(
-                    candidateId,
-                    Component.text(names.getOrDefault(candidateId, playerName(candidateId))),
+                    server.getOfflinePlayer(candidateId),
+                    Component.text(roster.names().get(candidateId)),
                     List.of()
             ));
         }
@@ -577,7 +614,7 @@ public final class LockControlPanelController implements Listener {
                 messages.component(player, "ui.lock-panel.search-player"),
                 List.of()
         ));
-        if (page > 0) {
+        if (visiblePage > 0) {
             panel.getInventory().setItem(45, item(
                     Material.ARROW,
                     messages.component(player, "ui.common.previous"),
@@ -595,18 +632,6 @@ public final class LockControlPanelController implements Listener {
         feedback.play(player, FeedbackService.UI_OPEN);
     }
 
-    private OfflinePlayer resolvePlayer(String name) {
-        if (name.isBlank()) {
-            return null;
-        }
-        Player online = server.getPlayerExact(name);
-        if (online != null) {
-            return online;
-        }
-        OfflinePlayer cached = server.getOfflinePlayerIfCached(name);
-        return cached != null && cached.hasPlayedBefore() ? cached : null;
-    }
-
     private void searchPlayer(Player player, ContainerLock lock, CandidateAction action) {
         prompts.request(player, "ui.lock-panel.search-prompt", (responding, text) -> {
             if (!messages.requirePermission(responding, "survivaltweaks.command.lock")) {
@@ -622,7 +647,7 @@ public final class LockControlPanelController implements Listener {
             // Resolving the typed name directly beats scanning every player who
             // has ever joined, and unlike getOfflinePlayer(String) it neither
             // blocks on Mojang's API nor invents a profile for an unknown name.
-            OfflinePlayer found = resolvePlayer(text.strip());
+            OfflinePlayer found = PlayerNameLookup.findCached(server, text.strip());
             if (found == null
                     || found.getUniqueId().equals(lock.ownerId())
                     || (action == CandidateAction.TRUST
@@ -638,22 +663,12 @@ public final class LockControlPanelController implements Listener {
                     List.of(found.getUniqueId()),
                     0,
                     false,
+                    null,
                     server,
                     Component.empty()
             );
             candidateClick(responding, lock, synthetic, 0);
         });
-    }
-
-    private void notifyAdministrativeChange(Player actor, ContainerLock lock, String detail) {
-        if (!actor.getUniqueId().equals(lock.ownerId())) {
-            notifications.notify(
-                    lock.ownerId(),
-                    NotificationType.LOCK_ADMIN_CHANGED,
-                    actor.getName(),
-                    detail
-            );
-        }
     }
 
     private void outline(Player player, ContainerLock lock) {
@@ -680,26 +695,8 @@ public final class LockControlPanelController implements Listener {
         });
     }
 
-    private ItemStack playerHead(UUID playerId, Component name, List<Component> lore) {
-        ItemStack item = item(Material.PLAYER_HEAD, name, lore);
-        SkullMeta meta = (SkullMeta) item.getItemMeta();
-        meta.setOwningPlayer(server.getOfflinePlayer(playerId));
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private ItemStack item(Material material, Component name, List<Component> lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(name);
-        meta.lore(lore);
-        item.setItemMeta(meta);
-        return item;
-    }
-
     private String playerName(UUID playerId) {
-        OfflinePlayer player = server.getOfflinePlayer(playerId);
-        return player.getName() == null ? playerId.toString().substring(0, 8) : player.getName();
+        return PlayerNameLookup.displayName(server, playerId);
     }
 
     private enum CandidateAction {
@@ -712,27 +709,31 @@ public final class LockControlPanelController implements Listener {
         private final UUID viewerId;
         private final UUID lockId;
         private final CandidateAction action;
-        private final List<UUID> candidates;
+        private final List<UUID> playerIds;
         private final int page;
         private final boolean hasNextPage;
+        private final CandidateRoster roster;
         private final Inventory inventory;
+        private RosterRequest rosterRequest;
 
         private LockPanel(
                 UUID viewerId,
                 UUID lockId,
                 CandidateAction action,
-                List<UUID> candidates,
+                List<UUID> playerIds,
                 int page,
                 boolean hasNextPage,
+                CandidateRoster roster,
                 Server server,
                 Component title
         ) {
             this.viewerId = viewerId;
             this.lockId = lockId;
             this.action = action;
-            this.candidates = List.copyOf(candidates);
+            this.playerIds = List.copyOf(playerIds);
             this.page = page;
             this.hasNextPage = hasNextPage;
+            this.roster = roster;
             this.inventory = server.createInventory(this, 54, title);
         }
 
@@ -748,8 +749,8 @@ public final class LockControlPanelController implements Listener {
             return action;
         }
 
-        private List<UUID> candidates() {
-            return candidates;
+        private List<UUID> playerIds() {
+            return playerIds;
         }
 
         private int page() {

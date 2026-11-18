@@ -1,6 +1,7 @@
 package gg.nurmi.survivaltweaks.service;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.JoinConfiguration;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -116,19 +117,9 @@ public final class SessionSummaryService {
         return messages.component(
                 player,
                 "session-summary.line",
-                Placeholder.component("items", join(items)),
+                Placeholder.component("items", Component.join(JoinConfiguration.separator(SEPARATOR), items)),
                 Placeholder.component("open", open)
         );
     }
 
-    private Component join(List<Component> components) {
-        Component result = Component.empty();
-        for (int index = 0; index < components.size(); index++) {
-            if (index > 0) {
-                result = result.append(SEPARATOR);
-            }
-            result = result.append(components.get(index));
-        }
-        return result;
-    }
 }

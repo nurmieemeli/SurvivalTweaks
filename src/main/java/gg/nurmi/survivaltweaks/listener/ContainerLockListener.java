@@ -18,11 +18,15 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockBurnEvent;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.CrafterCraftEvent;
+import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.inventory.HopperInventorySearchEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryPickupItemEvent;
@@ -110,8 +114,8 @@ public final class ContainerLockListener implements Listener {
         }
         boolean administrator = player.hasPermission(LockCommand.ADMIN_PERMISSION);
         boolean denied = !hasAccess(player.getUniqueId(), administrator, selected);
-        boolean withdrawalBlocked = !hasWithdrawAccess(player.getUniqueId(), administrator, selected)
-                && !isDepositSafeAction(event);
+        boolean withdrawalBlocked = !denied && !isDepositSafeAction(event)
+                && !hasWithdrawAccess(player.getUniqueId(), administrator, selected);
         if (denied || withdrawalBlocked) {
             event.setCancelled(true);
             messages.send(player, denied ? "lock.denied-open" : "lock.deposit-only");
@@ -158,7 +162,8 @@ public final class ContainerLockListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onAcceptedBreak(BlockBreakEvent event) {
-        Set<ContainerLock> connected = locks.locksFor(resolver.blocksFor(event.getBlock()));
+        Set<BlockKey> blocks = resolver.blocksFor(event.getBlock());
+        Set<ContainerLock> connected = locks.locksFor(blocks);
         if (connected.size() != 1) {
             return;
         }
@@ -167,17 +172,17 @@ public final class ContainerLockListener implements Listener {
         if (!lock.canManage(player.getUniqueId(), player.hasPermission(LockCommand.ADMIN_PERMISSION))) {
             return;
         }
+        boolean removed = locks.detachBrokenBlock(lock, BlockKey.from(event.getBlock()), blocks);
         if (!player.getUniqueId().equals(lock.ownerId())) {
             notifyOwner(
                     lock.ownerId(),
                     NotificationType.LOCK_ADMIN_CHANGED,
                     player.getName(),
-                    "removed-by-break"
+                    removed ? "removed-by-break" : "retained-after-break"
             );
         }
-        locks.remove(lock);
-        messages.send(player, "lock.removed-by-break");
-        feedback.play(player, FeedbackService.LOCK_REMOVED);
+        messages.send(player, removed ? "lock.removed-by-break" : "lock.retained-after-break");
+        feedback.play(player, removed ? FeedbackService.LOCK_REMOVED : FeedbackService.LOCK_ACCESS_CHANGED);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -260,6 +265,13 @@ public final class ContainerLockListener implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntityChangeBlock(EntityChangeBlockEvent event) {
+        if (event.getTo() != event.getBlock().getType() && isProtectedBlock(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
     /**
      * A lock is bound to exact block coordinates, so a piston that moves a
      * locked container would leave the lock pointing at empty space and the
@@ -291,6 +303,25 @@ public final class ContainerLockListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDispense(BlockDispenseEvent event) {
+        if (blocksAutomation(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onCraft(CrafterCraftEvent event) {
+        if (blocksAutomation(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    private boolean blocksAutomation(Block block) {
+        return settings.current().blockLockedContainerAutomation() && locks.lockCount() > 0
+                && !locks.automationAllowed(BlockKey.from(block), null);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryMove(InventoryMoveItemEvent event) {
         if (!settings.current().blockLockedContainerAutomation()) {
             return;
@@ -303,6 +334,19 @@ public final class ContainerLockListener implements Listener {
         if (!locks.automationAllowed(source.first(), source.second())
                 || !locks.automationAllowed(destination.first(), destination.second())) {
             event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onHopperInventorySearch(HopperInventorySearchEvent event) {
+        if (!settings.current().blockLockedContainerAutomation() || locks.lockCount() == 0
+                || event.getInventory() == null) {
+            return;
+        }
+        ContainerBlockResolver.BlockPair inventory = resolver.blockPairFor(event.getInventory());
+        if (!locks.automationAllowed(BlockKey.from(event.getBlock()), null)
+                || !locks.automationAllowed(inventory.first(), inventory.second())) {
+            event.setInventory(null);
         }
     }
 
@@ -346,11 +390,11 @@ public final class ContainerLockListener implements Listener {
 
     private boolean hasAccess(UUID playerId, boolean administrator, Set<ContainerLock> selectedLocks) {
         return selectedLocks.stream().allMatch(lock ->
-                lock.canAccess(playerId, administrator) || profiles.isTrusted(lock.ownerId(), playerId));
+                lock.canAccess(playerId, administrator, profiles.isTrusted(lock.ownerId(), playerId)));
     }
 
     private boolean hasWithdrawAccess(UUID playerId, boolean administrator, Set<ContainerLock> selectedLocks) {
         return selectedLocks.stream().allMatch(lock ->
-                lock.canWithdraw(playerId, administrator) || profiles.isTrusted(lock.ownerId(), playerId));
+                lock.canWithdraw(playerId, administrator, profiles.isTrusted(lock.ownerId(), playerId)));
     }
 }

@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.object.TeleportRequest;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;
+import gg.nurmi.survivaltweaks.service.PlayerNameLookup;
 import gg.nurmi.survivaltweaks.service.SafeTeleportService;
 import gg.nurmi.survivaltweaks.service.TeleportRequestService;
 import gg.nurmi.survivaltweaks.service.OnboardingService;
@@ -19,11 +20,12 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Clock;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 
 public final class TeleportCommand implements CommandExecutor, TabCompleter {
 
+    static final String PERMISSION = "survivaltweaks.command.teleport";
     public static final String BYPASS_PERMISSION = "survivaltweaks.teleport.bypass";
 
     private final Server server;
@@ -97,6 +99,7 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
                     () -> {
                         Player currentTarget = server.getPlayer(target.getUniqueId());
                         return currentTarget == null || !player.canSee(currentTarget)
+                                || !player.hasPermission(PERMISSION) || !player.hasPermission(BYPASS_PERMISSION)
                                 ? null : currentTarget.getLocation();
                     },
                     messages.component(
@@ -155,14 +158,7 @@ public final class TeleportCommand implements CommandExecutor, TabCompleter {
         if (!(sender instanceof Player player) || arguments.length != 1) {
             return List.of();
         }
-        String prefix = arguments[0].toLowerCase(Locale.ROOT);
-        return server.getOnlinePlayers().stream()
-                .filter(candidate -> !candidate.getUniqueId().equals(player.getUniqueId()))
-                .filter(player::canSee)
-                .map(Player::getName)
-                .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(prefix))
-                .sorted()
-                .toList();
+        return PlayerNameLookup.otherPlayerSuggestions(server, player, arguments[0], Comparator.naturalOrder());
     }
 
 }

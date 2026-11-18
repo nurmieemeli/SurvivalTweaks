@@ -5,12 +5,6 @@ import gg.nurmi.survivaltweaks.object.NewPlayerSpawnLocation;
 import gg.nurmi.survivaltweaks.object.NewPlayerSpawnState;
 import org.bukkit.configuration.file.YamlConfiguration;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,23 +16,18 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public final class NewPlayerSpawnStore implements NewPlayerSpawnDataStore {
+import static gg.nurmi.survivaltweaks.storage.LegacyYamlFields.number;
+import static gg.nurmi.survivaltweaks.storage.LegacyYamlFields.text;
 
-    public static final int SCHEMA_VERSION = 2;
+final class NewPlayerSpawnStore {
 
-    private final Path file;
     private final Logger logger;
 
-    public NewPlayerSpawnStore(Path file, Logger logger) {
-        this.file = Objects.requireNonNull(file, "file");
+    NewPlayerSpawnStore(Logger logger) {
         this.logger = Objects.requireNonNull(logger, "logger");
     }
 
-    public NewPlayerSpawnState load() {
-        if (Files.notExists(file)) {
-            return NewPlayerSpawnState.EMPTY;
-        }
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file.toFile());
+    NewPlayerSpawnState load(YamlConfiguration yaml) {
         List<NewPlayerSpawnLocation> available = new ArrayList<>();
         List<NewPlayerSpawnLocation> retired = new ArrayList<>();
         Map<UUID, NewPlayerSpawnAssignment> assignments = new LinkedHashMap<>();
@@ -54,16 +43,14 @@ public final class NewPlayerSpawnStore implements NewPlayerSpawnDataStore {
             try {
                 UUID playerId = UUID.fromString(text(values, "player"));
                 NewPlayerSpawnLocation location = deserializeLocation(map(values, "location"));
-                assignments.put(
-                        playerId,
-                        new NewPlayerSpawnAssignment(
-                                playerId,
-                                location,
-                                Boolean.TRUE.equals(values.get("completed"))
-                        )
-                );
+                var assignment = new NewPlayerSpawnAssignment(playerId, location,
+                        Boolean.TRUE.equals(values.get("completed")));
+                if (assignments.putIfAbsent(playerId, assignment) != null) {
+                    throw new IllegalArgumentException("Duplicate spawn assignment for player " + playerId);
+                }
             } catch (RuntimeException exception) {
-                logger.log(Level.WARNING, "Skipped an invalid new-player spawn assignment", exception);
+                logger.log(Level.WARNING, "Skipped an invalid new-player spawn assignment: " + exception.getMessage(),
+                        exception);
             }
         }
         for (Map<?, ?> values : yaml.getMapList("retired")) {
@@ -81,59 +68,6 @@ public final class NewPlayerSpawnStore implements NewPlayerSpawnDataStore {
             }
         }
         return new NewPlayerSpawnState(available, assignments, retired, awaitingReplacement);
-    }
-
-    @Override
-    public NewPlayerSpawnState loadSpawnState() {
-        return load();
-    }
-
-    public void save(NewPlayerSpawnState state) throws IOException {
-        Path parent = Objects.requireNonNull(file.getParent(), "spawn file parent");
-        Files.createDirectories(parent);
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.set("schema-version", SCHEMA_VERSION);
-        yaml.set("available", state.available().stream().map(this::serializeLocation).toList());
-        yaml.set("assignments", state.assignments().values().stream()
-                .sorted(java.util.Comparator.comparing(assignment -> assignment.playerId().toString()))
-                .map(this::serializeAssignment)
-                .toList());
-        yaml.set("retired", state.retired().stream().map(this::serializeLocation).toList());
-        yaml.set(
-                "awaiting-replacement",
-                state.awaitingReplacement().stream().map(UUID::toString).sorted().toList()
-        );
-        Path temporary = Files.createTempFile(parent, "new-player-spawns-", ".tmp");
-        try {
-            Files.writeString(temporary, yaml.saveToString(), StandardCharsets.UTF_8);
-            replaceAtomically(temporary, file);
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
-    }
-
-    @Override
-    public void saveSpawnState(NewPlayerSpawnState state) throws IOException {
-        save(state);
-    }
-
-    private Map<String, Object> serializeAssignment(NewPlayerSpawnAssignment assignment) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("player", assignment.playerId().toString());
-        values.put("completed", assignment.completed());
-        values.put("location", serializeLocation(assignment.location()));
-        return values;
-    }
-
-    private Map<String, Object> serializeLocation(NewPlayerSpawnLocation location) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("world-uuid", location.worldId().toString());
-        values.put("world", location.worldName());
-        values.put("x", location.x());
-        values.put("y", location.y());
-        values.put("z", location.z());
-        values.put("yaw", location.yaw());
-        return values;
     }
 
     private NewPlayerSpawnLocation deserializeLocation(Map<?, ?> values) {
@@ -155,27 +89,4 @@ public final class NewPlayerSpawnStore implements NewPlayerSpawnDataStore {
         return mapped;
     }
 
-    private String text(Map<?, ?> values, String key) {
-        Object value = values.get(key);
-        if (value == null || value.toString().isBlank()) {
-            throw new IllegalArgumentException("Missing text field '" + key + "'");
-        }
-        return value.toString();
-    }
-
-    private Number number(Map<?, ?> values, String key) {
-        Object value = values.get(key);
-        if (!(value instanceof Number number)) {
-            throw new IllegalArgumentException("Missing numeric field '" + key + "'");
-        }
-        return number;
-    }
-
-    private void replaceAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
 }

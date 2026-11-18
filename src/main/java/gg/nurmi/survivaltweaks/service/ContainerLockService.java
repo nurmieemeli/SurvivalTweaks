@@ -152,12 +152,20 @@ public final class ContainerLockService implements AutoCloseable {
         return changed;
     }
 
-    public boolean transfer(ContainerLock lock, UUID newOwnerId) {
-        boolean changed = lock.transfer(newOwnerId);
-        if (changed) {
-            markDirty();
+    public TransferResult transfer(ContainerLock lock, UUID newOwnerId, int maximumLocks) {
+        if (lock.ownerId().equals(newOwnerId)) {
+            return TransferResult.ALREADY_OWNER;
         }
-        return changed;
+        if (lockCount(newOwnerId) >= maximumLocks) {
+            return TransferResult.LIMIT;
+        }
+        lock.transfer(newOwnerId);
+        markDirty();
+        return TransferResult.TRANSFERRED;
+    }
+
+    public enum TransferResult {
+        ALREADY_OWNER, LIMIT, TRANSFERRED
     }
 
     public boolean toggleAutomation(ContainerLock lock) {
@@ -192,6 +200,29 @@ public final class ContainerLockService implements AutoCloseable {
             accessHistory.remove(lock.id());
             markDirty();
         }
+    }
+
+    /** Returns whether breaking the block removed the entire lock. */
+    public boolean detachBrokenBlock(ContainerLock lock, BlockKey broken, Set<BlockKey> connected) {
+        boolean changed = false;
+        for (BlockKey survivor : connected) {
+            if (!survivor.equals(broken) && !locksByBlock.containsKey(survivor) && lock.addBlock(survivor)) {
+                locksByBlock.put(survivor, lock);
+                changed = true;
+            }
+        }
+        if (lock.blocks().size() == 1 && locksByBlock.get(broken) == lock) {
+            remove(lock);
+            return true;
+        }
+        if (lock.removeBlock(broken)) {
+            locksByBlock.remove(broken, lock);
+            changed = true;
+        }
+        if (changed) {
+            markDirty();
+        }
+        return false;
     }
 
     public boolean isLocked(BlockKey block) {

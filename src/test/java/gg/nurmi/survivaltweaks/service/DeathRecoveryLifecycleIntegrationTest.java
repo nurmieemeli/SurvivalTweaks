@@ -2,7 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
-import gg.nurmi.survivaltweaks.storage.DeathMarkerStore;
+import gg.nurmi.survivaltweaks.storage.StorageManager;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -42,7 +42,7 @@ class DeathRecoveryLifecycleIntegrationTest {
     Path temporary;
 
     @Test
-    void deathMarkerSurvivesRespawnRejoinShutdownAndServiceRestart() {
+    void deathMarkerSurvivesRespawnRejoinShutdownAndServiceRestart() throws Exception {
         UUID playerId = UUID.randomUUID();
         UUID worldId = UUID.randomUUID();
         World world = mock(World.class);
@@ -75,50 +75,50 @@ class DeathRecoveryLifecycleIntegrationTest {
         YamlConfiguration yaml = bundledConfig();
         yaml.set("death-recovery.floating-guide.enabled", false);
         SettingsService settings = new SettingsService(PluginSettings.validate(yaml));
-        DeathMarkerStore store = new DeathMarkerStore(
-                temporary.resolve("death-markers.yml"),
-                Logger.getAnonymousLogger()
-        );
         NotificationService notifications = mock(NotificationService.class);
         OnboardingService onboarding = mock(OnboardingService.class);
-        DeathRecoveryService service = new DeathRecoveryService(
-                plugin,
-                store,
-                mock(MessageService.class),
-                settings,
-                Clock.fixed(Instant.parse("2026-07-30T05:00:00Z"), ZoneOffset.UTC),
-                mock(FeedbackService.class),
-                notifications,
-                onboarding
-        );
+        try (var storage = StorageManager.open(yaml, temporary, plugin.getLogger(), name -> null)) {
+            DeathRecoveryService service = new DeathRecoveryService(
+                    plugin,
+                    storage.store(),
+                    mock(MessageService.class),
+                    settings,
+                    Clock.fixed(Instant.parse("2026-07-30T05:00:00Z"), ZoneOffset.UTC),
+                    mock(FeedbackService.class),
+                    notifications,
+                    onboarding
+            );
 
-        PlayerDeathEvent death = mock(PlayerDeathEvent.class);
-        when(death.getEntity()).thenReturn(player);
-        when(death.getDrops()).thenReturn(new ArrayList<>());
-        service.onDeath(death);
-        assertTrue(service.hasActiveMarker(playerId));
+            PlayerDeathEvent death = mock(PlayerDeathEvent.class);
+            when(death.getEntity()).thenReturn(player);
+            when(death.getDrops()).thenReturn(new ArrayList<>());
+            service.onDeath(death);
+            assertTrue(service.hasActiveMarker(playerId));
 
-        PlayerRespawnEvent respawn = mock(PlayerRespawnEvent.class);
-        when(respawn.getPlayer()).thenReturn(player);
-        service.onRespawn(respawn);
-        PlayerJoinEvent rejoin = mock(PlayerJoinEvent.class);
-        when(rejoin.getPlayer()).thenReturn(player);
-        service.onJoin(rejoin);
-        service.close();
+            PlayerRespawnEvent respawn = mock(PlayerRespawnEvent.class);
+            when(respawn.getPlayer()).thenReturn(player);
+            service.onRespawn(respawn);
+            PlayerJoinEvent rejoin = mock(PlayerJoinEvent.class);
+            when(rejoin.getPlayer()).thenReturn(player);
+            service.onJoin(rejoin);
+            service.close();
+        }
 
         verify(expiryTask).cancel();
-        DeathRecoveryService restarted = new DeathRecoveryService(
-                plugin,
-                store,
-                mock(MessageService.class),
-                settings,
-                Clock.fixed(Instant.parse("2026-07-30T05:01:00Z"), ZoneOffset.UTC),
-                mock(FeedbackService.class),
-                notifications,
-                onboarding
-        );
-        assertTrue(restarted.hasActiveMarker(playerId));
-        restarted.close();
+        try (var storage = StorageManager.open(yaml, temporary, plugin.getLogger(), name -> null)) {
+            DeathRecoveryService restarted = new DeathRecoveryService(
+                    plugin,
+                    storage.store(),
+                    mock(MessageService.class),
+                    settings,
+                    Clock.fixed(Instant.parse("2026-07-30T05:01:00Z"), ZoneOffset.UTC),
+                    mock(FeedbackService.class),
+                    notifications,
+                    onboarding
+            );
+            assertTrue(restarted.hasActiveMarker(playerId));
+            restarted.close();
+        }
     }
 
     private YamlConfiguration bundledConfig() {

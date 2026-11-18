@@ -1,9 +1,10 @@
 package gg.nurmi.survivaltweaks.service;
 
+import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.object.Profile;
-import gg.nurmi.survivaltweaks.storage.ProfileStore;
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.ProfileFiles;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Server;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -25,15 +26,22 @@ import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MailServiceTest {
@@ -51,7 +59,7 @@ class MailServiceTest {
 
     @BeforeEach
     void openProfiles() {
-        profiles = new ProfileRepository(new ProfileStore(directory, logger), logger);
+        profiles = new ProfileRepository(new ProfileFiles(directory, logger), logger);
         // Delivery completes on the main thread; run it inline so join() observes the result.
         BukkitScheduler scheduler = mock(BukkitScheduler.class);
         when(server.getScheduler()).thenReturn(scheduler);
@@ -67,12 +75,69 @@ class MailServiceTest {
     }
 
     @Test
+    void cooldownSkipsRecipientLoadAndFailedLookupReleasesPendingSend() {
+        var repository = spy(profiles);
+        var service = new MailService(plugin, server, defaults(), repository,
+                new NotificationService(repository, clock), mock(MessageService.class), mock(FeedbackService.class), clock);
+        UUID senderId = UUID.randomUUID();
+        Player sender = sender(senderId);
+        UUID recipientId = UUID.randomUUID();
+        OfflinePlayer recipient = offline(recipientId, true);
+        var lookup = new CompletableFuture<Profile>();
+        doReturn(lookup).doCallRealMethod().when(repository).loadAsync(recipientId);
+        UUID secondRecipientId = UUID.randomUUID();
+        OfflinePlayer secondRecipient = offline(secondRecipientId, true);
+
+        var first = service.sendAsync(sender, recipient, "first");
+        assertEquals(MailService.SendResult.COOLDOWN, service.sendAsync(sender, secondRecipient, "queued").join());
+        lookup.completeExceptionally(new IllegalStateException("Database unavailable"));
+        assertThrows(CompletionException.class, first::join);
+        assertEquals(MailService.SendResult.SENT, service.sendAsync(sender, recipient, "retry").join());
+        assertEquals(MailService.SendResult.COOLDOWN, service.sendAsync(sender, secondRecipient, "again").join());
+        verify(repository, never()).loadAsync(secondRecipientId);
+    }
+
+    @Test
+    void failedRecipientLoadReportsDeliveryFailure() {
+        var brokenProfiles = mock(ProfileRepository.class);
+        var messages = mock(MessageService.class);
+        UUID recipientId = UUID.randomUUID();
+        when(plugin.getLogger()).thenReturn(logger);
+        when(brokenProfiles.<MailService.SendResult>withProfileAsync(eq(recipientId), any(), any())).thenReturn(
+                java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("Database unavailable")));
+        var service = new MailService(plugin, server, defaults(), brokenProfiles,
+                mock(NotificationService.class), messages, mock(FeedbackService.class), clock);
+        var sender = sender(UUID.randomUUID());
+        when(sender.isOnline()).thenReturn(true);
+
+        service.sendWithFeedbackAsync(sender, offline(recipientId, true), "Hello");
+
+        org.mockito.Mockito.verify(messages).send(sender, "mail.result.failed");
+    }
+
+    @Test
     void normalizeCollapsesWhitespaceAndRemovesControlCharacters() {
         assertEquals("hello there", MailService.normalize("  hello \t there  "));
         assertEquals("one two", MailService.normalize("one\n\r\ntwo"));
         assertEquals("a b", MailService.normalize("ab"));
         assertEquals("", MailService.normalize(null));
         assertEquals("", MailService.normalize("   "));
+    }
+
+    @Test
+    void fullMailboxKeepsDeliveredMailAndReportsTheRefusedDelivery() {
+        UUID recipientId = UUID.randomUUID();
+        UUID senderId = UUID.randomUUID();
+        NotificationService notifications = new NotificationService(profiles, clock);
+        for (int index = 0; index < 80; index++) {
+            assertTrue(notifications.mail(recipientId, senderId, "Alex", "Letter " + index));
+        }
+        var before = profiles.load(recipientId).notifications();
+
+        assertEquals(MailService.SendResult.MAILBOX_FULL,
+                mail(defaults()).sendAsync(sender(senderId), offline(recipientId, true), "New mail").join());
+        assertFalse(notifications.notify(recipientId, NotificationType.LOCK_ACCESS_DENIED, "Alex", "Chest"));
+        assertEquals(before, profiles.load(recipientId).notifications());
     }
 
     @Test
@@ -248,8 +313,29 @@ class MailServiceTest {
         assertTrue(mail.block(sender(ownerId), offline(blockedId, true)));
         profiles.close();
 
-        profiles = new ProfileRepository(new ProfileStore(directory, logger), logger);
+        profiles = new ProfileRepository(new ProfileFiles(directory, logger), logger);
         assertTrue(profiles.load(ownerId).blocksMailFrom(blockedId));
+    }
+
+    @Test
+    void cacheMissUsesOnlyAnUnambiguousSavedNameAndTracksRenames() {
+        UUID firstId = UUID.randomUUID();
+        Profile first = profiles.load(firstId);
+        first.lastKnownName("OfflineSam");
+        profiles.save(first);
+        OfflinePlayer recipient = offline(firstId, true);
+        when(server.getOfflinePlayer(firstId)).thenReturn(recipient);
+        MailService mail = mail(defaults());
+        assertEquals(recipient, mail.findRecipient("offlinesam"));
+
+        Profile second = profiles.load(UUID.randomUUID());
+        second.lastKnownName("offlinesam");
+        profiles.save(second);
+        assertNull(mail.findRecipient("offlinesam"));
+
+        second.lastKnownName("NewName");
+        profiles.save(second);
+        assertEquals(recipient, mail.findRecipient("offlinesam"));
     }
 
     @Test

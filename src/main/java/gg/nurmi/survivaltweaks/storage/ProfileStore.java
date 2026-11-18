@@ -9,19 +9,13 @@ import gg.nurmi.survivaltweaks.object.OnboardingHint;
 import gg.nurmi.survivaltweaks.object.PlayerNotification;
 import gg.nurmi.survivaltweaks.object.PlayerPreferences;
 import gg.nurmi.survivaltweaks.object.Profile;
-import gg.nurmi.survivaltweaks.object.ProfileSnapshot;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.Material;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,94 +25,62 @@ import java.time.Instant;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
-public final class ProfileStore implements ProfileDataStore {
+public final class ProfileStore {
 
     static final int SCHEMA_VERSION = 6;
+    private static final Pattern PROFILE_FILENAME = Pattern.compile(
+            "[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\.yml");
+
+    public static boolean isProfileFilename(String filename) {
+        return PROFILE_FILENAME.matcher(filename).matches();
+    }
 
     private final Path directory;
     private final Logger logger;
     private final Function<String, UUID> worldResolver;
 
-    public ProfileStore(Path directory, Logger logger) {
-        this(directory, logger, ignored -> null);
-    }
-
-    public ProfileStore(Path directory, Logger logger, Function<String, UUID> worldResolver) {
+    ProfileStore(Path directory, Logger logger, Function<String, UUID> worldResolver) {
         this.directory = Objects.requireNonNull(directory, "directory");
         this.logger = Objects.requireNonNull(logger, "logger");
         this.worldResolver = Objects.requireNonNull(worldResolver, "worldResolver");
     }
 
-    public Profile load(UUID uniqueId) {
+    Profile load(UUID uniqueId, YamlConfiguration yaml) {
         Profile profile = new Profile(uniqueId);
         Path file = fileFor(uniqueId);
-        if (Files.notExists(file)) {
-            return profile;
-        }
-
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file.toFile());
         if (yaml.getInt("schema-version", 0) < SCHEMA_VERSION) {
             profile.requireMigration();
         }
-        if (yaml.isList("homes")) {
-            loadCurrentHomes(profile, yaml.getMapList("homes"), file);
+        if (yaml.get("homes") instanceof List<?> homes) {
+            loadCurrentHomes(profile, homes, file);
         } else {
+            if (yaml.contains("homes")) {
+                throw new IllegalArgumentException("homes must be a list");
+            }
+            if (yaml.contains("home") && !yaml.isConfigurationSection("home")) {
+                throw new IllegalArgumentException("home must be a section");
+            }
             loadLegacyHomes(profile, yaml.getConfigurationSection("home"), file);
         }
         loadExperience(profile, yaml, file);
         return profile;
     }
 
-    /**
-     * The legacy YAML format predates global trusts and never stored them, so there is nothing to
-     * read. This store only backs the one-time import into SQL; trusts are held there instead.
-     */
-    @Override
-    public Map<UUID, Set<UUID>> loadAllGlobalTrusts() {
-        return Map.of();
-    }
-
-    public void save(ProfileSnapshot snapshot) throws IOException {
-        Files.createDirectories(directory);
-
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.set("schema-version", SCHEMA_VERSION);
-        yaml.set("homes", snapshot.homes().stream().map(this::serialize).toList());
-        yaml.set("preferences", serializePreferences(snapshot.preferences()));
-        yaml.set("seen-hints", snapshot.seenHints().stream().map(Enum::name).sorted().toList());
-        yaml.set("notifications", snapshot.notifications().stream().map(this::serializeNotification).toList());
-        yaml.set("social.last-known-name", snapshot.lastKnownName());
-        yaml.set(
-                "social.last-seen-at",
-                snapshot.lastSeenAt() == null ? null : snapshot.lastSeenAt().toString()
-        );
-        yaml.set("social.play-time-ticks", snapshot.playTimeTicks());
-        yaml.set(
-                "social.blocked-mail-senders",
-                snapshot.blockedMailSenders().stream().map(UUID::toString).sorted().toList()
-        );
-
-        Path target = fileFor(snapshot.uniqueId());
-        Path temporary = Files.createTempFile(directory, snapshot.uniqueId() + "-", ".tmp");
-        try {
-            Files.writeString(temporary, yaml.saveToString(), StandardCharsets.UTF_8);
-            replaceAtomically(temporary, target);
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
-    }
-
-    private void loadCurrentHomes(Profile profile, List<Map<?, ?>> serializedHomes, Path file) {
-        for (Map<?, ?> values : serializedHomes) {
+    private void loadCurrentHomes(Profile profile, List<?> serializedHomes, Path file) {
+        for (Object serialized : serializedHomes) {
             try {
+                if (!(serialized instanceof Map<?, ?> values)) {
+                    throw new IllegalArgumentException("homes entries must be mappings");
+                }
                 String worldName = text(values, "world");
                 UUID worldId = optionalUuid(values, "world-uuid");
                 if (worldId == null) {
                     worldId = worldResolver.apply(worldName);
                     profile.requireMigration();
                 }
-                profile.addHome(new Home(
+                addHome(profile, new Home(
                         text(values, "name"),
                         worldId,
                         worldName,
@@ -157,16 +119,18 @@ public final class ProfileStore implements ProfileDataStore {
         for (String name : homes.getKeys(false)) {
             String path = name + ".";
             try {
-                String worldName = Objects.requireNonNull(homes.getString(path + "world"), "world");
-                profile.addHome(new Home(
+                if (!(homes.get(path + "world") instanceof String worldName)) {
+                    throw new IllegalArgumentException("home." + path + "world must be text");
+                }
+                addHome(profile, new Home(
                         name,
                         worldResolver.apply(worldName),
                         worldName,
-                        homes.getDouble(path + "x"),
-                        homes.getDouble(path + "y"),
-                        homes.getDouble(path + "z"),
-                        (float) homes.getDouble(path + "yaw"),
-                        (float) homes.getDouble(path + "pitch")
+                        legacyHomeNumber(homes, path + "x"),
+                        legacyHomeNumber(homes, path + "y"),
+                        legacyHomeNumber(homes, path + "z"),
+                        (float) legacyHomeNumber(homes, path + "yaw"),
+                        (float) legacyHomeNumber(homes, path + "pitch")
                 ));
                 profile.requireMigration();
             } catch (RuntimeException exception) {
@@ -175,38 +139,34 @@ public final class ProfileStore implements ProfileDataStore {
         }
     }
 
-    private Map<String, Object> serialize(Home home) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("name", home.name());
-        values.put("world-uuid", home.worldId() == null ? null : home.worldId().toString());
-        values.put("world", home.worldName());
-        values.put("x", home.x());
-        values.put("y", home.y());
-        values.put("z", home.z());
-        values.put("yaw", home.yaw());
-        values.put("pitch", home.pitch());
-        values.put("icon", home.icon().getKey().asString());
-        values.put("description", home.description());
-        values.put("favorite", home.favorite());
-        values.put("order", home.order());
-        values.put("category", home.category().name());
-        values.put("arrival-style", home.arrivalStyle().name());
-        values.put("shared-with", home.sharedWith().stream().map(UUID::toString).sorted().toList());
-        return values;
+    private void addHome(Profile profile, Home home) {
+        if (!profile.addHome(home)) {
+            throw new IllegalArgumentException("Duplicate home name '" + home.name() + "'");
+        }
+    }
+
+    private double legacyHomeNumber(ConfigurationSection homes, String path) {
+        if (homes.get(path, 0) instanceof Number number && Double.isFinite(number.doubleValue())) {
+            return number.doubleValue();
+        }
+        throw new IllegalArgumentException("home." + path + " must be a finite number");
     }
 
     private void loadExperience(Profile profile, YamlConfiguration yaml, Path file) {
+        if (yaml.contains("preferences") && !yaml.isConfigurationSection("preferences")) {
+            throw new IllegalArgumentException("preferences must be a section");
+        }
         profile.preferences(new PlayerPreferences(
-                yaml.getBoolean("preferences.sounds", true),
-                yaml.getBoolean("preferences.particles", true),
-                yaml.getBoolean("preferences.dialogs", true),
-                yaml.getBoolean("preferences.action-bar", true),
-                yaml.getBoolean("preferences.reduced-effects", false),
-                yaml.getBoolean("preferences.player-list", true),
-                yaml.getBoolean("preferences.mention-notifications", true),
-                yaml.getBoolean("preferences.journey-guidance", true),
-                yaml.getBoolean("preferences.public-profile", true),
-                yaml.getBoolean("preferences.mail", true),
+                preference(yaml, "sounds", true),
+                preference(yaml, "particles", true),
+                preference(yaml, "dialogs", true),
+                preference(yaml, "action-bar", true),
+                preference(yaml, "reduced-effects", false),
+                preference(yaml, "player-list", true),
+                preference(yaml, "mention-notifications", true),
+                preference(yaml, "journey-guidance", true),
+                preference(yaml, "public-profile", true),
+                preference(yaml, "mail", true),
                 enumValue(
                         LanguagePreference.class,
                         yaml.get("preferences.language"),
@@ -225,9 +185,10 @@ public final class ProfileStore implements ProfileDataStore {
         profile.seenHints(hints);
 
         ArrayList<PlayerNotification> notifications = new ArrayList<>();
+        Set<UUID> notificationIds = new HashSet<>();
         for (Map<?, ?> values : yaml.getMapList("notifications")) {
             try {
-                notifications.add(new PlayerNotification(
+                PlayerNotification notification = new PlayerNotification(
                         UUID.fromString(text(values, "id")),
                         NotificationType.valueOf(text(values, "type").toUpperCase(java.util.Locale.ROOT)),
                         Instant.parse(text(values, "created-at")),
@@ -235,11 +196,15 @@ public final class ProfileStore implements ProfileDataStore {
                         Objects.toString(values.get("actor"), ""),
                         Objects.toString(values.get("detail"), ""),
                         Boolean.TRUE.equals(values.get("read"))
-                ));
+                );
+                if (!notificationIds.add(notification.id())) {
+                    throw new IllegalArgumentException("Duplicate notification ID " + notification.id());
+                }
+                notifications.add(notification);
             } catch (RuntimeException exception) {
                 logger.log(
                         Level.WARNING,
-                        "Skipped an invalid notification in " + file.getFileName(),
+                        "Skipped an invalid notification in " + file.getFileName() + ": " + exception.getMessage(),
                         exception
                 );
             }
@@ -266,35 +231,12 @@ public final class ProfileStore implements ProfileDataStore {
         profile.blockedMailSenders(blocked);
     }
 
-    private Map<String, Object> serializePreferences(PlayerPreferences preferences) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("sounds", preferences.soundsEnabled());
-        values.put("particles", preferences.particlesEnabled());
-        values.put("dialogs", preferences.dialogsEnabled());
-        values.put("action-bar", preferences.actionBarEnabled());
-        values.put("reduced-effects", preferences.reducedEffects());
-        values.put("player-list", preferences.playerListEnabled());
-        values.put("mention-notifications", preferences.mentionNotificationsEnabled());
-        values.put("journey-guidance", preferences.journeyGuidanceEnabled());
-        values.put("public-profile", preferences.publicProfileEnabled());
-        values.put("mail", preferences.mailEnabled());
-        values.put("language", preferences.language().name());
-        return values;
-    }
-
-    private Map<String, Object> serializeNotification(PlayerNotification notification) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("id", notification.id().toString());
-        values.put("type", notification.type().name());
-        values.put("created-at", notification.createdAt().toString());
-        values.put(
-                "actor-id",
-                notification.actorId() == null ? null : notification.actorId().toString()
-        );
-        values.put("actor", notification.actor());
-        values.put("detail", notification.detail());
-        values.put("read", notification.read());
-        return values;
+    private boolean preference(YamlConfiguration yaml, String key, boolean fallback) {
+        String path = "preferences." + key;
+        if (yaml.get(path, fallback) instanceof Boolean value) {
+            return value;
+        }
+        throw new IllegalArgumentException(path + " must be a boolean");
     }
 
     private Material material(Object value) {
@@ -327,8 +269,8 @@ public final class ProfileStore implements ProfileDataStore {
 
     private Number number(Map<?, ?> values, String key) {
         Object value = values.get(key);
-        if (!(value instanceof Number number)) {
-            throw new IllegalArgumentException("Missing numeric field '" + key + "'");
+        if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue())) {
+            throw new IllegalArgumentException("'" + key + "' must be a finite number");
         }
         return number;
     }
@@ -356,16 +298,9 @@ public final class ProfileStore implements ProfileDataStore {
         return Set.copyOf(set);
     }
 
-    private void replaceAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
     private void warnInvalidHome(Path file, RuntimeException exception) {
-        logger.log(Level.WARNING, "Skipped an invalid home in " + file.getFileName(), exception);
+        logger.log(Level.WARNING, "Skipped an invalid home in " + file.getFileName() + ": " + exception.getMessage(),
+                exception);
     }
 
     private Path fileFor(UUID uniqueId) {

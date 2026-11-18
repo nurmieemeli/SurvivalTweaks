@@ -4,6 +4,7 @@ import gg.nurmi.survivaltweaks.command.AfkCommand;
 import gg.nurmi.survivaltweaks.command.MailCommand;
 import gg.nurmi.survivaltweaks.command.ShoutCommand;
 import gg.nurmi.survivaltweaks.command.SurvivalTweaksCommand;
+import gg.nurmi.survivaltweaks.command.TrustCommand;
 import gg.nurmi.survivaltweaks.command.home.DeleteHomeCommand;
 import gg.nurmi.survivaltweaks.command.home.HomeCommand;
 import gg.nurmi.survivaltweaks.command.home.SetHomeCommand;
@@ -14,6 +15,7 @@ import gg.nurmi.survivaltweaks.command.teleport.TeleportCommand;
 import gg.nurmi.survivaltweaks.config.PluginSettings;
 import gg.nurmi.survivaltweaks.config.ConfigMigrationService;
 import gg.nurmi.survivaltweaks.config.SettingsService;
+import gg.nurmi.survivaltweaks.config.StrictYaml;
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.listener.ChatListener;
 import gg.nurmi.survivaltweaks.listener.ConnectionListener;
@@ -76,24 +78,33 @@ import gg.nurmi.survivaltweaks.ui.MailboxController;
 import gg.nurmi.survivaltweaks.ui.NotificationCenterController;
 import gg.nurmi.survivaltweaks.ui.PlayerHubController;
 import gg.nurmi.survivaltweaks.ui.PreferencesMenuController;
+import gg.nurmi.survivaltweaks.ui.ProfileMenuRequests;
 import gg.nurmi.survivaltweaks.ui.SocialProfileController;
 import gg.nurmi.survivaltweaks.ui.StatisticsJournalController;
 import gg.nurmi.survivaltweaks.ui.TeleportInboxController;
 import gg.nurmi.survivaltweaks.ui.TextPromptService;
 import gg.nurmi.survivaltweaks.ui.VanillaGuideController;
 import gg.nurmi.survivaltweaks.ui.WelcomeBackController;
+import org.bukkit.World;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.configuration.Configuration;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.time.Clock;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public final class SurvivalTweaks extends JavaPlugin {
 
@@ -106,6 +117,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private ContainerLockService containerLocks;
     private LockTargetStatusService lockTargetStatus;
     private SettingsService settings;
+    private FileConfiguration configuration;
     private MessageService messages;
     private FeedbackService feedback;
     private BackupService backups;
@@ -114,6 +126,7 @@ public final class SurvivalTweaks extends JavaPlugin {
     private PersistenceCoordinator persistenceCoordinator;
     private OperationalHealthService operationalHealth;
     private StorageManager storageManager;
+    private Exception failedRestoreStartup;
     private DiagnosticService diagnostics;
     private DeathRecoveryService deathRecovery;
     private NewPlayerSpawnService newPlayerSpawns;
@@ -133,20 +146,50 @@ public final class SurvivalTweaks extends JavaPlugin {
     private BukkitTask purgeTask;
 
     @Override
+    public FileConfiguration getConfig() {
+        if (configuration == null) {
+            reloadConfig();
+        }
+        return configuration;
+    }
+
+    @Override
+    public void reloadConfig() {
+        var file = getDataFolder().toPath().resolve("config.yml");
+        try (var defaults = getTextResource("config.yml")) {
+            YamlConfiguration loaded = Files.notExists(file) ? new YamlConfiguration() : StrictYaml.load(file);
+            loaded.setDefaults(YamlConfiguration.loadConfiguration(defaults));
+            configuration = loaded;
+        } catch (IOException | InvalidConfigurationException exception) {
+            throw new IllegalStateException("Could not load config.yml: " + exception.getMessage(), exception);
+        }
+    }
+
+    @Override
     public void onEnable() {
-        backups = new BackupService(getDataFolder().toPath(), clock, getLogger());
+        // Backup verification also runs off the server thread.
+        var startupWorlds = getServer().getWorlds().stream().collect(Collectors.toUnmodifiableMap(
+                world -> world.getName().toLowerCase(Locale.ROOT), World::getUID));
+        backups = new BackupService(getDataFolder().toPath(), clock, getLogger(),
+                name -> startupWorlds.get(name.toLowerCase(Locale.ROOT)));
+        BackupService.RestoreResult restore = BackupService.RestoreResult.NONE;
         try {
+            backups.discardAbandonedRestoreWork();
             backups.recoverInterruptedRestore();
             saveDefaultConfig();
-            backups.databaseFilename(
-                    getConfig().getString("storage.sqlite.file", "survivaltweaks.db")
-            );
-            backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
-            if (backups.hasPendingRestore()) {
-                backups.createPreRestoreBackup();
-                backups.applyPendingRestore();
+            boolean pendingRestore = backups.hasPendingRestore();
+            try {
                 reloadConfig();
                 backups.databaseFilename(getConfig().getString("storage.sqlite.file", "survivaltweaks.db"));
+            } catch (IllegalStateException | IllegalArgumentException failure) {
+                if (!pendingRestore) {
+                    throw failure;
+                }
+                getLogger().warning(failure.getMessage());
+            }
+            backups.snapshotLeaseFactory(backups::acquireStartupSnapshotLease);
+            if (pendingRestore) {
+                restore = backups.applyPendingRestore();
             } else {
                 backups.createStartupBackup();
             }
@@ -156,17 +199,36 @@ public final class SurvivalTweaks extends JavaPlugin {
                     exception
             );
         }
-        try {
-            ConfigMigrationService.Result migration = new ConfigMigrationService(clock, getLogger())
-                    .migrate(getConfig(), getDataFolder().toPath());
-            if (migration.changed()) {
-                saveConfig();
+        if (restore == BackupService.RestoreResult.PREPARED) {
+            try {
+                storageManager = loadStartupStorage(true);
+            } catch (IOException | RuntimeException failure) {
+                try {
+                    backups.rollbackFailedRestore(failure);
+                    restore = BackupService.RestoreResult.REJECTED;
+                } catch (IOException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                    throw new IllegalStateException("Could not roll back the failed restore", failure);
+                }
             }
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not migrate config.yml safely", exception);
         }
-        mergeConfigDefaults();
+        try {
+            if (storageManager == null) {
+                storageManager = loadStartupStorage(false);
+            }
+            startServices();
+            if (restore == BackupService.RestoreResult.PREPARED) {
+                backups.commitRestore();
+            }
+        } catch (IOException | RuntimeException failure) {
+            if (restore == BackupService.RestoreResult.PREPARED) {
+                failedRestoreStartup = failure;
+            }
+            throw new IllegalStateException("Could not initialize SurvivalTweaks", failure);
+        }
+    }
 
+    private void startServices() {
         PluginSettings initialSettings = PluginSettings.load(getConfig(), getLogger());
         settings = new SettingsService(initialSettings);
         taskFailures = new TaskFailureIsolation(getLogger(), clock);
@@ -183,19 +245,6 @@ public final class SurvivalTweaks extends JavaPlugin {
         }
         feedback = new FeedbackService(getConfig(), getLogger());
         releaseUpdates = new ReleaseUpdateService(this, messages, getConfig(), clock);
-        try {
-            storageManager = StorageManager.open(
-                getConfig(),
-                getDataFolder().toPath(),
-                getLogger(),
-                worldName -> {
-                    org.bukkit.World world = getServer().getWorld(worldName);
-                    return world == null ? null : world.getUID();
-                }
-            );
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not initialize SurvivalTweaks storage", exception);
-        }
         backups.snapshotLeaseFactory(() -> {
             var lease = storageManager.acquireSnapshotLease();
             return lease::close;
@@ -256,7 +305,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 clock,
                 performanceGovernor,
                 taskFailures,
-                storageManager
+                storageManager,
+                backups
         );
         OnboardingService onboarding = new OnboardingService(profiles, messages);
         onboarding.guidancePreference(playerId ->
@@ -338,6 +388,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 getServer(),
                 containerResolver,
                 containerLocks,
+                settings,
                 messages,
                 feedback,
                 prompts,
@@ -356,6 +407,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 safeTeleports,
                 experience,
                 profiles,
+                clock,
                 taskFailures
         );
         ReloadService reloads = new ReloadService(
@@ -436,6 +488,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 feedback,
                 clock
         );
+        ProfileMenuRequests profileMenuRequests = new ProfileMenuRequests();
+        getServer().getPluginManager().registerEvents(profileMenuRequests, this);
         StatisticsJournalController statistics = new StatisticsJournalController(
                 this,
                 getServer(),
@@ -443,7 +497,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 profiles,
                 new PlayerStatisticsService(),
                 messages,
-                feedback
+                feedback,
+                profileMenuRequests
         );
         SocialProfileController socialProfile = new SocialProfileController(
                 this,
@@ -455,7 +510,8 @@ public final class SurvivalTweaks extends JavaPlugin {
                 statistics,
                 messages,
                 feedback,
-                clock
+                clock,
+                profileMenuRequests
         );
         LockListController lockList = new LockListController(
                 this,
@@ -598,13 +654,16 @@ public final class SurvivalTweaks extends JavaPlugin {
         newPlayerSpawns.start();
         playerList.start();
         sleepVotes.start();
-        profiles.retryPendingLanguages();
+        profiles.retryPendingLanguages(getServer().getScheduler().getMainThreadExecutor(this));
 
         getLogger().info("SurvivalTweaks enabled with " + initialSettings.maxHomes() + " homes per player.");
     }
 
     @Override
     public void onDisable() {
+        if (backups != null) {
+            backups.closeRestorePreparations();
+        }
         cancel(autosaveTask);
         cancel(purgeTask);
         if (atmosphere != null) {
@@ -690,6 +749,17 @@ public final class SurvivalTweaks extends JavaPlugin {
         settings = null;
         messages = null;
         feedback = null;
+        if (failedRestoreStartup != null) {
+            // Paper disables the plugin on startup failure. Close its writers and storage
+            // before moving the original database back into place.
+            try {
+                backups.rollbackFailedRestore(failedRestoreStartup);
+            } catch (IOException failure) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Could not roll back the failed restore", failure);
+            } finally {
+                failedRestoreStartup = null;
+            }
+        }
         backups = null;
         serverList = null;
         workBudget = null;
@@ -858,6 +928,9 @@ public final class SurvivalTweaks extends JavaPlugin {
         register("home", new HomeCommand(profiles, messages, homeMenu, this, getServer(), feedback));
         register("sethome", new SetHomeCommand(profiles, messages, feedback, settings, onboarding));
         register("deletehome", new DeleteHomeCommand(profiles, messages, feedback));
+        TrustCommand trust = new TrustCommand(getServer(), profiles, messages);
+        register("trust", trust);
+        register("untrust", trust);
         register("shout", new ShoutCommand(getServer(), messages, feedback));
         register("lock", new LockCommand(
                 getServer(),
@@ -951,6 +1024,7 @@ public final class SurvivalTweaks extends JavaPlugin {
             PluginSettings reloaded,
             FileConfiguration configuration
     ) {
+        storageManager.verifyReloadConfiguration(configuration);
         restartAutosave(reloaded);
         if (newPlayerSpawns != null) {
             newPlayerSpawns.reconfigure();
@@ -970,6 +1044,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         if (portableExports != null) {
             portableExports.reconfigure(configuration);
         }
+        this.configuration = configuration;
     }
 
 
@@ -1001,6 +1076,26 @@ public final class SurvivalTweaks extends JavaPlugin {
         if (task != null) {
             task.cancel();
         }
+    }
+
+    private StorageManager loadStartupStorage(boolean restoring) throws IOException {
+        saveDefaultConfig();
+        reloadConfig();
+        ConfigMigrationService.Result migration = new ConfigMigrationService(clock, getLogger())
+                .migrate(getConfig(), getDataFolder().toPath());
+        if (migration.changed()) {
+            saveConfig();
+        }
+        mergeConfigDefaults();
+        PortableExportService.validate(getConfig());
+        backups.databaseFilename(getConfig().getString("storage.sqlite.file", "survivaltweaks.db"));
+        Function<String, UUID> worldResolver = worldName -> {
+            org.bukkit.World world = getServer().getWorld(worldName);
+            return world == null ? null : world.getUID();
+        };
+        return restoring
+                ? StorageManager.openRestored(getConfig(), getDataFolder().toPath(), getLogger(), worldResolver)
+                : StorageManager.open(getConfig(), getDataFolder().toPath(), getLogger(), worldResolver);
     }
 
     private void mergeConfigDefaults() {

@@ -2,7 +2,7 @@ package gg.nurmi.survivaltweaks.service;
 
 import gg.nurmi.survivaltweaks.object.NotificationType;
 import gg.nurmi.survivaltweaks.object.Profile;
-import gg.nurmi.survivaltweaks.storage.ProfileStore;
+import gg.nurmi.survivaltweaks.storage.LegacyYamlFixtures.ProfileFiles;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,9 +28,32 @@ class NotificationServiceTest {
     Path directory;
 
     @Test
+    void administrativeLockChangesSkipTheOwnerAndKeepNotificationDeduplication() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        Logger logger = Logger.getAnonymousLogger();
+        ProfileFiles store = new ProfileFiles(directory, logger);
+        try (ProfileRepository profiles = new ProfileRepository(store, logger)) {
+            var notifications = new NotificationService(profiles, Clock.fixed(
+                    Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC));
+
+            assertFalse(notifications.lockAdministrativeChange(ownerId, ownerId, "Owner", "renamed"));
+            assertTrue(profiles.load(ownerId).notifications().isEmpty());
+            assertTrue(notifications.lockAdministrativeChange(ownerId, adminId, "Admin", "renamed"));
+            assertFalse(notifications.lockAdministrativeChange(ownerId, adminId, "Admin", "removed"));
+            var notification = profiles.load(ownerId).notifications().getFirst();
+            assertEquals(NotificationType.LOCK_ADMIN_CHANGED, notification.type());
+            assertEquals("Admin", notification.actor());
+            assertEquals("renamed", notification.detail());
+            assertTrue(profiles.flush(Duration.ofSeconds(5)));
+            assertEquals(List.of(notification), store.load(ownerId).notifications());
+        }
+    }
+
+    @Test
     void queuedNotificationUsesTheCurrentProfileAfterEviction() throws Exception {
         Logger logger = Logger.getAnonymousLogger();
-        ProfileStore store = new ProfileStore(directory, logger);
+        ProfileFiles store = new ProfileFiles(directory, logger);
         UUID recipientId = UUID.randomUUID();
         try (ProfileRepository profiles = new ProfileRepository(store, logger)) {
             Profile detached = profiles.load(recipientId);
@@ -64,7 +87,7 @@ class NotificationServiceTest {
         Instant now = Instant.parse("2026-07-27T12:00:00Z");
 
         try (ProfileRepository profiles = new ProfileRepository(
-                new ProfileStore(directory, logger),
+                new ProfileFiles(directory, logger),
                 logger
         )) {
             NotificationService notifications = new NotificationService(
@@ -88,7 +111,7 @@ class NotificationServiceTest {
         }
 
         try (ProfileRepository profiles = new ProfileRepository(
-                new ProfileStore(directory, logger),
+                new ProfileFiles(directory, logger),
                 logger
         )) {
             assertEquals(1L, profiles.load(playerId).unreadNotificationCount());
@@ -101,7 +124,7 @@ class NotificationServiceTest {
         UUID senderId = UUID.randomUUID();
         Logger logger = Logger.getLogger(NotificationServiceTest.class.getName());
         try (ProfileRepository profiles = new ProfileRepository(
-                new ProfileStore(directory, logger),
+                new ProfileFiles(directory, logger),
                 logger
         )) {
             NotificationService notifications = new NotificationService(
