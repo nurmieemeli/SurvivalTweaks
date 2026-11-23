@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.26.4 - 2026-11-23
+
+### Changed
+
+- Inventory menus share the same click checks and still defer actions until
+  the next tick.
+- Database maintenance uses the same row filters to preview and remove records.
+- The documentation now reflects the server language setting, SQL-backed
+  spawn pool, and order of teleport safety checks.
+
 ## 2.26.3 - 2026-11-18
 
 ### Fixed
