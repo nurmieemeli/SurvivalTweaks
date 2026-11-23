@@ -1,17 +1,15 @@
 # Player journeys
 
-These journeys define the intended order, safety properties, and feedback
-budget of the main player-facing workflows. They complement unit tests by
-making cross-feature behavior explicit.
+Use these checks when testing workflows that span more than one feature.
 
 ## First join
 
 1. Async pre-login loads the profile or rejects login with a stable message.
-2. `PlayerSessionService` starts the online session and records identity.
-3. `NewPlayerSpawnService` claims a unique prepared Overworld destination. If
+2. `PlayerSessionService` starts the session and records the player's identity.
+3. The experience service loads the player's language and preferences.
+4. `NewPlayerSpawnService` claims a unique prepared Overworld destination. If
    none is ready, the player waits at Paper's normal spawn and remains eligible
    for a prepared location if they reconnect.
-4. The experience service primes per-player locale and preference state.
 5. Onboarding and journey guidance begin after the player is placed safely.
 6. Operator health and update notices are shown only to authorized players.
 
@@ -21,29 +19,23 @@ location as another new player.
 
 ## Returning join
 
-1. The session owner captures the previous persisted `lastSeenAt` before
-   updating the active profile.
-2. The welcome-back controller decides whether the absence qualifies for its
-   richer overview.
+1. `PlayerSessionService` reads the saved `lastSeenAt` when the player joins.
+2. The welcome-back controller checks how long the player has been away.
 3. The session summary always retains urgent maintenance or restart notices.
-4. Mail, teleport-request, and death-marker counts are omitted from the compact
-   summary when the richer welcome view already contains them.
+4. When a welcome-back menu or prompt is scheduled, the session summary skips
+   unread notifications, pending teleport requests, and the active death marker.
 5. Release and storage-health notices are restricted to their permissions.
-
-This ordering gives one useful arrival experience instead of several services
-repeating the same information.
 
 ## Home teleport
 
 1. Resolve the named home by player UUID and stored world UUID.
 2. Reject an unavailable world without guessing by world name.
-3. Search for a safe landing near the destination without generating unsafe
-   synchronous terrain reads.
-4. Start the warm-up and cancel it on configured movement, damage, or state
+3. Start the warm-up and cancel it on configured movement, damage, or state
    changes.
-5. Close vulnerable container interaction before teleporting.
-6. Apply cooldown only according to the completed teleport contract and give
-   localized sound, particle, and message feedback.
+4. Load destination chunks asynchronously and look for a safe landing.
+5. Recheck the open container guard before moving the player.
+6. After a successful teleport, start the configured cooldown and show
+   arrival feedback.
 
 ## Player teleport request
 
@@ -87,8 +79,7 @@ repeating the same information.
    shutdown.
 4. Persistence producers stop, online sessions close, queues drain, and the
    server shuts down cleanly.
-5. An external process manager starts the server again; the plugin never
-   pretends it can guarantee that step.
+5. An external process manager starts the server again.
 
 ## Experience invariants
 

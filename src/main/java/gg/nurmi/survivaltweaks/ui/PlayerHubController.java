@@ -196,13 +196,7 @@ public final class PlayerHubController implements Listener {
         if (!(event.getView().getTopInventory().getHolder(false) instanceof HubHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(holder.ownerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, slot));
+        SurvivalTweaksMenu.afterClick(plugin, event, holder.ownerId(), this::handleClick);
     }
 
     private void handleClick(Player player, int slot) {

@@ -32,7 +32,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -154,13 +153,8 @@ public final class LockControlPanelController implements Listener {
         if (!(holder instanceof LockPanel panel)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(panel.viewerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, panel, slot));
+        SurvivalTweaksMenu.afterClick(plugin, event, panel.viewerId(),
+                (player, slot) -> handleClick(player, panel, slot));
     }
 
     private void handleClick(Player player, LockPanel panel, int slot) {

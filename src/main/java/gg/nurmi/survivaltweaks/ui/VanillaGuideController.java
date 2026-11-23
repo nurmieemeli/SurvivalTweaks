@@ -147,16 +147,13 @@ public final class VanillaGuideController implements Listener, CommandExecutor {
         if (!(event.getView().getTopInventory().getHolder(false) instanceof GuideHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(holder.ownerId())) {
-            return;
-        }
         if (event.getRawSlot() == BACK) {
-            SurvivalTweaksMenu.afterClick(plugin, event, player, () -> {
+            SurvivalTweaksMenu.afterClick(plugin, event, holder.ownerId(), (player, slot) -> {
                 feedback.play(player, FeedbackService.UI_CLICK);
                 back.accept(player);
             });
+        } else {
+            event.setCancelled(true);
         }
     }
 

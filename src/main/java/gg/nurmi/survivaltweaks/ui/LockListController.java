@@ -144,13 +144,8 @@ public final class LockListController implements Listener {
         if (!(event.getView().getTopInventory().getHolder(false) instanceof LockListHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(holder.ownerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot));
+        SurvivalTweaksMenu.afterClick(plugin, event, holder.ownerId(),
+                (player, slot) -> handleClick(player, holder, slot));
     }
 
     private void handleClick(Player player, LockListHolder holder, int slot) {

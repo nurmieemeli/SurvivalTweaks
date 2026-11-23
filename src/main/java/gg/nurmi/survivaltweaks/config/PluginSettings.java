@@ -227,7 +227,7 @@ public record PluginSettings(
                 )),
                 config.getBoolean("custom-death-messages.enabled", true),
                 boundedInt(config, logger, "custom-death-messages.rare-variant-percent", 5, 0, 100),
-                customDeathMessageCauses(config, logger),
+                enabledFlags(config, logger, "custom-death-messages.causes", CustomDeathCause.keys()),
                 config.getBoolean("chat.enabled", true),
                 config.getString("chat.player-name-format", "<name>"),
                 config.getBoolean("connection-messages.enabled", true),
@@ -269,7 +269,7 @@ public record PluginSettings(
                         0,
                         3600
                 )),
-                vanillaGuideTopics(config, logger),
+                enabledFlags(config, logger, "journey.vanilla-guide.topics", VanillaGuideTopic.keys()),
                 config.getBoolean("welcome-back.enabled", true),
                 Duration.ofHours(boundedInt(
                         config,
@@ -382,7 +382,7 @@ public record PluginSettings(
                 )),
                 strictBoolean(config, errors, "custom-death-messages.enabled"),
                 strictInt(config, errors, "custom-death-messages.rare-variant-percent", 0, 100),
-                strictCustomDeathMessageCauses(config, errors),
+                strictEnabledFlags(config, errors, "custom-death-messages.causes", CustomDeathCause.keys()),
                 strictBoolean(config, errors, "chat.enabled"),
                 strictString(config, errors, "chat.player-name-format"),
                 strictBoolean(config, errors, "connection-messages.enabled"),
@@ -422,7 +422,7 @@ public record PluginSettings(
                         0,
                         3600
                 )),
-                strictVanillaGuideTopics(config, errors),
+                strictEnabledFlags(config, errors, "journey.vanilla-guide.topics", VanillaGuideTopic.keys()),
                 strictBoolean(config, errors, "welcome-back.enabled"),
                 Duration.ofHours(strictInt(
                         config,
@@ -598,67 +598,37 @@ public record PluginSettings(
         return List.copyOf(values);
     }
 
-    private static Set<String> vanillaGuideTopics(
+    private static Set<String> enabledFlags(
             FileConfiguration config,
-            Logger logger
+            Logger logger,
+            String section,
+            Set<String> keys
     ) {
         LinkedHashSet<String> enabled = new LinkedHashSet<>();
-        for (String topic : VanillaGuideTopic.keys()) {
-            String path = "journey.vanilla-guide.topics." + topic;
+        for (String key : keys) {
+            String path = section + "." + key;
             Object configured = config.get(path);
             if (configured != null && !(configured instanceof Boolean)) {
                 logger.warning("Configuration value '" + path
                         + "' must be true or false; using true.");
-                enabled.add(topic);
+                enabled.add(key);
             } else if (config.getBoolean(path, true)) {
-                enabled.add(topic);
+                enabled.add(key);
             }
         }
         return Set.copyOf(enabled);
     }
 
-    private static Set<String> customDeathMessageCauses(
+    private static Set<String> strictEnabledFlags(
             FileConfiguration config,
-            Logger logger
+            List<String> errors,
+            String section,
+            Set<String> keys
     ) {
         LinkedHashSet<String> enabled = new LinkedHashSet<>();
-        for (String cause : CustomDeathCause.keys()) {
-            String path = "custom-death-messages.causes." + cause;
-            Object configured = config.get(path);
-            if (configured != null && !(configured instanceof Boolean)) {
-                logger.warning("Configuration value '" + path
-                        + "' must be true or false; using true.");
-                enabled.add(cause);
-            } else if (config.getBoolean(path, true)) {
-                enabled.add(cause);
-            }
-        }
-        return Set.copyOf(enabled);
-    }
-
-    private static Set<String> strictCustomDeathMessageCauses(
-            FileConfiguration config,
-            List<String> errors
-    ) {
-        LinkedHashSet<String> enabled = new LinkedHashSet<>();
-        for (String cause : CustomDeathCause.keys()) {
-            String path = "custom-death-messages.causes." + cause;
-            if (strictBoolean(config, errors, path)) {
-                enabled.add(cause);
-            }
-        }
-        return Set.copyOf(enabled);
-    }
-
-    private static Set<String> strictVanillaGuideTopics(
-            FileConfiguration config,
-            List<String> errors
-    ) {
-        LinkedHashSet<String> enabled = new LinkedHashSet<>();
-        for (String topic : VanillaGuideTopic.keys()) {
-            String path = "journey.vanilla-guide.topics." + topic;
-            if (strictBoolean(config, errors, path)) {
-                enabled.add(topic);
+        for (String key : keys) {
+            if (strictBoolean(config, errors, section + "." + key)) {
+                enabled.add(key);
             }
         }
         return Set.copyOf(enabled);

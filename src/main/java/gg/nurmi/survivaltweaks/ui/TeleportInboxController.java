@@ -145,14 +145,9 @@ public final class TeleportInboxController implements Listener, CommandExecutor 
         if (!(event.getView().getTopInventory().getHolder(false) instanceof Inbox inbox)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(inbox.ownerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
         ClickType click = event.getClick();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, inbox, slot, click));
+        SurvivalTweaksMenu.afterClick(plugin, event, inbox.ownerId(),
+                (player, slot) -> handleClick(player, inbox, slot, click));
     }
 
     private void handleClick(Player player, Inbox inbox, int slot, ClickType click) {

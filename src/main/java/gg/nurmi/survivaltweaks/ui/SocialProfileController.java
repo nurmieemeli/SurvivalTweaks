@@ -277,10 +277,7 @@ public final class SocialProfileController implements Listener, CommandExecutor,
             @NotNull String alias,
             @NotNull String[] arguments
     ) {
-        if (arguments.length != 1) {
-            return List.of();
-        }
-        return PlayerNameLookup.suggestions(server, sender, arguments[0]);
+        return PlayerNameLookup.suggestions(server, sender, arguments);
     }
 
     @EventHandler
@@ -288,13 +285,8 @@ public final class SocialProfileController implements Listener, CommandExecutor,
         if (!(event.getView().getTopInventory().getHolder(false) instanceof ProfileHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player viewer)
-                || !viewer.getUniqueId().equals(holder.viewerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
-        SurvivalTweaksMenu.afterClick(plugin, event, viewer, () -> handleClick(viewer, holder, slot));
+        SurvivalTweaksMenu.afterClick(plugin, event, holder.viewerId(),
+                (viewer, slot) -> handleClick(viewer, holder, slot));
     }
 
     private void handleClick(Player viewer, ProfileHolder holder, int slot) {

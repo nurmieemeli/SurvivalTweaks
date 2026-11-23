@@ -149,23 +149,15 @@ public final class HomeMenuController implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent event) {
-        if (event.getView().getTopInventory().getHolder(false) instanceof HomeCustomizationMenu editor) {
-            editorClick(event, editor);
-            return;
+        var holder = event.getView().getTopInventory().getHolder(false);
+        if (holder instanceof HomeCustomizationMenu editor) {
+            SurvivalTweaksMenu.afterClick(plugin, event, editor.ownerId(),
+                    (player, slot) -> handleEditorClick(player, editor, slot));
+        } else if (holder instanceof HomeMenu menu) {
+            ClickType click = event.getClick();
+            SurvivalTweaksMenu.afterClick(plugin, event, menu.ownerId(),
+                    (player, slot) -> handleClick(player, menu, slot, click));
         }
-        if (!(event.getView().getTopInventory().getHolder(false) instanceof HomeMenu menu)) {
-            return;
-        }
-
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(menu.ownerId())) {
-            return;
-        }
-
-        int slot = event.getRawSlot();
-        ClickType click = event.getClick();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, menu, slot, click));
     }
 
     private void handleClick(Player player, HomeMenu menu, int slot, ClickType click) {
@@ -217,16 +209,6 @@ public final class HomeMenuController implements Listener {
                 || event.getInventory().getHolder(false) instanceof HomeCustomizationMenu) {
             reorderSelections.remove(event.getPlayer().getUniqueId());
         }
-    }
-
-    private void editorClick(InventoryClickEvent event, HomeCustomizationMenu editor) {
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(editor.ownerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleEditorClick(player, editor, slot));
     }
 
     private void handleEditorClick(Player player, HomeCustomizationMenu editor, int slot) {

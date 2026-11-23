@@ -38,13 +38,6 @@ class MessageServiceTest {
             Logger.getAnonymousLogger()
     );
 
-    private static org.bukkit.configuration.file.YamlConfiguration finnishConfig() {
-        org.bukkit.configuration.file.YamlConfiguration config =
-                new org.bukkit.configuration.file.YamlConfiguration();
-        config.set("default-language", "FI");
-        return config;
-    }
-
     @Test
     void startupUsesBundledMessagesAndPreservesInvalidCatalogs(@TempDir Path directory) throws IOException {
         StringBuilder english = new StringBuilder("a0: &a0 {leaf: value}\n");
@@ -75,15 +68,15 @@ class MessageServiceTest {
 
     @Test
     void anUnsupportedDefaultLanguageIsRejectedRatherThanIgnored() {
-        org.bukkit.configuration.file.YamlConfiguration config =
-                new org.bukkit.configuration.file.YamlConfiguration();
+        YamlConfiguration config = new YamlConfiguration();
         config.set("default-language", "de");
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> MessageService.finnishByDefaultForTesting(config)
+                () -> MessageService.finnishByDefault(config)
         );
-        assertTrue(MessageService.finnishByDefaultForTesting(finnishConfig()));
+        config.set("default-language", "FI");
+        assertTrue(MessageService.finnishByDefault(config));
     }
 
     @Test

@@ -32,8 +32,10 @@ public final class PlayerNameLookup {
         return displayName(playerId, server.getOfflinePlayer(playerId).getName());
     }
 
-    public static List<String> suggestions(Server server, CommandSender sender, String input) {
-        return suggestions(server.getOnlinePlayers().stream(), sender, input, String.CASE_INSENSITIVE_ORDER);
+    public static List<String> suggestions(Server server, CommandSender sender, String[] arguments) {
+        return arguments.length == 1
+                ? suggestions(server.getOnlinePlayers().stream(), sender, arguments[0], String.CASE_INSENSITIVE_ORDER)
+                : List.of();
     }
 
     public static List<String> otherPlayerSuggestions(

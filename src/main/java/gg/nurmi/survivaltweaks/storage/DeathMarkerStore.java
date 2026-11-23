@@ -12,6 +12,9 @@ import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static gg.nurmi.survivaltweaks.storage.LegacyYamlFields.number;
+import static gg.nurmi.survivaltweaks.storage.LegacyYamlFields.text;
+
 final class DeathMarkerStore {
 
     private final Logger logger;
@@ -40,21 +43,5 @@ final class DeathMarkerStore {
             }
         }
         return List.copyOf(markers);
-    }
-
-    private String text(Map<?, ?> values, String key) {
-        Object value = values.get(key);
-        if (value == null || value.toString().isBlank()) {
-            throw new IllegalArgumentException("Missing " + key);
-        }
-        return value.toString();
-    }
-
-    private Number number(Map<?, ?> values, String key) {
-        Object value = values.get(key);
-        if (!(value instanceof Number number)) {
-            throw new IllegalArgumentException("Missing " + key);
-        }
-        return number;
     }
 }

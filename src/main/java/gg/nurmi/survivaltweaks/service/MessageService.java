@@ -242,18 +242,7 @@ public final class MessageService {
         return new Prepared(englishTemplates, finnishTemplates, finnishByDefault);
     }
 
-    /**
-     * Whether text with no player to address is written in Finnish. Server list
-     * pings, pre-login kicks, console output, and lore baked into items handed
-     * out by loot tables or villager trades have no audience to read a language
-     * preference from, so they follow this instead of always falling back to
-     * English.
-     */
-    static boolean finnishByDefaultForTesting(Configuration config) {
-        return finnishByDefault(config);
-    }
-
-    private static boolean finnishByDefault(Configuration config) {
+    static boolean finnishByDefault(Configuration config) {
         String configured = Objects
                 .requireNonNullElse(config.getString("default-language", "en"), "en")
                 .strip()
@@ -262,8 +251,6 @@ public final class MessageService {
             return true;
         }
         if (!configured.equals("en")) {
-            // Falling back silently would leave an operator believing they had
-            // switched the server language.
             throw new IllegalArgumentException("default-language must be en or fi");
         }
         return false;

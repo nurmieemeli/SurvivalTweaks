@@ -1,8 +1,5 @@
 # Operations
 
-Operator reference for SurvivalTweaks: how data is stored and protected, how
-backups and restores work, and how to tune the first-join spawn pool.
-
 ## Data safety
 
 Profiles load before they become available to commands. A profile holds the
@@ -22,11 +19,11 @@ death markers, and first-join spawn state are updated as complete aggregates:
 either the entire change commits or none of it does. Bukkit objects and mutable
 collections never cross the asynchronous persistence boundary.
 
-SQLite is used automatically when `storage.remote.type` is blank. It keeps
-`survivaltweaks.db` in the plugin data directory, uses WAL journaling and full
-synchronous durability, and serializes writes through a single pooled
-connection. PostgreSQL and MySQL use a small bounded HikariCP pool. All three
-JDBC drivers are included in the release JAR.
+With `storage.backend: auto`, a blank `storage.remote.type` selects SQLite.
+`storage.sqlite.file` names the database in the plugin data directory and
+defaults to `survivaltweaks.db`. SQLite uses WAL journaling and full synchronous
+durability, with a single pooled connection. PostgreSQL and MySQL use a small
+bounded HikariCP pool. The release JAR includes all three JDBC drivers.
 
 Remote connections have finite connect, socket, and statement timeouts plus
 TCP keepalives, so a dead network cannot leave a persistence worker blocked
@@ -53,32 +50,19 @@ missing or unrecognized pinned database. A remote outage
 also fails startup: SurvivalTweaks never silently falls back to SQLite, because
 doing so could create two divergent copies of player data.
 
-Runtime work is deliberately event-driven. Idle teleport, death-guide, and
-sleep-vote tasks stop themselves, and player-list and action-bar updates are
-sent only when visible state changes. Profile, death-marker, spawn-pool,
-reload, and backup disk work runs off the server thread, with immutable
-snapshots and shutdown drains preserving durability.
+Idle teleport, death-guide, and sleep-vote tasks stop themselves. Player-list
+and action-bar updates are sent when visible state changes. Profile,
+death-marker, spawn-pool, reload, and backup disk work runs off the server
+thread. Shutdown drains pending writes.
 
 ## Item duplication
 
-Carrying an open container through a teleport is a known duplication technique:
-a modified client can keep a shulker box or chest view open while running a
-teleport command, leaving its contents recorded in both the container and the
-player inventory. `teleport.cancel-on-inventory-open` closes that route and is
-enabled by default. Every delayed teleport SurvivalTweaks performs — homes and
-player-to-player requests — refuses to start while a container is open, and a
-container opened during a warm-up cancels the teleport rather than completing
-it.
-
-Open containers are tracked from inventory events and confirmed against the
-player's live inventory view at teleport start and cutover. A player's own
-inventory never counts. SurvivalTweaks' own menus are exempt because every one
-of them cancels its clicks and drags and therefore holds nothing a player can
-take.
-
-This addresses the duplication routes a plugin can control. Duplication bugs in
-the server itself are fixed in Paper, so running a current Paper build remains
-the primary defence.
+`teleport.cancel-on-inventory-open` is enabled by default. Home teleports and
+player teleport requests are blocked while a container is open. Opening one
+during warm-up cancels the teleport. The plugin tracks inventory events and
+checks the live view when the teleport starts and again before it moves the
+player. The guard allows the player's own inventory and SurvivalTweaks menus.
+Keep Paper current for fixes to server-side duplication bugs.
 
 ## Database administration
 
@@ -128,16 +112,9 @@ cleaned so the same staged migration can be retried after fixing the cause.
 Do not manually copy the SQLite file while Paper is running; use
 `storage export` for a closed, verified portable snapshot.
 
-The same command can stage a move from the configured remote backend back to
-SQLite. Direct PostgreSQL-to-MySQL moves are intentionally not implicit:
-migrate to SQLite first, update the one remote endpoint configuration, start
-successfully on SQLite, and then stage the second migration.
-
-After login, players receive one compact session line only when something needs
-attention. It combines unread notifications, pending teleport requests, an
-active recovery marker, maintenance mode, and a scheduled restart, with one
-localized shortcut to the player hub. It replaces separate join-time notices
-for those states and does not appear for an empty session.
+To switch between PostgreSQL and MySQL, migrate to SQLite first and start Paper
+on SQLite. Then update the remote endpoint settings and stage the second
+migration.
 
 ## Adaptive performance
 
@@ -175,7 +152,7 @@ ZIP archives are capped at 512 MiB uncompressed, with a 16 MiB limit per YAML
 file. A config reload can proceed when a backup exceeds those limits, and the
 server log records the skipped backup.
 Archives contain configuration, both language catalogs, the pinned storage
-identity, the default SQLite database, and preserved legacy YAML files. SQLite
+identity, the configured SQLite database, and preserved legacy YAML files. SQLite
 writes are paused briefly and its WAL is checkpointed while the database enters
 the ZIP, so the archived file is self-contained. A startup backup recovers any
 unfinished SQLite rollback journal before capturing the database. Remote database contents should
@@ -204,10 +181,10 @@ files over 16 MiB and stops parsing documents that exceed 250,000 parser events.
 
 ### Restoring
 
-Restoration is deliberately staged and cannot be completed in one step:
+Stage the restore from the local console and restart Paper to apply it.
 
 1. Enable maintenance mode and wait until no players remain online.
-2. Issue the final confirmation from the local server console — not in-game.
+2. Issue the final confirmation from the local server console.
 3. The chosen archive is copied to a protected pending file and Paper shuts down.
 4. On the next startup the plugin re-verifies the staged archive, including any
    SQLite database, language catalogs, and legacy YAML it would import. Before replacing files,
@@ -291,10 +268,8 @@ joining and produces no player-facing error.
 
 ## First-join spawn pool
 
-New players can be placed at unique, pre-generated Overworld locations so
-terrain generation never interrupts their first moments. Prepared and assigned
-destinations are stored in `new-player-spawns.yml` with both world UUID and
-name.
+New players can be placed at unique, pre-generated Overworld locations. The SQL
+store records prepared and assigned destinations with the world UUID and name.
 
 A location is reserved persistently before teleporting, completed after a
 successful placement, and retained afterwards so future selections respect the

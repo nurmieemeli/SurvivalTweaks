@@ -269,10 +269,7 @@ public final class StatisticsJournalController implements Listener, CommandExecu
             @NotNull String alias,
             @NotNull String[] arguments
     ) {
-        if (arguments.length != 1) {
-            return List.of();
-        }
-        return PlayerNameLookup.suggestions(server, sender, arguments[0]);
+        return PlayerNameLookup.suggestions(server, sender, arguments);
     }
 
     @EventHandler
@@ -280,14 +277,13 @@ public final class StatisticsJournalController implements Listener, CommandExecu
         if (!(event.getView().getTopInventory().getHolder(false) instanceof StatisticsHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (event.getWhoClicked() instanceof Player player
-                && player.getUniqueId().equals(holder.viewerId())
-                && event.getRawSlot() == BACK) {
-            SurvivalTweaksMenu.afterClick(plugin, event, player, () -> {
+        if (event.getRawSlot() == BACK) {
+            SurvivalTweaksMenu.afterClick(plugin, event, holder.viewerId(), (player, slot) -> {
                 feedback.play(player, FeedbackService.UI_CLICK);
                 holder.back().accept(player);
             });
+        } else {
+            event.setCancelled(true);
         }
     }
 

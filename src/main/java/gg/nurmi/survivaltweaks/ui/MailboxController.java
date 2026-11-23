@@ -153,14 +153,9 @@ public final class MailboxController implements Listener {
         if (!(event.getView().getTopInventory().getHolder(false) instanceof MailboxHolder holder)) {
             return;
         }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || !player.getUniqueId().equals(holder.ownerId())) {
-            return;
-        }
-        int slot = event.getRawSlot();
         ClickType click = event.getClick();
-        SurvivalTweaksMenu.afterClick(plugin, event, player, () -> handleClick(player, holder, slot, click));
+        SurvivalTweaksMenu.afterClick(plugin, event, holder.ownerId(),
+                (player, slot) -> handleClick(player, holder, slot, click));
     }
 
     private void handleClick(Player player, MailboxHolder holder, int slot, ClickType click) {

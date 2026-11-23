@@ -48,7 +48,6 @@ import java.util.Optional;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class DeathRecoveryService

@@ -1,6 +1,5 @@
 package gg.nurmi.survivaltweaks.command.teleport;
 
-import gg.nurmi.survivaltweaks.object.TeleportRequest;
 import gg.nurmi.survivaltweaks.config.SettingsService;
 import gg.nurmi.survivaltweaks.service.FeedbackService;
 import gg.nurmi.survivaltweaks.service.MessageService;

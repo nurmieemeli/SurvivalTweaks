@@ -2,8 +2,6 @@
 
 <h3>Vanilla-friendly quality of life for Paper survival servers</h3>
 
-<p>Homes · safe teleports · container locks · death recovery · player hub · bilingual UI</p>
-
 <p>
   <a href="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml"><img src="https://github.com/nurmieemeli/SurvivalTweaks/actions/workflows/build.yml/badge.svg" alt="Build and release"></a>
   <a href="https://github.com/nurmieemeli/SurvivalTweaks/releases/latest"><img src="https://img.shields.io/github/v/release/nurmieemeli/SurvivalTweaks" alt="Latest release"></a>
@@ -20,15 +18,10 @@
   <a href="docs/operations.md">Operations guide</a>
 </p>
 
-SurvivalTweaks brings the everyday features of a polished survival server into
-one dependency-free Paper plugin. Players get a unified, localized experience;
-operators get strict configuration validation, diagnostics, backups, and safe
-maintenance tools.
-
-The survival loop remains recognizably vanilla. SurvivalTweaks adds no custom
-currency, economy, or parallel progression system, and it does not require a
-scoreboard, permissions, resource pack, or chat plugin. Its custom enchanted
-books use ordinary enchanting, loot, villager, anvil, and grindstone flows.
+SurvivalTweaks adds homes, container locks, death markers, and other conveniences
+to Paper survival servers, with English and Finnish messages. It requires no
+companion plugins or resource pack. Custom enchanted books use vanilla
+enchanting, loot, trading, anvil, and grindstone mechanics.
 
 ## Quick start
 
@@ -85,9 +78,8 @@ are always active, while area tools require sneaking.
 | Deflection I | Shield | Returns a properly blocked projectile toward its original shooter |
 | Surefooted I | Boots | Prevents farmland trampling |
 
-Enchanting tables can add one eligible custom enchantment as an unadvertised
-bonus after the selected vanilla enchantment is applied. The custom result is
-intentionally absent from the preview and is revealed after enchanting.
+Enchanting tables can add one eligible custom enchantment when you apply the
+previewed vanilla enchantment. The bonus is revealed after enchanting.
 Custom-enchanted books also appear in selected structure loot and librarian
 trades, combine through anvils, and are removed by grindstones. The anvil
 action bar explains custom compatibility, maximum levels, vanilla cost limits,
@@ -185,11 +177,9 @@ obsolete settings, preserves custom values, and writes
 `config-migration-report.txt` with a concise operator summary. A configuration
 from a newer unsupported schema is rejected instead of being rewritten.
 
-Startup replaces unsafe numeric values with logged safe defaults.
-`/survivaltweaks reload` is deliberately stricter: it validates the complete
-configuration, both language catalogs, MiniMessage templates, particles, and
-sound keys before applying anything. A rejected reload leaves the active
-configuration unchanged.
+Startup logs out-of-range numeric settings and uses defaults.
+`/survivaltweaks reload` validates the full configuration, both language
+catalogs, MiniMessage templates, particles, and sound keys before applying changes.
 
 Operators with `survivaltweaks.update-notify` receive a direct download link
 after joining when the release contains a newer `SurvivalTweaks-<version>.jar`.
@@ -197,13 +187,8 @@ The repository is derived from the plugin metadata, and the downloadable
 artifact version is compared with the running build. Checks are asynchronous,
 cached for six hours by default, and never delay login or server ticks.
 
-The adaptive performance governor observes Paper's MSPT once per second. At the
-configured reduced and critical thresholds it lowers cosmetic cadence and
-particle density and spreads tree felling, leaf decay, spawn preparation, and
-guide/atmosphere work over additional ticks. It recovers gradually after a
-sustained healthy period. Persistence, lock enforcement, and teleport safety
-are never throttled. Batchable workloads receive separate fair slices of the
-shared tick budget, and concurrent tree jobs rotate between players.
+See the [adaptive performance guide](docs/operations.md#adaptive-performance)
+for MSPT thresholds, recovery, and the per-tick work budget.
 
 ## Languages
 
@@ -217,56 +202,23 @@ customizations. At startup, an invalid catalog is kept on disk and the plugin
 uses the bundled messages for that language. Numbers, durations, distances, and
 item names are rendered for the receiving player's locale.
 
-Shared text that has no single viewer—such as server-list content, TAB row
-markers, restart login messages, and searchable operator diagnostics—uses the
-English catalog.
+`default-language` selects English (`en`, the default) or Finnish (`fi`) for
+shared text such as server-list messages, TAB row markers, pre-login kicks,
+and console output.
 
 ## Data safety and operations
 
-Profiles, locks, death markers, and first-join spawn state share one normalized,
-transactional SQL store. SQLite is automatic and requires no setup. PostgreSQL
-and MySQL are optional remote backends with bounded connection pooling; their
-JDBC drivers are bundled in the plugin JAR. Remote stores use finite I/O
-timeouts, automatic save retries, and a singleton database-session lock that
-rejects a second server using the same endpoint. PostgreSQL uses an explicit
-schema and defaults to `verify-full` TLS for new installations.
+SQLite stores player data by default. SurvivalTweaks also supports PostgreSQL and
+MySQL, with verified portable SQLite exports for both. On upgrade, legacy YAML
+data is verified during import and the original files are retained.
 
-When a remote backend is active, SurvivalTweaks also creates a verified,
-portable SQLite export every 24 hours by default. Each export is reopened and
-checked against the source record counts and deterministic checksum before it
-is retained; the newest seven are kept in
-`storage-exports/automatic/`. These settings are reloadable.
+The plugin takes safety backups at startup and before configuration reloads.
+Restore and database migration both require a restart. See the
+[operations guide](docs/operations.md) for backup retention, database migration,
+recovery, diagnostics, and restart procedures.
 
-The first SQL startup imports existing YAML data only when the database is
-empty, verifies record counts and a deterministic checksum, and preserves the
-original files. The chosen backend and endpoint are then pinned in
-`storage-state.yml`. If a configured remote database is unavailable, startup
-fails visibly instead of silently writing to SQLite and splitting player data.
-
-Database changes are explicit two-phase operations: configure the remote
-endpoint while leaving the active backend selected, run `storage test`, then
-run `storage migrate`. On restart, SurvivalTweaks copies the complete logical
-snapshot in one transaction, verifies it, and switches the pinned backend only
-after success. The source remains authoritative after any failure.
-
-Logical exports use one repeatable-read transaction and bulk-load each table,
-avoiding one query per player or lock. Runtime aggregate saves compare stable
-keys and only replace rows that actually changed, reducing database work while
-preserving transactional rollback behavior.
-
-SurvivalTweaks creates safety archives before startup data loading and
-configuration reloads, retaining the newest ten. Restores are staged while the
-server is running and applied before normal data loading on the next startup.
-
-Maintenance mode blocks new joins without removing connected players. Scheduled
-restarts display localized milestones, block late joins, flush pending writes,
-and stop Paper cleanly; an external process manager remains responsible for
-starting it again.
-
-See the [operations guide](docs/operations.md) for backup restoration,
-diagnostics, spawn-pool tuning, and recovery procedures.
-
-Maintainers can also review the cross-feature [player journey contracts](docs/player-journeys.md)
+The [player journeys](docs/player-journeys.md) document the expected order and
+safety checks for joins, teleports, recovery, and locks.
 
 ## Building from source
 
@@ -277,22 +229,13 @@ run the Maven `verify` lifecycle. The equivalent command-line build is:
 mvn --batch-mode --no-transfer-progress clean verify
 ```
 
-The resulting plugin is written to
-`target/SurvivalTweaks-<version>.jar`. IntelliJ project files, compiler output,
-and other local state are intentionally excluded from version control.
+The build writes `target/SurvivalTweaks-<version>.jar`.
 
-## Release quality
+## Release verification
 
-Every push and pull request runs the complete Maven test suite and a
-checksum-pinned Paper 26.3 smoke test covering startup, configuration reload,
-completed diagnostics, and clean shutdown. Recurring runtime subsystems isolate
-and report failures so one cosmetic task cannot silently disable its later runs.
-CI retains the verified JAR and SHA-256 as
-workflow artifacts. A `v*` tag publishes those same files as the latest GitHub
-release.
-
-Older profile, lock, and version 1.0 `userdata/` files are upgraded
-automatically.
+CI runs Maven verification and a checksum-pinned Paper 26.3 smoke test covering
+startup, reload, Doctor, and shutdown. A `v*` tag publishes the verified JAR
+and its SHA-256 checksum to GitHub Releases.
 
 ## Contributing and license
 

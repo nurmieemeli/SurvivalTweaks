@@ -489,7 +489,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
                 Biome biome = loc.getBlock().getBiome();
                 String biomeName = biome.key().value();
 
-                // Sprint Dust
                 if (current.atmosphereSprintDust() && player.isSprinting() && showParticles) {
                     Material ground = loc.getBlock().getRelative(org.bukkit.block.BlockFace.DOWN).getType();
                     if (ground == Material.SAND || ground == Material.RED_SAND || ground == Material.GRAVEL || ground == Material.SOUL_SAND) {
@@ -515,7 +514,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
                     }
                 }
 
-                // Nether Soul Embers
                 if (current.atmosphereNetherSoulEmbers()
                         && showParticles
                         && loc.getWorld().getEnvironment() == org.bukkit.World.Environment.NETHER) {
@@ -528,7 +526,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
                     }
                 }
 
-                // Totem Guardian Glow
                 if (current.atmosphereTotemGlow()
                         && showParticles
                         && player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING
@@ -543,7 +540,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
                     );
                 }
 
-                // Subterranean Cave Echoes
                 if (current.atmosphereCaveEchoes()
                         && (loc.getY() <= 0
                         || biomeName.contains("dripstone"))) {
@@ -586,7 +582,6 @@ public class AtmosphereService implements Listener, AutoCloseable {
                     }
                 }
 
-                // Deep Dark Sculk Spores
                 if (current.atmosphereDeepDarkSpores() && showParticles) {
                     if (biomeName.contains("deep_dark")) {
                         player.spawnParticle(Particle.SCULK_SOUL, loc.clone().add(

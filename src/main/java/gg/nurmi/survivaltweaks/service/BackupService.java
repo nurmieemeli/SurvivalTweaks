@@ -741,19 +741,18 @@ public final class BackupService {
         ArrayList<Path> sources = new ArrayList<>();
         for (String filename : ROOT_FILES) {
             Path candidate = dataFolder.resolve(filename);
-            if (Files.isRegularFile(candidate) && !Files.isSymbolicLink(candidate)) {
+            if (Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) {
                 sources.add(candidate);
             }
         }
         Path database = dataFolder.resolve(databaseFilename);
-        if (Files.isRegularFile(database) && !Files.isSymbolicLink(database)) {
+        if (Files.isRegularFile(database, LinkOption.NOFOLLOW_LINKS)) {
             sources.add(database);
         }
         Path userdata = dataFolder.resolve(USERDATA);
-        if (Files.isDirectory(userdata) && !Files.isSymbolicLink(userdata)) {
+        if (Files.isDirectory(userdata, LinkOption.NOFOLLOW_LINKS)) {
             try (Stream<Path> files = Files.list(userdata)) {
-                files.filter(Files::isRegularFile)
-                        .filter(path -> !Files.isSymbolicLink(path))
+                files.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                         .filter(path -> path.getFileName().toString().endsWith(".yml"))
                         .forEach(sources::add);
             }

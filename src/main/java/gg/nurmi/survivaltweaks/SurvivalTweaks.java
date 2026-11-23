@@ -124,7 +124,6 @@ public final class SurvivalTweaks extends JavaPlugin {
     private PortableExportService portableExports;
     private PersistenceMonitor persistenceMonitor;
     private PersistenceCoordinator persistenceCoordinator;
-    private OperationalHealthService operationalHealth;
     private StorageManager storageManager;
     private Exception failedRestoreStartup;
     private DiagnosticService diagnostics;
@@ -134,7 +133,6 @@ public final class SurvivalTweaks extends JavaPlugin {
     private SleepVoteService sleepVotes;
     private MaintenanceService maintenance;
     private ServerListService serverList;
-    private WelcomeBackController welcomeBack;
     private FastLeafDecayService fastLeafDecay;
     private AtmosphereService atmosphere;
     private TreeFellerService treeFeller;
@@ -253,7 +251,7 @@ public final class SurvivalTweaks extends JavaPlugin {
         portableExports.reconfigure(getConfig());
 
         persistenceMonitor = new PersistenceMonitor();
-        operationalHealth = new OperationalHealthService(
+        OperationalHealthService operationalHealth = new OperationalHealthService(
                 this,
                 storageManager,
                 portableExports,
@@ -537,7 +535,7 @@ public final class SurvivalTweaks extends JavaPlugin {
                 messages,
                 feedback
         );
-        welcomeBack = new WelcomeBackController(
+        WelcomeBackController welcomeBack = new WelcomeBackController(
                 this,
                 settings,
                 profiles,
@@ -714,9 +712,6 @@ public final class SurvivalTweaks extends JavaPlugin {
             containerLocks.close();
             containerLocks = null;
         }
-        if (welcomeBack != null) {
-            welcomeBack = null;
-        }
         if (playerSessions != null) {
             getServer().getOnlinePlayers().forEach(playerSessions::end);
             playerSessions.close();
@@ -726,7 +721,6 @@ public final class SurvivalTweaks extends JavaPlugin {
             portableExports.close();
             portableExports = null;
         }
-        operationalHealth = null;
         persistenceMonitor = null;
         persistenceCoordinator = null;
         if (profiles != null) {

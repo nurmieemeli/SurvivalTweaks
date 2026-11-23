@@ -68,6 +68,31 @@ public final class SqlStorage implements
     private static final String META_INSTANCE_ID = "instance-id";
     private static final long LEASE_CHECK_SECONDS = 30;
 
+    private static final String OLD_MAIL = "st_notifications WHERE notification_type = 'MAIL' AND created_at < ?";
+    private static final String EXPIRED_DEATH_MARKERS = "st_death_markers WHERE expires_at <= ?";
+    private static final String ORPHANED_HOME_SHARES = "st_home_shares WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id "
+            + "AND st_homes.home_key = st_home_shares.home_key)";
+    private static final String ORPHANED_HOMES = "st_homes WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_homes.player_id)";
+    private static final String ORPHANED_HINTS = "st_hints WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)";
+    private static final String ORPHANED_NOTIFICATIONS = "st_notifications WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)";
+    private static final String ORPHANED_MAIL_BLOCKS = "st_mail_blocks WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)";
+    private static final String ORPHANED_PROFILE_TRUST = "st_profile_trusted WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_profile_trusted.player_id)";
+    private static final String ORPHANED_LOCK_BLOCKS = "st_lock_blocks WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)";
+    private static final String ORPHANED_LOCK_TRUST = "st_lock_trusted WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)";
+    private static final String EMPTY_LOCKS = "st_locks WHERE NOT EXISTS "
+            + "(SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)";
+    private static final String INVALID_SPAWN_LOCATIONS = "st_spawn_locations WHERE location_kind NOT IN "
+            + "('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) "
+            + "OR (location_kind <> 'assignment' AND player_id IS NOT NULL)";
+
     private final StorageConfiguration configuration;
     private final Logger logger;
     private final HikariDataSource dataSource;
@@ -563,21 +588,21 @@ public final class SqlStorage implements
                 int oldMailRemoved = 0;
                 long mailCutoff = Long.MIN_VALUE;
                 if (mailPurgeInactiveDays > 0) {
-                    mailCutoff = now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli();
-                    oldMailRemoved = delete(connection, "DELETE FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", mailCutoff);
+                    mailCutoff = now.minus(Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli();
+                    oldMailRemoved = deleteRows(connection, OLD_MAIL, mailCutoff);
                 }
                 MaintenancePreview removed = new MaintenancePreview(
-                        delete(connection, "DELETE FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
-                        delete(connection, "DELETE FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
-                        delete(connection, "DELETE FROM st_homes WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_homes.player_id)"),
-                        delete(connection, "DELETE FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
-                        delete(connection, "DELETE FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
-                        delete(connection, "DELETE FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
-                        delete(connection, "DELETE FROM st_profile_trusted WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_profile_trusted.player_id)"),
-                        delete(connection, "DELETE FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
-                        delete(connection, "DELETE FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
-                        delete(connection, "DELETE FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
-                        delete(connection, "DELETE FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)"),
+                        deleteRows(connection, EXPIRED_DEATH_MARKERS, now.toEpochMilli()),
+                        deleteRows(connection, ORPHANED_HOME_SHARES),
+                        deleteRows(connection, ORPHANED_HOMES),
+                        deleteRows(connection, ORPHANED_HINTS),
+                        deleteRows(connection, ORPHANED_NOTIFICATIONS),
+                        deleteRows(connection, ORPHANED_MAIL_BLOCKS),
+                        deleteRows(connection, ORPHANED_PROFILE_TRUST),
+                        deleteRows(connection, ORPHANED_LOCK_BLOCKS),
+                        deleteRows(connection, ORPHANED_LOCK_TRUST),
+                        deleteRows(connection, EMPTY_LOCKS),
+                        deleteRows(connection, INVALID_SPAWN_LOCATIONS),
                         oldMailRemoved
                 );
                 MaintenancePreview remaining = maintenancePreview(connection, now, mailPurgeInactiveDays);
@@ -678,10 +703,7 @@ public final class SqlStorage implements
         );
         problemCount(
                 connection,
-                "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN "
-                        + "('available', 'assignment', 'retired') OR "
-                        + "(location_kind = 'assignment' AND player_id IS NULL) OR "
-                        + "(location_kind <> 'assignment' AND player_id IS NOT NULL)",
+                "SELECT COUNT(*) FROM " + INVALID_SPAWN_LOCATIONS,
                 "st_spawn_locations contains %d invalid row(s)",
                 problems
         );
@@ -743,26 +765,27 @@ public final class SqlStorage implements
             throws SQLException {
         int oldMailCount = 0;
         if (mailPurgeInactiveDays > 0) {
-            oldMailCount = queryCount(connection, "SELECT COUNT(*) FROM st_notifications WHERE notification_type = 'MAIL' AND created_at < ?", now.minus(java.time.Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli());
+            long mailCutoff = now.minus(Duration.ofDays(mailPurgeInactiveDays)).toEpochMilli();
+            oldMailCount = countRows(connection, OLD_MAIL, mailCutoff);
         }
         return new MaintenancePreview(
-                queryCount(connection, "SELECT COUNT(*) FROM st_death_markers WHERE expires_at <= ?", now.toEpochMilli()),
-                queryCount(connection, "SELECT COUNT(*) FROM st_home_shares WHERE NOT EXISTS (SELECT 1 FROM st_homes WHERE st_homes.player_id = st_home_shares.player_id AND st_homes.home_key = st_home_shares.home_key)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_homes WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_homes.player_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_hints WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_hints.player_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_notifications WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_notifications.player_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_mail_blocks WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_mail_blocks.player_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_profile_trusted WHERE NOT EXISTS (SELECT 1 FROM st_profiles WHERE st_profiles.player_id = st_profile_trusted.player_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_lock_blocks WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_blocks.lock_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_lock_trusted WHERE NOT EXISTS (SELECT 1 FROM st_locks WHERE st_locks.lock_id = st_lock_trusted.lock_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_locks WHERE NOT EXISTS (SELECT 1 FROM st_lock_blocks WHERE st_lock_blocks.lock_id = st_locks.lock_id)"),
-                queryCount(connection, "SELECT COUNT(*) FROM st_spawn_locations WHERE location_kind NOT IN ('available', 'assignment', 'retired') OR (location_kind = 'assignment' AND player_id IS NULL) OR (location_kind <> 'assignment' AND player_id IS NOT NULL)"),
+                countRows(connection, EXPIRED_DEATH_MARKERS, now.toEpochMilli()),
+                countRows(connection, ORPHANED_HOME_SHARES),
+                countRows(connection, ORPHANED_HOMES),
+                countRows(connection, ORPHANED_HINTS),
+                countRows(connection, ORPHANED_NOTIFICATIONS),
+                countRows(connection, ORPHANED_MAIL_BLOCKS),
+                countRows(connection, ORPHANED_PROFILE_TRUST),
+                countRows(connection, ORPHANED_LOCK_BLOCKS),
+                countRows(connection, ORPHANED_LOCK_TRUST),
+                countRows(connection, EMPTY_LOCKS),
+                countRows(connection, INVALID_SPAWN_LOCATIONS),
                 oldMailCount
         );
     }
 
-    private int queryCount(Connection connection, String sql, long parameter) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    private int countRows(Connection connection, String rowFilter, long parameter) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM " + rowFilter)) {
             statement.setLong(1, parameter);
             try (ResultSet result = statement.executeQuery()) {
                 result.next();
@@ -771,24 +794,24 @@ public final class SqlStorage implements
         }
     }
 
-    private int queryCount(Connection connection, String sql) throws SQLException {
+    private int countRows(Connection connection, String rowFilter) throws SQLException {
         try (Statement statement = connection.createStatement();
-             ResultSet result = statement.executeQuery(sql)) {
+             ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM " + rowFilter)) {
             result.next();
             return Math.toIntExact(result.getLong(1));
         }
     }
 
-    private int delete(Connection connection, String sql, long parameter) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    private int deleteRows(Connection connection, String rowFilter, long parameter) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("DELETE FROM " + rowFilter)) {
             statement.setLong(1, parameter);
             return statement.executeUpdate();
         }
     }
 
-    private int delete(Connection connection, String sql) throws SQLException {
+    private int deleteRows(Connection connection, String rowFilter) throws SQLException {
         try (Statement statement = connection.createStatement()) {
-            return statement.executeUpdate(sql);
+            return statement.executeUpdate("DELETE FROM " + rowFilter);
         }
     }
 

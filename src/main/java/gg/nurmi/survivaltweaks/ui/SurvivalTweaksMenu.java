@@ -6,6 +6,9 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.plugin.Plugin;
 
+import java.util.UUID;
+import java.util.function.BiConsumer;
+
 /**
  * Marks an inventory owned by SurvivalTweaks. Every menu cancels its own clicks and drags, so
  * these views never hold items a player can take. Safety checks that must distinguish a plugin
@@ -13,14 +16,21 @@ import org.bukkit.plugin.Plugin;
  */
 public interface SurvivalTweaksMenu extends InventoryHolder {
 
-    static void afterClick(Plugin plugin, InventoryClickEvent event, Player player, Runnable action) {
+    static void afterClick(
+            Plugin plugin, InventoryClickEvent event, UUID viewerId, BiConsumer<Player, Integer> action
+    ) {
+        event.setCancelled(true);
+        if (!(event.getWhoClicked() instanceof Player player) || !player.getUniqueId().equals(viewerId)) {
+            return;
+        }
         Inventory inventory = event.getView().getTopInventory();
-        if (event.getRawSlot() < 0 || event.getRawSlot() >= inventory.getSize()) {
+        int slot = event.getRawSlot();
+        if (slot < 0 || slot >= inventory.getSize()) {
             return;
         }
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (player.isOnline() && player.getOpenInventory().getTopInventory().equals(inventory)) {
-                action.run();
+                action.accept(player, slot);
             }
         });
     }
